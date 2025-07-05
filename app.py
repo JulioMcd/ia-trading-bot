@@ -8,7 +8,7 @@ CORS(app)  # Permitir acesso de outras origens, como seu HTML
 def home():
     return jsonify({"status": "IA online"})
 
-@app.route("/signal", methods=["POST"])
+@app.route("/signal", methods=["POST", "OPTIONS"])
 def trading_signal():
     data = request.get_json()
     return jsonify({
@@ -16,6 +16,26 @@ def trading_signal():
         "confidence": 85.4,
         "reasoning": "Padrão de reversão detectado",
         "timeframe": "5m",
+        "entry_price": data.get("currentPrice", 1000)
+    })
+
+@app.route("/smart-signal", methods=["POST", "OPTIONS"])
+def smart_signal():
+    data = request.get_json()
+    return jsonify({
+        "direction": "PUT",
+        "confidence": 81.3,
+        "reasoning": "IA Smart: padrão de rompimento identificado",
+        "entry_price": data.get("currentPrice", 1000)
+    })
+
+@app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
+def evolutionary_signal():
+    data = request.get_json()
+    return jsonify({
+        "direction": "CALL",
+        "confidence": 88.2,
+        "reasoning": "IA Evolutiva: aprendizado recente indica padrão vencedor",
         "entry_price": data.get("currentPrice", 1000)
     })
 
