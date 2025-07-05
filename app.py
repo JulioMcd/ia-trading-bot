@@ -1,21 +1,26 @@
-@app.route("/advanced-analysis", methods=["POST", "OPTIONS"])
-def advanced_analysis():
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)  # Libera o acesso ao backend para o frontend
+
+@app.route("/")
+def home():
+    return jsonify({"status": "IA online"})
+
+@app.route("/signal", methods=["POST", "OPTIONS"])
+def trading_signal():
     if request.method == "OPTIONS":
         return '', 200
     data = request.get_json()
     return jsonify({
-        "analysis": "Análise Avançada concluída",
-        "detected_pattern": "Engolfo de alta com volume",
-        "signal_strength": 92.7
+        "direction": "CALL",
+        "confidence": 85.4,
+        "reasoning": "Padrão de reversão detectado",
+        "timeframe": "5m",
+        "entry_price": data.get("currentPrice", 1000)
     })
 
-@app.route("/evolutionary-analysis", methods=["POST", "OPTIONS"])
-def evolutionary_analysis():
+@app.route("/smart-signal", methods=["POST", "OPTIONS"])
+def smart_signal():
     if request.method == "OPTIONS":
-        return '', 200
-    data = request.get_json()
-    return jsonify({
-        "evolution_result": "IA adaptou modelo após última perda",
-        "next_action": "Aguardar novo padrão válido",
-        "accuracy_boost": "+3.5%"
-    })
