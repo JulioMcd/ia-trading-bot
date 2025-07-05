@@ -7,7 +7,7 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
-# Simulação de dados de treino (normalmente viria de histórico real)
+# Dados de treino simulados
 X_train = [[0, 1, 2], [1, 2, 3], [3, 2, 1], [2, 1, 0]]
 y_train = [1, 1, 0, 0]  # 1 = CALL, 0 = PUT
 
@@ -15,32 +15,38 @@ y_train = [1, 1, 0, 0]  # 1 = CALL, 0 = PUT
 model = RandomForestClassifier(n_estimators=10)
 model.fit(X_train, y_train)
 
+def predict_direction(ticks):
+    try:
+        features = np.array(ticks[-3:]).reshape(1, -1)
+        prediction = model.predict(features)[0]
+        confidence = model.predict_proba(features)[0][prediction] * 100
+        direction = "CALL" if prediction == 1 else "PUT"
+        return direction, round(confidence, 2)
+    except:
+        return "WAIT", 0.0
+
 @app.route("/")
 def home():
     return jsonify({"status": "IA real online"})
 
 @app.route("/smart-signal", methods=["POST", "OPTIONS"])
-def smart_signal():
+@app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
+@app.route("/prediction", methods=["POST", "OPTIONS"])
+@app.route("/analyze", methods=["POST", "OPTIONS"])
+@app.route("/advanced-analysis", methods=["POST", "OPTIONS"])
+def all_signals():
     if request.method == "OPTIONS":
         return '', 200
     data = request.get_json()
-    ticks = data.get("lastTicks", [1, 2, 3])[-3:]  # usa últimos 3 valores
+    ticks = data.get("lastTicks", [1, 2, 3])
     current_price = data.get("currentPrice", 1000)
 
-    # Previsão com modelo IA real
-    try:
-        features = np.array(ticks).reshape(1, -1)
-        prediction = model.predict(features)[0]
-        direction = "CALL" if prediction == 1 else "PUT"
-        confidence = model.predict_proba(features)[0][prediction] * 100
-    except:
-        direction = "WAIT"
-        confidence = 0.0
+    direction, confidence = predict_direction(ticks)
 
     return jsonify({
         "direction": direction,
-        "confidence": round(confidence, 2),
-        "reasoning": "Previsão com IA real baseada nos últimos ticks",
+        "confidence": confidence,
+        "reasoning": "IA real com RandomForest baseada nos últimos ticks",
         "entry_price": current_price
     })
 
@@ -49,17 +55,16 @@ def feedback():
     if request.method == "OPTIONS":
         return '', 200
     data = request.get_json()
-    ticks = data.get("lastTicks", [1, 2, 3])[-3:]
-    result = data.get("result")  # 1 = WIN, 0 = LOSS
+    ticks = data.get("lastTicks", [1, 2, 3])
+    result = data.get("result", 0)
 
-    # Aprendizado online simples (adiciona novo exemplo e re-treina)
     global X_train, y_train, model
-    X_train.append(ticks)
+    X_train.append(ticks[-3:])
     y_train.append(result)
     model.fit(X_train, y_train)
 
     return jsonify({
-        "message": "Feedback recebido e modelo atualizado",
+        "message": "Feedback recebido e IA atualizada",
         "total_examples": len(y_train)
     })
 
