@@ -1,103 +1,66 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from sklearn.ensemble import RandomForestClassifier
+import numpy as np
 
 app = Flask(__name__)
-CORS(app)  # Libera o acesso ao backend para o frontend
+CORS(app)
+
+# Simulação de dados de treino (normalmente viria de histórico real)
+X_train = [[0, 1, 2], [1, 2, 3], [3, 2, 1], [2, 1, 0]]
+y_train = [1, 1, 0, 0]  # 1 = CALL, 0 = PUT
+
+# Modelo IA real (Random Forest)
+model = RandomForestClassifier(n_estimators=10)
+model.fit(X_train, y_train)
 
 @app.route("/")
 def home():
-    return jsonify({"status": "IA online"})
-
-@app.route("/signal", methods=["POST", "OPTIONS"])
-def trading_signal():
-    if request.method == "OPTIONS":
-        return '', 200
-    data = request.get_json()
-    return jsonify({
-        "direction": "CALL",
-        "confidence": 85.4,
-        "reasoning": "Padrão de reversão detectado",
-        "timeframe": "5m",
-        "entry_price": data.get("currentPrice", 1000)
-    })
+    return jsonify({"status": "IA real online"})
 
 @app.route("/smart-signal", methods=["POST", "OPTIONS"])
 def smart_signal():
     if request.method == "OPTIONS":
         return '', 200
     data = request.get_json()
+    ticks = data.get("lastTicks", [1, 2, 3])[-3:]  # usa últimos 3 valores
+    current_price = data.get("currentPrice", 1000)
+
+    # Previsão com modelo IA real
+    try:
+        features = np.array(ticks).reshape(1, -1)
+        prediction = model.predict(features)[0]
+        direction = "CALL" if prediction == 1 else "PUT"
+        confidence = model.predict_proba(features)[0][prediction] * 100
+    except:
+        direction = "WAIT"
+        confidence = 0.0
+
     return jsonify({
-        "direction": "PUT",
-        "confidence": 81.3,
-        "reasoning": "IA Smart: padrão de rompimento identificado",
-        "entry_price": data.get("currentPrice", 1000)
+        "direction": direction,
+        "confidence": round(confidence, 2),
+        "reasoning": "Previsão com IA real baseada nos últimos ticks",
+        "entry_price": current_price
     })
 
-@app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
-def evolutionary_signal():
+@app.route("/feedback", methods=["POST", "OPTIONS"])
+def feedback():
     if request.method == "OPTIONS":
         return '', 200
     data = request.get_json()
-    return jsonify({
-        "direction": "CALL",
-        "confidence": 88.2,
-        "reasoning": "IA Evolutiva: aprendizado recente indica padrão vencedor",
-        "entry_price": data.get("currentPrice", 1000)
-    })
+    ticks = data.get("lastTicks", [1, 2, 3])[-3:]
+    result = data.get("result")  # 1 = WIN, 0 = LOSS
 
-@app.route("/analyze", methods=["POST", "OPTIONS"])
-def analyze_market():
-    if request.method == "OPTIONS":
-        return '', 200
-    return jsonify({
-        "trend": "bullish",
-        "confidence": 78.9,
-        "volatility": 42.3,
-        "message": "Mercado em tendência de alta com alta volatilidade"
-    })
+    # Aprendizado online simples (adiciona novo exemplo e re-treina)
+    global X_train, y_train, model
+    X_train.append(ticks)
+    y_train.append(result)
+    model.fit(X_train, y_train)
 
-@app.route("/risk", methods=["POST", "OPTIONS"])
-def risk_assessment():
-    if request.method == "OPTIONS":
-        return '', 200
     return jsonify({
-        "level": "medium",
-        "message": "Risco moderado. Martingale em nível aceitável.",
-        "recommendation": "Continuar operando"
-    })
-
-@app.route("/prediction", methods=["POST", "OPTIONS"])
-def prediction():
-    if request.method == "OPTIONS":
-        return '', 200
-    data = request.get_json()
-    return jsonify({
-        "prediction": "over 2",
-        "confidence": 75.3,
-        "ticks": data.get("lastTicks", [])
-    })
-
-@app.route("/advanced-analysis", methods=["POST", "OPTIONS"])
-def advanced_analysis():
-    if request.method == "OPTIONS":
-        return '', 200
-    data = request.get_json()
-    return jsonify({
-        "analysis": "Análise Avançada concluída",
-        "detected_pattern": "Engolfo de alta com volume",
-        "signal_strength": 92.7
-    })
-
-@app.route("/evolutionary-analysis", methods=["POST", "OPTIONS"])
-def evolutionary_analysis():
-    if request.method == "OPTIONS":
-        return '', 200
-    data = request.get_json()
-    return jsonify({
-        "evolution_result": "IA adaptou modelo após última perda",
-        "next_action": "Aguardar novo padrão válido",
-        "accuracy_boost": "+3.5%"
+        "message": "Feedback recebido e modelo atualizado",
+        "total_examples": len(y_train)
     })
 
 if __name__ == "__main__":
