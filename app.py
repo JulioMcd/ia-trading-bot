@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 # API Key válida
 VALID_API_KEY = "bhcOGajqbfFfolT"
 
-# ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS
-INVERT_SIGNALS = True  # Mude para False se quiser sinais normais
+# ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS - DESATIVADA
+INVERT_SIGNALS = False  # Sinais normais ativados
 
 # Dados de histórico simples
 trade_history = []
@@ -48,39 +48,33 @@ def analyze_technical_pattern(prices):
             recent_trend = prices[-1] - prices[-3]
             volatility = abs(prices[-1] - prices[-2]) / prices[-2] * 100 if prices[-2] != 0 else 50
             
-            # Lógica de direção ORIGINAL
+            # Lógica de direção NORMAL
             if recent_trend > 0:
-                original_direction = "CALL"
+                direction = "CALL"
                 confidence = 70 + min(volatility * 0.3, 20)
             else:
-                original_direction = "PUT" 
+                direction = "PUT" 
                 confidence = 70 + min(volatility * 0.3, 20)
             
-            # ✅ INVERTER SINAL SE CONFIGURADO
-            if INVERT_SIGNALS:
-                final_direction = "PUT" if original_direction == "CALL" else "CALL"
-                logger.info(f"🔄 SINAL INVERTIDO: {original_direction} → {final_direction}")
-            else:
-                final_direction = original_direction
+            # ✅ SINAIS NORMAIS - SEM INVERSÃO
+            final_direction = direction
+            logger.info(f"📊 SINAL NORMAL: {direction}")
                 
-            return final_direction, round(confidence, 1), original_direction
+            return final_direction, round(confidence, 1), direction
         else:
             # Fallback aleatório ponderado
-            original_direction = "CALL" if random.random() > 0.5 else "PUT"
+            direction = "CALL" if random.random() > 0.5 else "PUT"
             confidence = 70 + random.uniform(0, 20)
             
-            # ✅ INVERTER SINAL SE CONFIGURADO
-            if INVERT_SIGNALS:
-                final_direction = "PUT" if original_direction == "CALL" else "CALL"
-                logger.info(f"🔄 SINAL INVERTIDO (Random): {original_direction} → {final_direction}")
-            else:
-                final_direction = original_direction
+            # ✅ SINAIS NORMAIS - SEM INVERSÃO
+            final_direction = direction
+            logger.info(f"📊 SINAL NORMAL (Random): {direction}")
                 
-            return final_direction, round(confidence, 1), original_direction
+            return final_direction, round(confidence, 1), direction
     except:
-        original_direction = "CALL" if random.random() > 0.5 else "PUT"
-        final_direction = "PUT" if (INVERT_SIGNALS and original_direction == "CALL") else ("CALL" if (INVERT_SIGNALS and original_direction == "PUT") else original_direction)
-        return final_direction, 70.0, original_direction
+        direction = "CALL" if random.random() > 0.5 else "PUT"
+        final_direction = direction
+        return final_direction, 70.0, direction
 
 def extract_features(data):
     """Extrair dados dos parâmetros recebidos"""
@@ -246,18 +240,17 @@ def manage_position(data):
 def home():
     return jsonify({
         "status": "🤖 IA Trading Bot API Online",
-        "version": "2.1.0 - Sinais Invertidos",
-        "description": "API de IA com Sistema de Inversão de Sinais",
-        "model": "Technical Analysis Engine (Inverted)",
-        "signal_mode": "INVERTED" if INVERT_SIGNALS else "NORMAL",
-        "inversion_active": INVERT_SIGNALS,
+        "version": "2.1.0 - Sinais Normais",
+        "description": "API de IA com Sinais Normais",
+        "model": "Technical Analysis Engine",
+        "signal_mode": "NORMAL",
+        "inversion_active": False,
         "endpoints": {
             "analyze": "POST /analyze - Análise de mercado",
-            "signal": "POST /signal - Sinais de trading (invertidos)",
+            "signal": "POST /signal - Sinais de trading normais",
             "risk": "POST /risk - Avaliação de risco",
             "optimal-duration": "POST /optimal-duration - Duração ótima",
-            "management": "POST /management - Gestão de posição",
-            "toggle-inversion": "POST /toggle-inversion - Alternar inversão"
+            "management": "POST /management - Gestão de posição"
         },
         "stats": {
             "total_predictions": performance_stats['total_trades'],
@@ -265,7 +258,7 @@ def home():
             "uptime": "99.9%"
         },
         "timestamp": datetime.datetime.now().isoformat(),
-        "source": "Python Simplified API with Signal Inversion"
+        "source": "Python Simplified API with Normal Signals"
     })
 
 @app.route("/analyze", methods=["POST", "OPTIONS"])
@@ -283,20 +276,16 @@ def analyze_market():
         data = request.get_json() or {}
         prices, volatility = extract_features(data)
         
-        direction, confidence, original_direction = analyze_technical_pattern(prices)
+        direction, confidence, _ = analyze_technical_pattern(prices)
         
         # Análise adicional
         symbol = data.get("symbol", "R_50")
         
-        # Determinar tendência baseada na direção FINAL
+        # Determinar tendência baseada na direção
         if confidence > 80:
             trend = "bullish" if direction == "CALL" else "bearish"
         else:
             trend = "neutral"
-        
-        # ✅ ADICIONAR INFO SOBRE INVERSÃO
-        analysis_mode = "INVERTIDO" if INVERT_SIGNALS else "NORMAL"
-        inversion_info = f" (Análise original: {original_direction} → Final: {direction})" if INVERT_SIGNALS else ""
         
         return jsonify({
             "symbol": symbol,
@@ -304,18 +293,17 @@ def analyze_market():
             "confidence": confidence,
             "volatility": round(volatility, 1),
             "direction": direction,
-            "original_direction": original_direction if INVERT_SIGNALS else direction,
-            "inverted": INVERT_SIGNALS,
-            "message": f"Análise {analysis_mode} para {symbol}: {direction} recomendado{inversion_info}",
+            "inverted": False,
+            "message": f"Análise NORMAL para {symbol}: {direction} recomendado",
             "recommendation": f"{direction} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
             "factors": {
                 "technical_analysis": direction,
                 "market_volatility": round(volatility, 1),
                 "confidence_level": confidence,
-                "inversion_mode": analysis_mode
+                "inversion_mode": "NORMAL"
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": f"IA Simplificada - Technical Analysis ({analysis_mode})"
+            "source": "IA Simplificada - Technical Analysis (NORMAL)"
         })
         
     except Exception as e:
@@ -339,7 +327,7 @@ def generate_signal():
         data = request.get_json() or {}
         prices, volatility = extract_features(data)
         
-        direction, confidence, original_direction = analyze_technical_pattern(prices)
+        direction, confidence, _ = analyze_technical_pattern(prices)
         
         # Dados do sinal
         current_price = data.get("currentPrice", 1000)
@@ -352,14 +340,8 @@ def generate_signal():
         elif win_rate < 40:
             confidence = max(confidence - 5, 65)
         
-        # ✅ INFORMAÇÕES SOBRE INVERSÃO
-        inversion_status = "ATIVO" if INVERT_SIGNALS else "INATIVO"
-        reasoning_base = f"Análise técnica para {symbol}"
-        
-        if INVERT_SIGNALS:
-            reasoning = f"{reasoning_base} - SINAL INVERTIDO: Análise sugeria {original_direction}, executando {direction}"
-        else:
-            reasoning = f"{reasoning_base} - baseado em padrões de preço"
+        # ✅ INFORMAÇÕES SOBRE SINAIS NORMAIS
+        reasoning = f"Análise técnica para {symbol} - baseado em padrões de preço"
         
         return jsonify({
             "direction": direction,
@@ -368,44 +350,21 @@ def generate_signal():
             "entry_price": current_price,
             "strength": "forte" if confidence > 85 else "moderado" if confidence > 75 else "fraco",
             "timeframe": "5m",
-            "original_direction": original_direction if INVERT_SIGNALS else direction,
-            "inverted": INVERT_SIGNALS,
-            "inversion_status": inversion_status,
+            "inverted": False,
+            "inversion_status": "INATIVO",
             "factors": {
-                "technical_model": "Pattern Analysis (Inverted)" if INVERT_SIGNALS else "Pattern Analysis",
+                "technical_model": "Pattern Analysis",
                 "volatility_factor": volatility,
                 "historical_performance": win_rate,
-                "signal_inversion": inversion_status
+                "signal_inversion": "INATIVO"
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": f"IA Simplificada - Signal Generator ({inversion_status})"
+            "source": "IA Simplificada - Signal Generator (NORMAL)"
         })
         
     except Exception as e:
         logger.error(f"Erro em signal: {e}")
         return jsonify({"error": "Erro na geração de sinal", "message": str(e)}), 500
-
-# ✅ NOVO ENDPOINT PARA ALTERNAR INVERSÃO
-@app.route("/toggle-inversion", methods=["POST", "OPTIONS"])
-def toggle_signal_inversion():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    global INVERT_SIGNALS
-    INVERT_SIGNALS = not INVERT_SIGNALS
-    
-    status = "ATIVADA" if INVERT_SIGNALS else "DESATIVADA"
-    logger.info(f"🔄 Inversão de sinais {status}")
-    
-    return jsonify({
-        "message": f"Inversão de sinais {status}",
-        "invert_signals": INVERT_SIGNALS,
-        "mode": "INVERTIDO" if INVERT_SIGNALS else "NORMAL",
-        "timestamp": datetime.datetime.now().isoformat()
-    })
 
 @app.route("/risk", methods=["POST", "OPTIONS"])
 @app.route("/risk-assessment", methods=["POST", "OPTIONS"])
@@ -446,7 +405,7 @@ def assess_risk():
                 "total_trades": data.get("totalTrades", 0)
             },
             "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
-            "signal_mode": "INVERTIDO" if INVERT_SIGNALS else "NORMAL",
+            "signal_mode": "NORMAL",
             "timestamp": datetime.datetime.now().isoformat(),
             "source": "IA Simplificada - Risk Assessment"
         })
@@ -472,7 +431,7 @@ def get_optimal_duration():
         
         return jsonify({
             **duration_data,
-            "signal_mode": "INVERTIDO" if INVERT_SIGNALS else "NORMAL",
+            "signal_mode": "NORMAL",
             "timestamp": datetime.datetime.now().isoformat(),
             "source": "IA Simplificada - Duration Optimizer"
         })
@@ -498,7 +457,7 @@ def position_management():
         
         return jsonify({
             **management_data,
-            "signal_mode": "INVERTIDO" if INVERT_SIGNALS else "NORMAL",
+            "signal_mode": "NORMAL",
             "timestamp": datetime.datetime.now().isoformat(),
             "source": "IA Simplificada - Position Management"
         })
@@ -526,14 +485,13 @@ def receive_feedback():
         
         accuracy = (performance_stats['won_trades'] / max(performance_stats['total_trades'], 1) * 100)
         
-        inversion_mode = "INVERTIDO" if INVERT_SIGNALS else "NORMAL"
-        logger.info(f"Feedback recebido ({inversion_mode}): {direction} -> {'WIN' if result == 1 else 'LOSS'}")
+        logger.info(f"Feedback recebido (NORMAL): {direction} -> {'WIN' if result == 1 else 'LOSS'}")
         
         return jsonify({
             "message": "Feedback recebido com sucesso",
             "total_trades": performance_stats['total_trades'],
             "accuracy": f"{accuracy:.1f}%",
-            "signal_mode": inversion_mode,
+            "signal_mode": "NORMAL",
             "timestamp": datetime.datetime.now().isoformat()
         })
         
@@ -546,8 +504,8 @@ def receive_feedback():
 def not_found(error):
     return jsonify({
         "error": "Endpoint não encontrado",
-        "available_endpoints": ["/analyze", "/signal", "/risk", "/optimal-duration", "/management", "/toggle-inversion"],
-        "signal_mode": "INVERTIDO" if INVERT_SIGNALS else "NORMAL",
+        "available_endpoints": ["/analyze", "/signal", "/risk", "/optimal-duration", "/management"],
+        "signal_mode": "NORMAL",
         "timestamp": datetime.datetime.now().isoformat()
     }), 404
 
@@ -561,8 +519,7 @@ def internal_error(error):
     }), 500
 
 if __name__ == "__main__":
-    inversion_status = "ATIVADA" if INVERT_SIGNALS else "DESATIVADA"
     logger.info("🚀 Iniciando IA Trading Bot API Simplificada")
     logger.info(f"🔑 API Key: {VALID_API_KEY}")
-    logger.info(f"🔄 Inversão de Sinais: {inversion_status}")
+    logger.info("📊 Sinais NORMAIS ativados - sem inversão")
     app.run(host="0.0.0.0", port=5000, debug=False)
