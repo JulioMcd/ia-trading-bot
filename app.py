@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # API Key válida
-VALID_API_KEY = "rnd_qpdTVwAeWzIItVbxHPPCc34uirv9"
+VALID_API_KEY = "bhcOGajqbfFfolT"
 
 # ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS
 INVERT_SIGNALS = True  # Mude para False se quiser sinais normais
