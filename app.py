@@ -20,8 +20,16 @@ logger = logging.getLogger(__name__)
 # API Key válida
 VALID_API_KEY = "bhcOGajqbfFfolT"
 
-# ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS - DESATIVADA
-INVERT_SIGNALS = False  # Sinais normais ativados
+# ✅ SISTEMA DE INVERSÃO AUTOMÁTICA - NOVO!
+INVERSION_SYSTEM = {
+    'active': True,  # Sistema de inversão ativo
+    'is_inverse_mode': False,  # false = modo normal, true = modo inverso
+    'consecutive_errors': 0,  # Contador de erros consecutivos
+    'max_errors': 3,  # Máximo de erros antes de inverter
+    'total_inversions': 0,  # Total de inversões realizadas
+    'last_inversion_time': None,  # Última vez que inverteu
+    'inversion_history': []  # Histórico de inversões
+}
 
 # Configuração para Render - usar diretório persistente se disponível
 DB_PATH = os.environ.get('DB_PATH', '/tmp/trading_data.db')
@@ -47,13 +55,14 @@ class TradingDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Tabela de sinais e resultados
+        # Tabela de sinais e resultados (modificada para incluir inversão)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 direction TEXT NOT NULL,
+                original_direction TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 entry_price REAL,
                 volatility REAL,
@@ -64,12 +73,29 @@ class TradingDatabase:
                 martingale_level INTEGER DEFAULT 0,
                 market_condition TEXT,
                 technical_factors TEXT,  -- JSON com fatores técnicos
+                is_inverted BOOLEAN DEFAULT 0,  -- NOVO: Se foi invertido
+                consecutive_errors_before INTEGER DEFAULT 0,  -- NOVO: Erros antes deste sinal
+                inversion_mode TEXT DEFAULT 'normal',  -- NOVO: normal ou inverse
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 feedback_received_at TEXT
             )
         ''')
         
-        # Tabela de métricas de performance
+        # Tabela de histórico de inversões (NOVA)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inversion_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                from_mode TEXT NOT NULL,
+                to_mode TEXT NOT NULL,
+                consecutive_errors INTEGER NOT NULL,
+                trigger_reason TEXT,
+                total_inversions_so_far INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabelas existentes...
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS performance_metrics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +111,6 @@ class TradingDatabase:
             )
         ''')
         
-        # Tabela de padrões de erro
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS error_patterns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +124,6 @@ class TradingDatabase:
             )
         ''')
         
-        # Tabela de parâmetros adaptativos
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS adaptive_parameters (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,20 +138,21 @@ class TradingDatabase:
         conn.close()
         
     def save_signal(self, signal_data):
-        """Salvar sinal no banco de dados"""
+        """Salvar sinal no banco de dados (modificado para incluir inversão)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
             INSERT INTO signals (
-                timestamp, symbol, direction, confidence, entry_price, 
+                timestamp, symbol, direction, original_direction, confidence, entry_price, 
                 volatility, duration_type, duration_value, martingale_level,
-                market_condition, technical_factors
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                market_condition, technical_factors, is_inverted, consecutive_errors_before, inversion_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             signal_data.get('timestamp'),
             signal_data.get('symbol', 'R_50'),
             signal_data.get('direction'),
+            signal_data.get('original_direction'),
             signal_data.get('confidence'),
             signal_data.get('entry_price'),
             signal_data.get('volatility'),
@@ -135,13 +160,37 @@ class TradingDatabase:
             signal_data.get('duration_value'),
             signal_data.get('martingale_level', 0),
             signal_data.get('market_condition', 'neutral'),
-            json.dumps(signal_data.get('technical_factors', {}))
+            json.dumps(signal_data.get('technical_factors', {})),
+            signal_data.get('is_inverted', False),
+            signal_data.get('consecutive_errors_before', 0),
+            signal_data.get('inversion_mode', 'normal')
         ))
         
         signal_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return signal_id
+        
+    def save_inversion_event(self, from_mode, to_mode, consecutive_errors, reason):
+        """Salvar evento de inversão no banco"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO inversion_history (
+                timestamp, from_mode, to_mode, consecutive_errors, trigger_reason, total_inversions_so_far
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.datetime.now().isoformat(),
+            from_mode,
+            to_mode,
+            consecutive_errors,
+            reason,
+            INVERSION_SYSTEM['total_inversions']
+        ))
+        
+        conn.commit()
+        conn.close()
         
     def update_signal_result(self, signal_id, result, pnl=0):
         """Atualizar resultado do sinal"""
@@ -179,6 +228,20 @@ class TradingDatabase:
         results = cursor.fetchall()
         conn.close()
         
+        return results
+        
+    def get_inversion_history(self, limit=20):
+        """Obter histórico de inversões"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM inversion_history 
+            ORDER BY created_at DESC LIMIT ?
+        ''', (limit,))
+        
+        results = cursor.fetchall()
+        conn.close()
         return results
         
     def get_error_patterns(self):
@@ -249,6 +312,97 @@ class TradingDatabase:
         conn.commit()
         conn.close()
 
+class InversionManager:
+    """Gerenciador do sistema de inversão automática"""
+    
+    def __init__(self, database):
+        self.db = database
+        
+    def invert_signal(self, signal):
+        """Inverter sinal de trading"""
+        signal_map = {
+            'CALL': 'PUT',
+            'PUT': 'CALL', 
+            'BUY': 'SELL',
+            'SELL': 'BUY',
+            'LONG': 'SHORT',
+            'SHORT': 'LONG',
+            'COMPRA': 'VENDA',
+            'VENDA': 'COMPRA'
+        }
+        
+        return signal_map.get(signal.upper(), signal)
+        
+    def should_invert_mode(self):
+        """Verificar se deve inverter o modo baseado nos erros consecutivos"""
+        return INVERSION_SYSTEM['consecutive_errors'] >= INVERSION_SYSTEM['max_errors']
+        
+    def switch_inversion_mode(self, reason="Max consecutive errors reached"):
+        """Alternar modo de inversão"""
+        old_mode = "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal"
+        INVERSION_SYSTEM['is_inverse_mode'] = not INVERSION_SYSTEM['is_inverse_mode']
+        INVERSION_SYSTEM['consecutive_errors'] = 0  # Reset contador
+        INVERSION_SYSTEM['total_inversions'] += 1
+        INVERSION_SYSTEM['last_inversion_time'] = datetime.datetime.now().isoformat()
+        
+        new_mode = "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal"
+        
+        # Registrar no histórico
+        INVERSION_SYSTEM['inversion_history'].append({
+            'timestamp': INVERSION_SYSTEM['last_inversion_time'],
+            'from_mode': old_mode,
+            'to_mode': new_mode,
+            'consecutive_errors': INVERSION_SYSTEM['max_errors'],
+            'reason': reason
+        })
+        
+        # Salvar no banco
+        self.db.save_inversion_event(old_mode, new_mode, INVERSION_SYSTEM['max_errors'], reason)
+        
+        logger.info(f"🔄 INVERSÃO AUTOMÁTICA: {old_mode.upper()} → {new_mode.upper()}")
+        logger.info(f"   Motivo: {reason}")
+        logger.info(f"   Total de inversões: {INVERSION_SYSTEM['total_inversions']}")
+        logger.info(f"   Contador de erros resetado para 0")
+        
+    def handle_signal_result(self, result):
+        """Processar resultado do sinal para sistema de inversão"""
+        if not INVERSION_SYSTEM['active']:
+            return
+            
+        if result == 0:  # Loss
+            INVERSION_SYSTEM['consecutive_errors'] += 1
+            logger.info(f"❌ Erro #{INVERSION_SYSTEM['consecutive_errors']} de {INVERSION_SYSTEM['max_errors']} (Modo: {'INVERSO' if INVERSION_SYSTEM['is_inverse_mode'] else 'NORMAL'})")
+            
+            if self.should_invert_mode():
+                self.switch_inversion_mode()
+        else:  # Win
+            if INVERSION_SYSTEM['consecutive_errors'] > 0:
+                logger.info(f"✅ Win! Resetando contador de erros (era {INVERSION_SYSTEM['consecutive_errors']})")
+                INVERSION_SYSTEM['consecutive_errors'] = 0
+                
+    def get_final_signal(self, original_signal):
+        """Obter sinal final (invertido ou não)"""
+        if not INVERSION_SYSTEM['active']:
+            return original_signal, False, "normal"
+            
+        if INVERSION_SYSTEM['is_inverse_mode']:
+            inverted_signal = self.invert_signal(original_signal)
+            return inverted_signal, True, "inverse"
+        else:
+            return original_signal, False, "normal"
+            
+    def get_inversion_status(self):
+        """Obter status atual do sistema de inversão"""
+        return {
+            'active': INVERSION_SYSTEM['active'],
+            'current_mode': "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal",
+            'consecutive_errors': INVERSION_SYSTEM['consecutive_errors'],
+            'max_errors': INVERSION_SYSTEM['max_errors'],
+            'total_inversions': INVERSION_SYSTEM['total_inversions'],
+            'last_inversion': INVERSION_SYSTEM['last_inversion_time'],
+            'errors_until_inversion': INVERSION_SYSTEM['max_errors'] - INVERSION_SYSTEM['consecutive_errors']
+        }
+
 class LearningEngine:
     """Motor de aprendizado baseado em erros - Versão Pure Python"""
     
@@ -272,7 +426,7 @@ class LearningEngine:
         symbol_errors = defaultdict(list)
         for signal in recent_data:
             symbol = signal[2]  # symbol column
-            result = signal[9]  # result column
+            result = signal[10]  # result column (ajustado para nova estrutura)
             symbol_errors[symbol].append(result)
             
         for symbol, results in symbol_errors.items():
@@ -295,7 +449,7 @@ class LearningEngine:
         direction_errors = defaultdict(list)
         for signal in recent_data:
             direction = signal[3]  # direction column
-            result = signal[9]  # result column
+            result = signal[10]  # result column
             direction_errors[direction].append(result)
             
         for direction, results in direction_errors.items():
@@ -317,8 +471,8 @@ class LearningEngine:
         # Analisar padrões por volatilidade
         volatility_results = []
         for signal in recent_data:
-            volatility = signal[6]  # volatility column
-            result = signal[9]  # result column
+            volatility = signal[7]  # volatility column (ajustado)
+            result = signal[10]  # result column
             if volatility and result is not None:
                 volatility_results.append((volatility, result))
                 
@@ -401,7 +555,7 @@ class LearningEngine:
             
         # Calcular métricas gerais
         total_signals = len(recent_data)
-        won_signals = sum(1 for signal in recent_data if signal[9] == 1)
+        won_signals = sum(1 for signal in recent_data if signal[10] == 1)  # ajustado coluna
         accuracy = (won_signals / total_signals) * 100 if total_signals > 0 else 0
         
         # Atualizar parâmetros adaptativos baseados na performance
@@ -434,6 +588,7 @@ class LearningEngine:
 # Instâncias globais
 db = TradingDatabase()
 learning_engine = LearningEngine(db)
+inversion_manager = InversionManager(db)  # NOVA INSTÂNCIA
 
 # Dados de histórico simples (mantidos para compatibilidade)
 trade_history = []
@@ -459,44 +614,75 @@ def validate_api_key():
     return api_key == VALID_API_KEY
 
 def analyze_technical_pattern(prices, learning_data=None):
-    """Análise técnica com aprendizado integrado"""
+    """Análise técnica com aprendizado integrado + SISTEMA DE INVERSÃO"""
     try:
         if len(prices) >= 3:
             # Tendência simples
             recent_trend = prices[-1] - prices[-3]
             volatility = abs(prices[-1] - prices[-2]) / prices[-2] * 100 if prices[-2] != 0 else 50
             
-            # Lógica de direção NORMAL
+            # Lógica de direção ORIGINAL (sem inversão ainda)
             if recent_trend > 0:
-                direction = "CALL"
+                original_direction = "CALL"
                 base_confidence = 70 + min(volatility * 0.3, 20)
             else:
-                direction = "PUT" 
+                original_direction = "PUT" 
                 base_confidence = 70 + min(volatility * 0.3, 20)
             
-            # 🧠 APLICAR APRENDIZADO
+            # 🧠 APLICAR APRENDIZADO na confiança
             if learning_data and LEARNING_CONFIG['learning_enabled']:
                 adapted_confidence, adjustments = learning_engine.adapt_confidence({
-                    'direction': direction,
+                    'direction': original_direction,
                     'confidence': base_confidence,
                     'volatility': volatility,
                     **learning_data
                 })
-                
-                return direction, round(adapted_confidence, 1), direction, adjustments
+            else:
+                adapted_confidence = base_confidence
+                adjustments = []
             
-            return direction, round(base_confidence, 1), direction, []
+            # 🔄 APLICAR SISTEMA DE INVERSÃO
+            final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+            
+            return {
+                'original_direction': original_direction,
+                'final_direction': final_direction,
+                'confidence': round(adapted_confidence, 1),
+                'is_inverted': is_inverted,
+                'inversion_mode': inversion_mode,
+                'adjustments': adjustments
+            }
             
         else:
             # Fallback aleatório ponderado
-            direction = "CALL" if random.random() > 0.5 else "PUT"
+            original_direction = "CALL" if random.random() > 0.5 else "PUT"
             confidence = 70 + random.uniform(0, 20)
             
-            return direction, round(confidence, 1), direction, []
+            # Aplicar inversão mesmo no fallback
+            final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+            
+            return {
+                'original_direction': original_direction,
+                'final_direction': final_direction,
+                'confidence': round(confidence, 1),
+                'is_inverted': is_inverted,
+                'inversion_mode': inversion_mode,
+                'adjustments': []
+            }
+            
     except Exception as e:
         logger.error(f"Erro na análise técnica: {e}")
-        direction = "CALL" if random.random() > 0.5 else "PUT"
-        return direction, 70.0, direction, []
+        original_direction = "CALL" if random.random() > 0.5 else "PUT"
+        final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+        
+        return {
+            'original_direction': original_direction,
+            'final_direction': final_direction,
+            'confidence': 70.0,
+            'is_inverted': is_inverted,
+            'inversion_mode': inversion_mode,
+            'adjustments': []
+        }
 
 def extract_features(data):
     """Extrair dados dos parâmetros recebidos"""
@@ -529,6 +715,11 @@ def calculate_risk_score(data):
     
     risk_score = 0
     risk_level = "low"
+    
+    # Adicionar risco por inversões consecutivas
+    if INVERSION_SYSTEM['consecutive_errors'] >= 2:
+        risk_score += 15
+        risk_level = "medium"
     
     # Análise Martingale (ajustada pelo fator de risco)
     martingale_threshold = max(3, int(6 * risk_factor))
@@ -636,7 +827,12 @@ def manage_position(data):
     pause_threshold_medium = int(100 * risk_factor)
     martingale_threshold = max(5, int(7 * risk_factor))
     
-    if today_pnl < -pause_threshold_high or martingale_level > martingale_threshold:
+    # Pausar se muitas inversões recentes
+    if INVERSION_SYSTEM['consecutive_errors'] >= INVERSION_SYSTEM['max_errors'] - 1:
+        should_pause = True
+        action = "pause"
+        pause_duration = random.randint(30000, 60000)
+    elif today_pnl < -pause_threshold_high or martingale_level > martingale_threshold:
         should_pause = True
         action = "pause"
         pause_duration = random.randint(60000, 180000)
@@ -659,7 +855,7 @@ def manage_position(data):
     
     message = ""
     if should_pause:
-        message = f"PAUSA RECOMENDADA - {pause_duration//1000}s - Alto risco (adaptativo)"
+        message = f"PAUSA RECOMENDADA - {pause_duration//1000}s - Alto risco (Sistema de Inversão ativo)"
     elif recommended_stake != current_stake:
         message = f"Stake adaptativo: ${current_stake:.2f} → ${recommended_stake:.2f}"
     else:
@@ -672,11 +868,12 @@ def manage_position(data):
         "pauseDuration": pause_duration,
         "riskLevel": "high" if martingale_level > 5 else "medium" if today_pnl < -50 else "low",
         "message": message,
-        "reasoning": "Sistema adaptativo ativo",
+        "reasoning": "Sistema adaptativo + inversão ativo",
         "adaptive_factors": {
             "risk_factor": risk_factor,
             "aggression_factor": aggression_factor
-        }
+        },
+        "inversion_status": inversion_manager.get_inversion_status()
     }
 
 # Sistema de análise de padrões em background
@@ -715,26 +912,36 @@ def home():
     # Obter estatísticas do banco de dados
     recent_data = db.get_recent_performance(100)
     total_signals = len(recent_data)
-    accuracy = (sum(1 for signal in recent_data if signal[9] == 1) / total_signals * 100) if total_signals > 0 else 0
+    accuracy = (sum(1 for signal in recent_data if signal[10] == 1) / total_signals * 100) if total_signals > 0 else 0
+    
+    # Status do sistema de inversão
+    inversion_status = inversion_manager.get_inversion_status()
     
     return jsonify({
-        "status": "🤖 IA Trading Bot API Online - Sistema de Aprendizado Ativo",
-        "version": "3.0.0 - ML Learning System (Pure Python)",
-        "description": "API com Sistema de Aprendizado Baseado em Erros",
-        "model": "Adaptive Learning Engine",
-        "signal_mode": "NORMAL + LEARNING",
-        "inversion_active": False,
+        "status": "🤖 IA Trading Bot API Online - Sistema de Inversão Automática + Aprendizado",
+        "version": "4.0.0 - Auto Inversion + ML Learning System",
+        "description": "API com Sistema de Inversão Automática após 3 erros + Aprendizado",
+        "model": "Adaptive Learning Engine + Auto Inversion",
+        "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+        "inversion_system": {
+            "active": inversion_status['active'],
+            "current_mode": inversion_status['current_mode'],
+            "consecutive_errors": inversion_status['consecutive_errors'],
+            "errors_until_inversion": inversion_status['errors_until_inversion'],
+            "total_inversions": inversion_status['total_inversions']
+        },
         "learning_active": LEARNING_CONFIG['learning_enabled'],
         "python_version": "Compatible with Python 3.13",
         "dependencies": "Pure Python - No NumPy required",
         "endpoints": {
             "analyze": "POST /analyze - Análise adaptativa de mercado",
-            "signal": "POST /signal - Sinais com aprendizado",
+            "signal": "POST /signal - Sinais com inversão automática + aprendizado",
             "risk": "POST /risk - Avaliação de risco adaptativa",
             "optimal-duration": "POST /optimal-duration - Duração otimizada",
             "management": "POST /management - Gestão adaptativa",
-            "feedback": "POST /feedback - Sistema de aprendizado",
-            "learning-stats": "GET /learning-stats - Estatísticas de aprendizado"
+            "feedback": "POST /feedback - Sistema de aprendizado + inversão",
+            "learning-stats": "GET /learning-stats - Estatísticas de aprendizado",
+            "inversion-status": "GET /inversion-status - Status do sistema de inversão"
         },
         "stats": {
             "total_predictions": total_signals,
@@ -744,8 +951,42 @@ def home():
         },
         "learning_config": LEARNING_CONFIG,
         "timestamp": datetime.datetime.now().isoformat(),
-        "source": "Python Pure API with Error Learning System"
+        "source": "Python Pure API with Auto Inversion + Error Learning System"
     })
+
+@app.route("/inversion-status", methods=["GET"])
+def get_inversion_status():
+    """Obter status detalhado do sistema de inversão"""
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        inversion_status = inversion_manager.get_inversion_status()
+        inversion_history = db.get_inversion_history(10)
+        
+        return jsonify({
+            "inversion_system": inversion_status,
+            "recent_inversions": [
+                {
+                    "timestamp": inv[1],
+                    "from_mode": inv[2],
+                    "to_mode": inv[3],
+                    "consecutive_errors": inv[4],
+                    "reason": inv[5],
+                    "total_inversions_so_far": inv[6]
+                } for inv in inversion_history
+            ],
+            "inversion_rules": {
+                "max_errors_before_inversion": INVERSION_SYSTEM['max_errors'],
+                "auto_reset_on_win": True,
+                "alternates_between_modes": True
+            },
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em inversion-status: {e}")
+        return jsonify({"error": "Erro ao obter status de inversão", "message": str(e)}), 500
 
 @app.route("/learning-stats", methods=["GET"])
 def get_learning_stats():
@@ -759,14 +1000,14 @@ def get_learning_stats():
         error_patterns = db.get_error_patterns()
         
         total_signals = len(recent_data)
-        won_signals = sum(1 for signal in recent_data if signal[9] == 1)
+        won_signals = sum(1 for signal in recent_data if signal[10] == 1)
         accuracy = (won_signals / total_signals * 100) if total_signals > 0 else 0
         
         # Estatísticas por símbolo
         symbol_stats = defaultdict(lambda: {'total': 0, 'wins': 0})
         for signal in recent_data:
             symbol = signal[2]
-            result = signal[9]
+            result = signal[10]
             symbol_stats[symbol]['total'] += 1
             if result == 1:
                 symbol_stats[symbol]['wins'] += 1
@@ -778,12 +1019,16 @@ def get_learning_stats():
             'duration_factor': db.get_adaptive_parameter('duration_factor', 1.0)
         }
         
+        # Status de inversão
+        inversion_status = inversion_manager.get_inversion_status()
+        
         return jsonify({
             "learning_enabled": LEARNING_CONFIG['learning_enabled'],
             "total_samples": total_signals,
             "current_accuracy": round(accuracy, 1),
             "error_patterns_found": len(error_patterns),
             "adaptive_parameters": adaptive_params,
+            "inversion_system": inversion_status,
             "symbol_performance": dict(symbol_stats),
             "recent_patterns": [
                 {
@@ -826,7 +1071,8 @@ def generate_signal():
             'martingale_level': data.get("martingaleLevel", 0)
         }
         
-        direction, confidence, _, adjustments = analyze_technical_pattern(prices, learning_data)
+        # Análise técnica com inversão automática
+        analysis_result = analyze_technical_pattern(prices, learning_data)
         
         # Dados do sinal
         current_price = data.get("currentPrice", 1000)
@@ -834,6 +1080,7 @@ def generate_signal():
         win_rate = data.get("winRate", 50)
         
         # Ajustar confiança baseada em performance
+        confidence = analysis_result['confidence']
         if win_rate > 60:
             confidence = min(confidence + 3, 95)
         elif win_rate < 40:
@@ -843,47 +1090,65 @@ def generate_signal():
         signal_data = {
             'timestamp': datetime.datetime.now().isoformat(),
             'symbol': symbol,
-            'direction': direction,
+            'direction': analysis_result['final_direction'],
+            'original_direction': analysis_result['original_direction'],
             'confidence': confidence,
             'entry_price': current_price,
             'volatility': volatility,
             'martingale_level': data.get("martingaleLevel", 0),
             'market_condition': data.get("marketCondition", "neutral"),
+            'is_inverted': analysis_result['is_inverted'],
+            'consecutive_errors_before': INVERSION_SYSTEM['consecutive_errors'],
+            'inversion_mode': analysis_result['inversion_mode'],
             'technical_factors': {
-                'adjustments': adjustments,
+                'adjustments': analysis_result['adjustments'],
                 'win_rate': win_rate,
-                'prices': prices
+                'prices': prices,
+                'inversion_applied': analysis_result['is_inverted']
             }
         }
         
         # Salvar sinal no banco de dados
         signal_id = db.save_signal(signal_data)
         
-        reasoning = f"Análise adaptativa para {symbol} - Sistema de aprendizado ativo"
-        if adjustments:
-            reasoning += f" (Ajustes aplicados: {len(adjustments)})"
+        # Preparar reasoning
+        reasoning = f"Análise adaptativa para {symbol} - Sistema de inversão automática"
+        if analysis_result['is_inverted']:
+            reasoning += f" - SINAL INVERTIDO ({analysis_result['original_direction']} → {analysis_result['final_direction']})"
+        if analysis_result['adjustments']:
+            reasoning += f" (Ajustes de aprendizado: {len(analysis_result['adjustments'])})"
+        
+        # Status de inversão para retorno
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
             "signal_id": signal_id,  # ID para feedback posterior
-            "direction": direction,
+            "direction": analysis_result['final_direction'],
+            "original_direction": analysis_result['original_direction'],
             "confidence": confidence,
             "reasoning": reasoning,
             "entry_price": current_price,
             "strength": "forte" if confidence > 85 else "moderado" if confidence > 75 else "fraco",
             "timeframe": "5m",
-            "inverted": False,
-            "inversion_status": "INATIVO",
+            "inverted": analysis_result['is_inverted'],
+            "inversion_status": {
+                "current_mode": analysis_result['inversion_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "errors_until_inversion": inversion_status['errors_until_inversion'],
+                "total_inversions": inversion_status['total_inversions']
+            },
             "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "confidence_adjustments": adjustments,
+            "confidence_adjustments": analysis_result['adjustments'],
             "factors": {
-                "technical_model": "Adaptive Pattern Analysis",
+                "technical_model": "Adaptive Pattern Analysis + Auto Inversion",
                 "volatility_factor": volatility,
                 "historical_performance": win_rate,
-                "signal_inversion": "INATIVO",
-                "learning_adjustments": len(adjustments)
+                "signal_inversion": "ATIVO" if analysis_result['is_inverted'] else "INATIVO",
+                "learning_adjustments": len(analysis_result['adjustments']),
+                "inversion_mode": analysis_result['inversion_mode']
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
@@ -892,7 +1157,7 @@ def generate_signal():
 
 @app.route("/feedback", methods=["POST", "OPTIONS"])
 def receive_feedback():
-    """Endpoint para receber feedback - SISTEMA DE APRENDIZADO"""
+    """Endpoint para receber feedback - SISTEMA DE APRENDIZADO + INVERSÃO"""
     if request.method == "OPTIONS":
         return '', 200
     
@@ -909,7 +1174,10 @@ def receive_feedback():
         if signal_id:
             # Atualizar resultado no banco de dados
             db.update_signal_result(signal_id, result, pnl)
-            logger.info(f"🧠 Feedback integrado ao sistema de aprendizado: Signal {signal_id} -> {'WIN' if result == 1 else 'LOSS'}")
+            logger.info(f"🧠 Feedback integrado: Signal {signal_id} -> {'WIN' if result == 1 else 'LOSS'}")
+        
+        # 🔄 SISTEMA DE INVERSÃO AUTOMÁTICA
+        inversion_manager.handle_signal_result(result)
         
         # Atualizar stats simples (mantido para compatibilidade)
         performance_stats['total_trades'] += 1
@@ -927,16 +1195,26 @@ def receive_feedback():
             except Exception as e:
                 logger.error(f"Erro na análise de padrões: {e}")
         
+        # Status atual do sistema de inversão
+        inversion_status = inversion_manager.get_inversion_status()
+        
         return jsonify({
-            "message": "Feedback recebido e processado pelo sistema de aprendizado",
+            "message": "Feedback recebido - Sistema de inversão automática + aprendizado ativo",
             "signal_id": signal_id,
             "result_recorded": result == 1,
             "total_trades": performance_stats['total_trades'],
             "accuracy": f"{accuracy:.1f}%",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "inversion_system": {
+                "current_mode": inversion_status['current_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "errors_until_inversion": inversion_status['errors_until_inversion'],
+                "total_inversions": inversion_status['total_inversions'],
+                "last_inversion": inversion_status['last_inversion']
+            },
             "patterns_analysis": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "Sistema de Aprendizado Pure Python"
+            "source": "Sistema de Inversão Automática + Aprendizado Pure Python"
         })
         
     except Exception as e:
@@ -963,37 +1241,49 @@ def analyze_market():
             'market_condition': data.get("marketCondition", "neutral")
         }
         
-        direction, confidence, _, adjustments = analyze_technical_pattern(prices, learning_data)
+        # Análise técnica com inversão
+        analysis_result = analyze_technical_pattern(prices, learning_data)
         
         # Análise adicional
         symbol = data.get("symbol", "R_50")
+        confidence = analysis_result['confidence']
         
-        # Determinar tendência baseada na direção
+        # Determinar tendência baseada na direção final
         if confidence > 80:
-            trend = "bullish" if direction == "CALL" else "bearish"
+            trend = "bullish" if analysis_result['final_direction'] == "CALL" else "bearish"
         else:
             trend = "neutral"
+        
+        # Status de inversão
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
             "symbol": symbol,
             "trend": trend,
             "confidence": confidence,
             "volatility": round(volatility, 1),
-            "direction": direction,
-            "inverted": False,
+            "direction": analysis_result['final_direction'],
+            "original_direction": analysis_result['original_direction'],
+            "inverted": analysis_result['is_inverted'],
             "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "confidence_adjustments": adjustments,
-            "message": f"Análise ADAPTATIVA para {symbol}: {direction} (confiança ajustada)",
-            "recommendation": f"{direction} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
+            "confidence_adjustments": analysis_result['adjustments'],
+            "inversion_status": {
+                "current_mode": inversion_status['current_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "errors_until_inversion": inversion_status['errors_until_inversion']
+            },
+            "message": f"Análise ADAPTATIVA para {symbol}: {analysis_result['final_direction']}" + (" (INVERTIDO)" if analysis_result['is_inverted'] else ""),
+            "recommendation": f"{analysis_result['final_direction']} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
             "factors": {
-                "technical_analysis": direction,
+                "technical_analysis": analysis_result['final_direction'],
                 "market_volatility": round(volatility, 1),
                 "confidence_level": confidence,
-                "inversion_mode": "NORMAL",
-                "learning_adjustments": len(adjustments)
+                "inversion_mode": analysis_result['inversion_mode'],
+                "learning_adjustments": len(analysis_result['adjustments']),
+                "signal_inverted": analysis_result['is_inverted']
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
@@ -1014,18 +1304,19 @@ def assess_risk():
         
         # Obter parâmetros adaptativos para mostrar no retorno
         risk_factor = db.get_adaptive_parameter('risk_factor', 1.0)
+        inversion_status = inversion_manager.get_inversion_status()
         
         # Mensagens baseadas no nível de risco
         messages = {
-            "high": "ALTO RISCO - Intervenção necessária (Sistema Adaptativo)",
-            "medium": "Risco moderado - Cautela recomendada (Ajustes ativos)", 
-            "low": "Risco controlado (Parâmetros otimizados)"
+            "high": "ALTO RISCO - Intervenção necessária (Sistema de Inversão ativo)",
+            "medium": "Risco moderado - Cautela recomendada (Monitoramento de inversão)", 
+            "low": "Risco controlado (Sistema adaptativo + inversão funcionando)"
         }
         
         recommendations = {
-            "high": "Pare imediatamente e revise estratégia",
-            "medium": "Reduza frequency e monitore de perto",
-            "low": "Continue operando com disciplina"
+            "high": "Pare imediatamente e revise estratégia - verifique sistema de inversão",
+            "medium": "Reduza frequency e monitore inversões de perto",
+            "low": "Continue operando com disciplina - sistema de inversão ativo"
         }
         
         return jsonify({
@@ -1034,18 +1325,21 @@ def assess_risk():
             "message": messages[risk_level],
             "recommendation": recommendations[risk_level],
             "adaptive_risk_factor": risk_factor,
+            "inversion_system": inversion_status,
             "factors": {
                 "martingale_level": data.get("martingaleLevel", 0),
                 "today_pnl": data.get("todayPnL", 0),
                 "win_rate": data.get("winRate", 50),
                 "total_trades": data.get("totalTrades", 0),
-                "risk_factor_applied": risk_factor
+                "risk_factor_applied": risk_factor,
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "inversion_mode": inversion_status['current_mode']
             },
             "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
-            "signal_mode": "NORMAL + LEARNING",
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
@@ -1063,14 +1357,16 @@ def get_optimal_duration():
     try:
         data = request.get_json() or {}
         duration_data = optimize_duration(data)
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
             **duration_data,
-            "signal_mode": "NORMAL + LEARNING",
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "inversion_system": inversion_status,
             "adaptive_optimization": True,
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
@@ -1088,13 +1384,14 @@ def position_management():
     try:
         data = request.get_json() or {}
         management_data = manage_position(data)
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
             **management_data,
-            "signal_mode": "NORMAL + LEARNING",
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
@@ -1104,11 +1401,13 @@ def position_management():
 # Middleware de erro global
 @app.errorhandler(404)
 def not_found(error):
+    inversion_status = inversion_manager.get_inversion_status()
     return jsonify({
         "error": "Endpoint não encontrado",
-        "available_endpoints": ["/analyze", "/signal", "/risk", "/optimal-duration", "/management", "/feedback", "/learning-stats"],
-        "signal_mode": "NORMAL + LEARNING",
+        "available_endpoints": ["/analyze", "/signal", "/risk", "/optimal-duration", "/management", "/feedback", "/learning-stats", "/inversion-status"],
+        "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
         "learning_active": LEARNING_CONFIG['learning_enabled'],
+        "inversion_system": inversion_status,
         "timestamp": datetime.datetime.now().isoformat()
     }), 404
 
@@ -1119,16 +1418,19 @@ def internal_error(error):
         "error": "Erro interno do servidor",
         "message": "Entre em contato com o suporte",
         "learning_system": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
+        "inversion_system": "Ativo" if INVERSION_SYSTEM['active'] else "Inativo",
         "timestamp": datetime.datetime.now().isoformat()
     }), 500
 
 if __name__ == "__main__":
     # Configuração para Render
     port = int(os.environ.get('PORT', 5000))
-    logger.info("🚀 Iniciando IA Trading Bot API com Sistema de Aprendizado")
+    logger.info("🚀 Iniciando IA Trading Bot API com Sistema de Inversão Automática + Aprendizado")
     logger.info(f"🔑 API Key: {VALID_API_KEY}")
     logger.info("🧠 Sistema de Aprendizado: ATIVADO")
-    logger.info("📊 Sinais NORMAIS + Adaptação Inteligente")
+    logger.info("🔄 Sistema de Inversão Automática: ATIVADO")
+    logger.info(f"📊 Modo atual: {INVERSION_SYSTEM['current_mode'] if INVERSION_SYSTEM['is_inverse_mode'] else 'normal'}")
     logger.info(f"📈 Banco de dados: {DB_PATH}")
     logger.info("🐍 Pure Python - Compatível com Python 3.13")
+    logger.info(f"⚙️ Max erros antes de inverter: {INVERSION_SYSTEM['max_errors']}")
     app.run(host="0.0.0.0", port=port, debug=False)
