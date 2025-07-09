@@ -1,525 +1,318 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import random
-import datetime
-import logging
+import requests
+import json
+import time
+from datetime import datetime
 
-app = Flask(__name__)
-CORS(app)
+# Configurações
+API_URL = "http://localhost:5000"
+API_KEY = "bhcOGajqbfFfolT"
+headers = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# API Key válida
-VALID_API_KEY = "bhcOGajqbfFfolT"
-
-# ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS - DESATIVADA
-INVERT_SIGNALS = False  # Sinais normais ativados
-
-# Dados de histórico simples
-trade_history = []
-performance_stats = {
-    'total_trades': 0,
-    'won_trades': 0,
-    'total_pnl': 0.0
-}
-
-def validate_api_key():
-    """Validar API Key (opcional)"""
-    auth_header = request.headers.get('Authorization', '')
-    api_key_header = request.headers.get('X-API-Key', '')
+class TradingLearningDemo:
+    """Demonstração prática do sistema de aprendizado"""
     
-    if auth_header.startswith('Bearer '):
-        api_key = auth_header.replace('Bearer ', '')
-    else:
-        api_key = api_key_header
-    
-    if not api_key:
-        return True
-    
-    return api_key == VALID_API_KEY
-
-def analyze_technical_pattern(prices):
-    """Análise técnica simples sem ML"""
-    try:
-        if len(prices) >= 3:
-            # Tendência simples
-            recent_trend = prices[-1] - prices[-3]
-            volatility = abs(prices[-1] - prices[-2]) / prices[-2] * 100 if prices[-2] != 0 else 50
-            
-            # Lógica de direção NORMAL
-            if recent_trend > 0:
-                direction = "CALL"
-                confidence = 70 + min(volatility * 0.3, 20)
-            else:
-                direction = "PUT" 
-                confidence = 70 + min(volatility * 0.3, 20)
-            
-            # ✅ SINAIS NORMAIS - SEM INVERSÃO
-            final_direction = direction
-            logger.info(f"📊 SINAL NORMAL: {direction}")
+    def __init__(self):
+        self.api_url = API_URL
+        self.headers = headers
+        
+    def get_learning_stats(self):
+        """Obter estatísticas atuais do aprendizado"""
+        try:
+            response = requests.get(f"{self.api_url}/learning-stats", headers=self.headers)
+            if response.status_code == 200:
+                stats = response.json()
+                print("📊 ESTATÍSTICAS DE APRENDIZADO")
+                print("=" * 50)
+                print(f"🎯 Accuracy Atual: {stats['current_accuracy']}%")
+                print(f"🔢 Total de Amostras: {stats['total_samples']}")
+                print(f"🧠 Padrões Identificados: {stats['error_patterns_found']}")
+                print(f"⚙️ Aprendizado Ativo: {stats['learning_enabled']}")
                 
-            return final_direction, round(confidence, 1), direction
-        else:
-            # Fallback aleatório ponderado
-            direction = "CALL" if random.random() > 0.5 else "PUT"
-            confidence = 70 + random.uniform(0, 20)
-            
-            # ✅ SINAIS NORMAIS - SEM INVERSÃO
-            final_direction = direction
-            logger.info(f"📊 SINAL NORMAL (Random): {direction}")
+                print("\n📈 PARÂMETROS ADAPTATIVOS:")
+                for param, value in stats['adaptive_parameters'].items():
+                    print(f"   {param}: {value:.3f}")
                 
-            return final_direction, round(confidence, 1), direction
-    except:
-        direction = "CALL" if random.random() > 0.5 else "PUT"
-        final_direction = direction
-        return final_direction, 70.0, direction
-
-def extract_features(data):
-    """Extrair dados dos parâmetros recebidos"""
-    current_price = data.get("currentPrice", 1000)
-    volatility = data.get("volatility", 50)
-    
-    # Gerar preços baseados no atual se não fornecidos
-    prices = data.get("lastTicks", [])
-    if not prices:
-        prices = [
-            current_price - random.uniform(0, 5),
-            current_price + random.uniform(0, 5), 
-            current_price - random.uniform(0, 3)
-        ]
-    
-    while len(prices) < 3:
-        prices.append(current_price + random.uniform(-2, 2))
-        
-    return prices[-3:], volatility
-
-def calculate_risk_score(data):
-    """Calcular score de risco sem ML"""
-    martingale_level = data.get("martingaleLevel", 0)
-    today_pnl = data.get("todayPnL", 0)
-    win_rate = data.get("winRate", 50)
-    total_trades = data.get("totalTrades", 0)
-    
-    risk_score = 0
-    risk_level = "low"
-    
-    # Análise Martingale
-    if martingale_level > 6:
-        risk_score += 40
-        risk_level = "high"
-    elif martingale_level > 3:
-        risk_score += 20
-        risk_level = "medium"
-    
-    # Análise P&L
-    if today_pnl < -100:
-        risk_score += 25
-        risk_level = "high"
-    elif today_pnl < -50:
-        risk_score += 10
-        risk_level = "medium" if risk_level == "low" else risk_level
-    
-    # Análise Win Rate
-    if win_rate < 30:
-        risk_score += 20
-        risk_level = "high"
-    elif win_rate < 45:
-        risk_score += 10
-    
-    # Over-trading
-    if total_trades > 50:
-        risk_score += 10
-    
-    return min(risk_score, 100), risk_level
-
-def optimize_duration(data):
-    """Otimizar duração sem ML"""
-    symbol = data.get("symbol", "R_50")
-    volatility = data.get("volatility", 50)
-    market_condition = data.get("marketCondition", "neutral")
-    
-    # Determinar se é índice de volatilidade
-    is_volatility_index = "R_" in symbol or "HZ" in symbol
-    
-    if is_volatility_index:
-        duration_type = "t"
-        if volatility > 70:
-            duration = random.randint(1, 3)
-        elif volatility > 40:
-            duration = random.randint(4, 6)
-        else:
-            duration = random.randint(7, 10)
-    else:
-        if random.random() > 0.3:
-            duration_type = "m"
-            if market_condition == "favorable":
-                duration = random.randint(1, 2)
-            elif market_condition == "unfavorable":
-                duration = random.randint(4, 5)
+                if stats['recent_patterns']:
+                    print("\n🔍 PADRÕES RECENTES:")
+                    for pattern in stats['recent_patterns']:
+                        print(f"   • {pattern['type']}: {pattern['error_rate']:.2f} erro")
+                        print(f"     Condições: {pattern['conditions']}")
+                
+                return stats
             else:
-                duration = random.randint(2, 4)
-        else:
-            duration_type = "t"
-            duration = random.randint(3, 8)
+                print(f"❌ Erro ao obter stats: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro na requisição: {e}")
+            return None
     
-    # Limites de segurança
-    if duration_type == "t":
-        duration = max(1, min(10, duration))
-    else:
-        duration = max(1, min(5, duration))
-    
-    confidence = 75 + random.uniform(0, 20)
-    
-    return {
-        "type": duration_type,
-        "duration_type": "ticks" if duration_type == "t" else "minutes",
-        "value": duration,
-        "duration": duration,
-        "confidence": round(confidence, 1),
-        "reasoning": f"Análise técnica para {symbol}: {duration}{duration_type} baseado em volatilidade {volatility:.1f}%"
-    }
-
-def manage_position(data):
-    """Gestão de posição sem ML"""
-    current_balance = data.get("currentBalance", 1000)
-    today_pnl = data.get("todayPnL", 0)
-    martingale_level = data.get("martingaleLevel", 0)
-    current_stake = data.get("currentStake", 1)
-    win_rate = data.get("winRate", 50)
-    
-    action = "continue"
-    recommended_stake = current_stake
-    should_pause = False
-    pause_duration = 0
-    
-    # Verificar se deve pausar
-    if today_pnl < -200 or martingale_level > 7:
-        should_pause = True
-        action = "pause"
-        pause_duration = random.randint(60000, 180000)
-    elif today_pnl < -100 or martingale_level > 5:
-        if random.random() > 0.7:
-            should_pause = True
-            action = "pause"
-            pause_duration = random.randint(30000, 90000)
-    
-    # Ajustar stake se não em Martingale
-    if not should_pause and martingale_level == 0:
-        if win_rate > 70:
-            recommended_stake = min(50, current_stake * 1.15)
-        elif win_rate < 30:
-            recommended_stake = max(0.35, current_stake * 0.8)
-        elif today_pnl < -50:
-            recommended_stake = max(0.35, current_stake * 0.9)
-    
-    message = ""
-    if should_pause:
-        message = f"PAUSA RECOMENDADA - {pause_duration//1000}s - Alto risco detectado"
-    elif recommended_stake != current_stake:
-        message = f"Stake ajustado: ${current_stake:.2f} → ${recommended_stake:.2f}"
-    else:
-        message = "Continuar operação - Parâmetros adequados"
-    
-    return {
-        "action": action,
-        "recommendedStake": round(recommended_stake, 2),
-        "shouldPause": should_pause,
-        "pauseDuration": pause_duration,
-        "riskLevel": "high" if martingale_level > 5 else "medium" if today_pnl < -50 else "low",
-        "message": message,
-        "reasoning": "Pausa preventiva" if should_pause else "Parâmetros adequados"
-    }
-
-# ===============================
-# ROTAS DA API
-# ===============================
-
-@app.route("/")
-def home():
-    return jsonify({
-        "status": "🤖 IA Trading Bot API Online",
-        "version": "2.1.0 - Sinais Normais",
-        "description": "API de IA com Sinais Normais",
-        "model": "Technical Analysis Engine",
-        "signal_mode": "NORMAL",
-        "inversion_active": False,
-        "endpoints": {
-            "analyze": "POST /analyze - Análise de mercado",
-            "signal": "POST /signal - Sinais de trading normais",
-            "risk": "POST /risk - Avaliação de risco",
-            "optimal-duration": "POST /optimal-duration - Duração ótima",
-            "management": "POST /management - Gestão de posição"
-        },
-        "stats": {
-            "total_predictions": performance_stats['total_trades'],
-            "accuracy": "Dynamic Analysis",
-            "uptime": "99.9%"
-        },
-        "timestamp": datetime.datetime.now().isoformat(),
-        "source": "Python Simplified API with Normal Signals"
-    })
-
-@app.route("/analyze", methods=["POST", "OPTIONS"])
-@app.route("/analysis", methods=["POST", "OPTIONS"])
-@app.route("/market-analysis", methods=["POST", "OPTIONS"])
-@app.route("/advanced-analysis", methods=["POST", "OPTIONS"])
-def analyze_market():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        prices, volatility = extract_features(data)
-        
-        direction, confidence, _ = analyze_technical_pattern(prices)
-        
-        # Análise adicional
-        symbol = data.get("symbol", "R_50")
-        
-        # Determinar tendência baseada na direção
-        if confidence > 80:
-            trend = "bullish" if direction == "CALL" else "bearish"
-        else:
-            trend = "neutral"
-        
-        return jsonify({
+    def generate_signal_with_learning(self, symbol="R_50", volatility=50):
+        """Gerar sinal com sistema de aprendizado"""
+        signal_data = {
             "symbol": symbol,
-            "trend": trend,
-            "confidence": confidence,
-            "volatility": round(volatility, 1),
-            "direction": direction,
-            "inverted": False,
-            "message": f"Análise NORMAL para {symbol}: {direction} recomendado",
-            "recommendation": f"{direction} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
-            "factors": {
-                "technical_analysis": direction,
-                "market_volatility": round(volatility, 1),
-                "confidence_level": confidence,
-                "inversion_mode": "NORMAL"
-            },
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Simplificada - Technical Analysis (NORMAL)"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em analyze: {e}")
-        return jsonify({"error": "Erro na análise", "message": str(e)}), 500
-
-@app.route("/signal", methods=["POST", "OPTIONS"])
-@app.route("/trading-signal", methods=["POST", "OPTIONS"])
-@app.route("/get-signal", methods=["POST", "OPTIONS"])
-@app.route("/smart-signal", methods=["POST", "OPTIONS"])
-@app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
-@app.route("/prediction", methods=["POST", "OPTIONS"])
-def generate_signal():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        prices, volatility = extract_features(data)
-        
-        direction, confidence, _ = analyze_technical_pattern(prices)
-        
-        # Dados do sinal
-        current_price = data.get("currentPrice", 1000)
-        symbol = data.get("symbol", "R_50")
-        win_rate = data.get("winRate", 50)
-        
-        # Ajustar confiança baseada em performance
-        if win_rate > 60:
-            confidence = min(confidence + 3, 95)
-        elif win_rate < 40:
-            confidence = max(confidence - 5, 65)
-        
-        # ✅ INFORMAÇÕES SOBRE SINAIS NORMAIS
-        reasoning = f"Análise técnica para {symbol} - baseado em padrões de preço"
-        
-        return jsonify({
-            "direction": direction,
-            "confidence": confidence,
-            "reasoning": reasoning,
-            "entry_price": current_price,
-            "strength": "forte" if confidence > 85 else "moderado" if confidence > 75 else "fraco",
-            "timeframe": "5m",
-            "inverted": False,
-            "inversion_status": "INATIVO",
-            "factors": {
-                "technical_model": "Pattern Analysis",
-                "volatility_factor": volatility,
-                "historical_performance": win_rate,
-                "signal_inversion": "INATIVO"
-            },
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Simplificada - Signal Generator (NORMAL)"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em signal: {e}")
-        return jsonify({"error": "Erro na geração de sinal", "message": str(e)}), 500
-
-@app.route("/risk", methods=["POST", "OPTIONS"])
-@app.route("/risk-assessment", methods=["POST", "OPTIONS"])
-@app.route("/evaluate-risk", methods=["POST", "OPTIONS"])
-def assess_risk():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        risk_score, risk_level = calculate_risk_score(data)
-        
-        # Mensagens baseadas no nível de risco
-        messages = {
-            "high": "ALTO RISCO - Intervenção necessária",
-            "medium": "Risco moderado - Cautela recomendada", 
-            "low": "Risco controlado"
+            "currentPrice": 1000 + (volatility - 50) * 2,  # Simular preço baseado na volatilidade
+            "volatility": volatility,
+            "winRate": 55,  # Simular win rate
+            "martingaleLevel": 0,
+            "marketCondition": "neutral",
+            "lastTicks": [999, 1001, 1000]
         }
         
-        recommendations = {
-            "high": "Pare imediatamente e revise estratégia",
-            "medium": "Reduza frequency e monitore de perto",
-            "low": "Continue operando com disciplina"
+        try:
+            response = requests.post(f"{self.api_url}/signal", 
+                                   headers=self.headers, 
+                                   json=signal_data)
+            
+            if response.status_code == 200:
+                signal = response.json()
+                print(f"\n🎯 SINAL GERADO PARA {symbol}")
+                print("=" * 40)
+                print(f"📍 Direção: {signal['direction']}")
+                print(f"🎲 Confiança: {signal['confidence']}%")
+                print(f"🆔 Signal ID: {signal['signal_id']}")
+                print(f"💡 Reasoning: {signal['reasoning']}")
+                print(f"🧠 Learning Ativo: {signal['learning_active']}")
+                
+                if signal.get('confidence_adjustments'):
+                    print(f"⚙️ Ajustes Aplicados: {len(signal['confidence_adjustments'])}")
+                    for adjustment in signal['confidence_adjustments']:
+                        print(f"   • {adjustment}")
+                
+                return signal
+            else:
+                print(f"❌ Erro ao gerar sinal: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro na requisição: {e}")
+            return None
+    
+    def send_feedback(self, signal_id, result, pnl=0):
+        """Enviar feedback de resultado"""
+        feedback_data = {
+            "signal_id": signal_id,
+            "result": result,  # 1 para win, 0 para loss
+            "pnl": pnl,
+            "direction": "CALL"  # Pode pegar do sinal original
         }
         
-        return jsonify({
-            "level": risk_level,
-            "score": risk_score,
-            "message": messages[risk_level],
-            "recommendation": recommendations[risk_level],
-            "factors": {
-                "martingale_level": data.get("martingaleLevel", 0),
-                "today_pnl": data.get("todayPnL", 0),
-                "win_rate": data.get("winRate", 50),
-                "total_trades": data.get("totalTrades", 0)
-            },
-            "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
-            "signal_mode": "NORMAL",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Simplificada - Risk Assessment"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em risk: {e}")
-        return jsonify({"error": "Erro na avaliação de risco", "message": str(e)}), 500
-
-@app.route("/optimal-duration", methods=["POST", "OPTIONS"])
-@app.route("/duration", methods=["POST", "OPTIONS"])
-@app.route("/timeframe", methods=["POST", "OPTIONS"])
-@app.route("/best-duration", methods=["POST", "OPTIONS"])
-def get_optimal_duration():
-    if request.method == "OPTIONS":
-        return '', 200
+        try:
+            response = requests.post(f"{self.api_url}/feedback", 
+                                   headers=self.headers, 
+                                   json=feedback_data)
+            
+            if response.status_code == 200:
+                feedback = response.json()
+                result_text = "WIN ✅" if result == 1 else "LOSS ❌"
+                print(f"\n🔄 FEEDBACK ENVIADO: {result_text}")
+                print("=" * 30)
+                print(f"🆔 Signal ID: {signal_id}")
+                print(f"📊 Total Trades: {feedback['total_trades']}")
+                print(f"🎯 Accuracy: {feedback['accuracy']}")
+                print(f"🧠 Learning: {feedback['learning_active']}")
+                print(f"📈 Análise: {feedback['patterns_analysis']}")
+                
+                return feedback
+            else:
+                print(f"❌ Erro ao enviar feedback: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro na requisição: {e}")
+            return None
     
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
+    def test_risk_assessment(self, martingale_level=0, today_pnl=0):
+        """Testar avaliação de risco adaptativa"""
+        risk_data = {
+            "currentBalance": 1000,
+            "todayPnL": today_pnl,
+            "martingaleLevel": martingale_level,
+            "currentStake": 10,
+            "winRate": 45,
+            "totalTrades": 50
+        }
+        
+        try:
+            response = requests.post(f"{self.api_url}/risk", 
+                                   headers=self.headers, 
+                                   json=risk_data)
+            
+            if response.status_code == 200:
+                risk = response.json()
+                print(f"\n⚠️ AVALIAÇÃO DE RISCO")
+                print("=" * 30)
+                print(f"🔴 Nível: {risk['level'].upper()}")
+                print(f"📊 Score: {risk['score']}/100")
+                print(f"💬 Mensagem: {risk['message']}")
+                print(f"💡 Recomendação: {risk['recommendation']}")
+                print(f"⚙️ Risk Factor: {risk['adaptive_risk_factor']:.3f}")
+                
+                return risk
+            else:
+                print(f"❌ Erro na avaliação: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro na requisição: {e}")
+            return None
     
-    try:
-        data = request.get_json() or {}
-        duration_data = optimize_duration(data)
+    def simulate_learning_cycle(self, num_signals=10):
+        """Simular um ciclo completo de aprendizado"""
+        print("🚀 INICIANDO SIMULAÇÃO DE APRENDIZADO")
+        print("=" * 50)
         
-        return jsonify({
-            **duration_data,
-            "signal_mode": "NORMAL",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Simplificada - Duration Optimizer"
-        })
+        # 1. Ver stats iniciais
+        initial_stats = self.get_learning_stats()
         
-    except Exception as e:
-        logger.error(f"Erro em optimal-duration: {e}")
-        return jsonify({"error": "Erro na otimização de duração", "message": str(e)}), 500
-
-@app.route("/management", methods=["POST", "OPTIONS"])
-@app.route("/auto-manage", methods=["POST", "OPTIONS"])
-@app.route("/position-size", methods=["POST", "OPTIONS"])
-@app.route("/risk-management", methods=["POST", "OPTIONS"])
-def position_management():
-    if request.method == "OPTIONS":
-        return '', 200
+        signals_generated = []
+        
+        # 2. Gerar vários sinais
+        symbols = ["R_50", "R_75", "R_100"]
+        volatilities = [30, 50, 70, 85]
+        
+        for i in range(num_signals):
+            symbol = symbols[i % len(symbols)]
+            volatility = volatilities[i % len(volatilities)]
+            
+            print(f"\n--- SINAL {i+1}/{num_signals} ---")
+            signal = self.generate_signal_with_learning(symbol, volatility)
+            
+            if signal:
+                signals_generated.append(signal)
+                
+                # Simular resultado (70% win rate para demonstração)
+                import random
+                result = 1 if random.random() < 0.7 else 0
+                pnl = 0.85 if result == 1 else -1.0
+                
+                # Enviar feedback
+                feedback = self.send_feedback(signal['signal_id'], result, pnl)
+                
+                # Pequena pausa para simular tempo real
+                time.sleep(0.5)
+        
+        # 3. Ver stats finais
+        print(f"\n\n📈 ESTATÍSTICAS FINAIS APÓS {num_signals} SINAIS")
+        print("=" * 50)
+        final_stats = self.get_learning_stats()
+        
+        # 4. Comparar evolução
+        if initial_stats and final_stats:
+            print(f"\n🔄 EVOLUÇÃO DO SISTEMA:")
+            print(f"   Amostras: {initial_stats['total_samples']} → {final_stats['total_samples']}")
+            print(f"   Accuracy: {initial_stats['current_accuracy']}% → {final_stats['current_accuracy']}%")
+            print(f"   Padrões: {initial_stats['error_patterns_found']} → {final_stats['error_patterns_found']}")
+        
+        return signals_generated
     
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
+    def demonstrate_pattern_detection(self):
+        """Demonstrar detecção de padrões enviando sinais problemáticos"""
+        print("🔍 DEMONSTRAÇÃO DE DETECÇÃO DE PADRÕES")
+        print("=" * 50)
+        
+        # Simular sinais ruins para um símbolo específico
+        problem_symbol = "R_75"
+        
+        print(f"📉 Gerando sinais com baixa performance para {problem_symbol}...")
+        
+        for i in range(15):
+            signal = self.generate_signal_with_learning(problem_symbol, 60)
+            if signal:
+                # Simular 80% de loss para criar padrão
+                result = 0 if i < 12 else 1  # 80% loss
+                pnl = -1.0 if result == 0 else 0.85
+                
+                self.send_feedback(signal['signal_id'], result, pnl)
+                print(f"   Sinal {i+1}: {'LOSS' if result == 0 else 'WIN'}")
+        
+        print(f"\n🧠 Aguardando detecção de padrão...")
+        time.sleep(2)
+        
+        # Verificar se padrão foi detectado
+        stats = self.get_learning_stats()
+        if stats and stats['recent_patterns']:
+            print(f"✅ Padrão detectado para {problem_symbol}!")
+        
+        # Gerar novo sinal para ver adaptação
+        print(f"\n🎯 Gerando novo sinal para {problem_symbol} (deve ter confiança reduzida):")
+        adapted_signal = self.generate_signal_with_learning(problem_symbol, 60)
+        
+        return adapted_signal
+
+def main():
+    """Função principal de demonstração"""
+    demo = TradingLearningDemo()
     
-    try:
-        data = request.get_json() or {}
-        management_data = manage_position(data)
-        
-        return jsonify({
-            **management_data,
-            "signal_mode": "NORMAL",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Simplificada - Position Management"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em management: {e}")
-        return jsonify({"error": "Erro no gerenciamento", "message": str(e)}), 500
-
-@app.route("/feedback", methods=["POST", "OPTIONS"])
-def receive_feedback():
-    """Endpoint para receber feedback"""
-    if request.method == "OPTIONS":
-        return '', 200
+    print("🤖 DEMO DO SISTEMA DE APRENDIZADO TRADING API")
+    print("=" * 60)
     
-    try:
-        data = request.get_json() or {}
+    while True:
+        print("\n📋 ESCOLHA UMA OPÇÃO:")
+        print("1. Ver estatísticas de aprendizado")
+        print("2. Gerar sinal com aprendizado")
+        print("3. Testar avaliação de risco")
+        print("4. Simular ciclo de aprendizado")
+        print("5. Demonstrar detecção de padrões")
+        print("6. Sair")
         
-        # Atualizar stats simples
-        result = data.get("result", 0)
-        direction = data.get("direction", "CALL")
+        choice = input("\n👉 Digite sua escolha (1-6): ").strip()
         
-        performance_stats['total_trades'] += 1
-        if result == 1:
-            performance_stats['won_trades'] += 1
+        if choice == "1":
+            demo.get_learning_stats()
+            
+        elif choice == "2":
+            symbol = input("Digite o símbolo (R_50): ").strip() or "R_50"
+            try:
+                volatility = float(input("Digite a volatilidade (50): ") or "50")
+            except:
+                volatility = 50
+            demo.generate_signal_with_learning(symbol, volatility)
+            
+        elif choice == "3":
+            try:
+                martingale = int(input("Nível Martingale (0): ") or "0")
+                pnl = float(input("P&L hoje (0): ") or "0")
+            except:
+                martingale, pnl = 0, 0
+            demo.test_risk_assessment(martingale, pnl)
+            
+        elif choice == "4":
+            try:
+                num_signals = int(input("Quantos sinais simular (10): ") or "10")
+            except:
+                num_signals = 10
+            demo.simulate_learning_cycle(num_signals)
+            
+        elif choice == "5":
+            demo.demonstrate_pattern_detection()
+            
+        elif choice == "6":
+            print("👋 Saindo...")
+            break
+            
+        else:
+            print("❌ Opção inválida!")
         
-        accuracy = (performance_stats['won_trades'] / max(performance_stats['total_trades'], 1) * 100)
-        
-        logger.info(f"Feedback recebido (NORMAL): {direction} -> {'WIN' if result == 1 else 'LOSS'}")
-        
-        return jsonify({
-            "message": "Feedback recebido com sucesso",
-            "total_trades": performance_stats['total_trades'],
-            "accuracy": f"{accuracy:.1f}%",
-            "signal_mode": "NORMAL",
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em feedback: {e}")
-        return jsonify({"error": "Erro no feedback", "message": str(e)}), 500
-
-# Middleware de erro global
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        "error": "Endpoint não encontrado",
-        "available_endpoints": ["/analyze", "/signal", "/risk", "/optimal-duration", "/management"],
-        "signal_mode": "NORMAL",
-        "timestamp": datetime.datetime.now().isoformat()
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.error(f"Erro interno: {error}")
-    return jsonify({
-        "error": "Erro interno do servidor",
-        "message": "Entre em contato com o suporte",
-        "timestamp": datetime.datetime.now().isoformat()
-    }), 500
+        input("\n⏸️ Pressione Enter para continuar...")
 
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando IA Trading Bot API Simplificada")
-    logger.info(f"🔑 API Key: {VALID_API_KEY}")
-    logger.info("📊 Sinais NORMAIS ativados - sem inversão")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    main()
+
+# Exemplo de uso direto (sem menu interativo)
+def quick_test():
+    """Teste rápido do sistema"""
+    demo = TradingLearningDemo()
+    
+    # 1. Ver stats
+    demo.get_learning_stats()
+    
+    # 2. Gerar sinal
+    signal = demo.generate_signal_with_learning("R_50", 45)
+    
+    # 3. Simular resultado e feedback
+    if signal:
+        result = 1  # WIN
+        demo.send_feedback(signal['signal_id'], result, 0.85)
+    
+    # 4. Ver stats novamente
+    demo.get_learning_stats()
+
+# Descomente para teste rápido:
+# quick_test()
