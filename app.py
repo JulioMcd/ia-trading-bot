@@ -5,11 +5,10 @@ import datetime
 import logging
 import sqlite3
 import json
-import numpy as np
-from collections import defaultdict, deque
 import threading
 import time
 import os
+from collections import defaultdict, deque
 
 app = Flask(__name__)
 CORS(app)
@@ -24,19 +23,22 @@ VALID_API_KEY = "bhcOGajqbfFfolT"
 # ✅ CONFIGURAÇÃO DE INVERSÃO DE SINAIS - DESATIVADA
 INVERT_SIGNALS = False  # Sinais normais ativados
 
+# Configuração para Render - usar diretório persistente se disponível
+DB_PATH = os.environ.get('DB_PATH', '/tmp/trading_data.db')
+
 # Configurações do sistema de aprendizado
 LEARNING_CONFIG = {
-    'min_samples_for_learning': 20,  # Mínimo de amostras para começar a aprender
-    'adaptation_rate': 0.1,          # Taxa de adaptação dos parâmetros
-    'error_pattern_window': 50,      # Janela para análise de padrões de erro
-    'confidence_adjustment_factor': 0.05,  # Fator de ajuste de confiança
-    'learning_enabled': True,        # Sistema de aprendizado ativo
+    'min_samples_for_learning': int(os.environ.get('MIN_SAMPLES', '20')),
+    'adaptation_rate': float(os.environ.get('ADAPTATION_RATE', '0.1')),
+    'error_pattern_window': int(os.environ.get('PATTERN_WINDOW', '50')),
+    'confidence_adjustment_factor': float(os.environ.get('CONFIDENCE_FACTOR', '0.05')),
+    'learning_enabled': os.environ.get('LEARNING_ENABLED', 'true').lower() == 'true',
 }
 
 class TradingDatabase:
     """Classe para gerenciar o banco de dados SQLite"""
     
-    def __init__(self, db_path='trading_data.db'):
+    def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
         self.init_database()
         
@@ -248,7 +250,7 @@ class TradingDatabase:
         conn.close()
 
 class LearningEngine:
-    """Motor de aprendizado baseado em erros"""
+    """Motor de aprendizado baseado em erros - Versão Pure Python"""
     
     def __init__(self, database):
         self.db = database
@@ -705,7 +707,7 @@ learning_thread = threading.Thread(target=background_learning_task, daemon=True)
 learning_thread.start()
 
 # ===============================
-# ROTAS DA API (Atualizadas)
+# ROTAS DA API
 # ===============================
 
 @app.route("/")
@@ -717,12 +719,14 @@ def home():
     
     return jsonify({
         "status": "🤖 IA Trading Bot API Online - Sistema de Aprendizado Ativo",
-        "version": "3.0.0 - ML Learning System",
+        "version": "3.0.0 - ML Learning System (Pure Python)",
         "description": "API com Sistema de Aprendizado Baseado em Erros",
         "model": "Adaptive Learning Engine",
         "signal_mode": "NORMAL + LEARNING",
         "inversion_active": False,
         "learning_active": LEARNING_CONFIG['learning_enabled'],
+        "python_version": "Compatible with Python 3.13",
+        "dependencies": "Pure Python - No NumPy required",
         "endpoints": {
             "analyze": "POST /analyze - Análise adaptativa de mercado",
             "signal": "POST /signal - Sinais com aprendizado",
@@ -740,7 +744,7 @@ def home():
         },
         "learning_config": LEARNING_CONFIG,
         "timestamp": datetime.datetime.now().isoformat(),
-        "source": "Python ML API with Error Learning System"
+        "source": "Python Pure API with Error Learning System"
     })
 
 @app.route("/learning-stats", methods=["GET"])
@@ -796,65 +800,6 @@ def get_learning_stats():
     except Exception as e:
         logger.error(f"Erro em learning-stats: {e}")
         return jsonify({"error": "Erro ao obter estatísticas", "message": str(e)}), 500
-
-@app.route("/analyze", methods=["POST", "OPTIONS"])
-@app.route("/analysis", methods=["POST", "OPTIONS"])
-@app.route("/market-analysis", methods=["POST", "OPTIONS"])
-@app.route("/advanced-analysis", methods=["POST", "OPTIONS"])
-def analyze_market():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        prices, volatility = extract_features(data)
-        
-        # Preparar dados para aprendizado
-        learning_data = {
-            'symbol': data.get("symbol", "R_50"),
-            'volatility': volatility,
-            'market_condition': data.get("marketCondition", "neutral")
-        }
-        
-        direction, confidence, _, adjustments = analyze_technical_pattern(prices, learning_data)
-        
-        # Análise adicional
-        symbol = data.get("symbol", "R_50")
-        
-        # Determinar tendência baseada na direção
-        if confidence > 80:
-            trend = "bullish" if direction == "CALL" else "bearish"
-        else:
-            trend = "neutral"
-        
-        return jsonify({
-            "symbol": symbol,
-            "trend": trend,
-            "confidence": confidence,
-            "volatility": round(volatility, 1),
-            "direction": direction,
-            "inverted": False,
-            "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "confidence_adjustments": adjustments,
-            "message": f"Análise ADAPTATIVA para {symbol}: {direction} (confiança ajustada)",
-            "recommendation": f"{direction} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
-            "factors": {
-                "technical_analysis": direction,
-                "market_volatility": round(volatility, 1),
-                "confidence_level": confidence,
-                "inversion_mode": "NORMAL",
-                "learning_adjustments": len(adjustments)
-            },
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA com Sistema de Aprendizado - Technical Analysis"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em analyze: {e}")
-        return jsonify({"error": "Erro na análise", "message": str(e)}), 500
 
 @app.route("/signal", methods=["POST", "OPTIONS"])
 @app.route("/trading-signal", methods=["POST", "OPTIONS"])
@@ -938,121 +883,12 @@ def generate_signal():
                 "learning_adjustments": len(adjustments)
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA com Sistema de Aprendizado - Signal Generator"
+            "source": "IA Pure Python com Sistema de Aprendizado"
         })
         
     except Exception as e:
         logger.error(f"Erro em signal: {e}")
         return jsonify({"error": "Erro na geração de sinal", "message": str(e)}), 500
-
-@app.route("/risk", methods=["POST", "OPTIONS"])
-@app.route("/risk-assessment", methods=["POST", "OPTIONS"])
-@app.route("/evaluate-risk", methods=["POST", "OPTIONS"])
-def assess_risk():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        risk_score, risk_level = calculate_risk_score(data)
-        
-        # Obter parâmetros adaptativos para mostrar no retorno
-        risk_factor = db.get_adaptive_parameter('risk_factor', 1.0)
-        
-        # Mensagens baseadas no nível de risco
-        messages = {
-            "high": "ALTO RISCO - Intervenção necessária (Sistema Adaptativo)",
-            "medium": "Risco moderado - Cautela recomendada (Ajustes ativos)", 
-            "low": "Risco controlado (Parâmetros otimizados)"
-        }
-        
-        recommendations = {
-            "high": "Pare imediatamente e revise estratégia",
-            "medium": "Reduza frequency e monitore de perto",
-            "low": "Continue operando com disciplina"
-        }
-        
-        return jsonify({
-            "level": risk_level,
-            "score": risk_score,
-            "message": messages[risk_level],
-            "recommendation": recommendations[risk_level],
-            "adaptive_risk_factor": risk_factor,
-            "factors": {
-                "martingale_level": data.get("martingaleLevel", 0),
-                "today_pnl": data.get("todayPnL", 0),
-                "win_rate": data.get("winRate", 50),
-                "total_trades": data.get("totalTrades", 0),
-                "risk_factor_applied": risk_factor
-            },
-            "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
-            "signal_mode": "NORMAL + LEARNING",
-            "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA com Sistema de Aprendizado - Risk Assessment"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em risk: {e}")
-        return jsonify({"error": "Erro na avaliação de risco", "message": str(e)}), 500
-
-@app.route("/optimal-duration", methods=["POST", "OPTIONS"])
-@app.route("/duration", methods=["POST", "OPTIONS"])
-@app.route("/timeframe", methods=["POST", "OPTIONS"])
-@app.route("/best-duration", methods=["POST", "OPTIONS"])
-def get_optimal_duration():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        duration_data = optimize_duration(data)
-        
-        return jsonify({
-            **duration_data,
-            "signal_mode": "NORMAL + LEARNING",
-            "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "adaptive_optimization": True,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA com Sistema de Aprendizado - Duration Optimizer"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em optimal-duration: {e}")
-        return jsonify({"error": "Erro na otimização de duração", "message": str(e)}), 500
-
-@app.route("/management", methods=["POST", "OPTIONS"])
-@app.route("/auto-manage", methods=["POST", "OPTIONS"])
-@app.route("/position-size", methods=["POST", "OPTIONS"])
-@app.route("/risk-management", methods=["POST", "OPTIONS"])
-def position_management():
-    if request.method == "OPTIONS":
-        return '', 200
-    
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        data = request.get_json() or {}
-        management_data = manage_position(data)
-        
-        return jsonify({
-            **management_data,
-            "signal_mode": "NORMAL + LEARNING",
-            "learning_active": LEARNING_CONFIG['learning_enabled'],
-            "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA com Sistema de Aprendizado - Position Management"
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro em management: {e}")
-        return jsonify({"error": "Erro no gerenciamento", "message": str(e)}), 500
 
 @app.route("/feedback", methods=["POST", "OPTIONS"])
 def receive_feedback():
@@ -1100,14 +936,172 @@ def receive_feedback():
             "learning_active": LEARNING_CONFIG['learning_enabled'],
             "patterns_analysis": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "Sistema de Aprendizado Integrado"
+            "source": "Sistema de Aprendizado Pure Python"
         })
         
     except Exception as e:
         logger.error(f"Erro em feedback: {e}")
         return jsonify({"error": "Erro no feedback", "message": str(e)}), 500
 
-# Middleware de erro global (atualizado)
+# Incluir outros endpoints necessários (analyze, risk, optimal-duration, management)
+@app.route("/analyze", methods=["POST", "OPTIONS"])
+def analyze_market():
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        prices, volatility = extract_features(data)
+        
+        # Preparar dados para aprendizado
+        learning_data = {
+            'symbol': data.get("symbol", "R_50"),
+            'volatility': volatility,
+            'market_condition': data.get("marketCondition", "neutral")
+        }
+        
+        direction, confidence, _, adjustments = analyze_technical_pattern(prices, learning_data)
+        
+        # Análise adicional
+        symbol = data.get("symbol", "R_50")
+        
+        # Determinar tendência baseada na direção
+        if confidence > 80:
+            trend = "bullish" if direction == "CALL" else "bearish"
+        else:
+            trend = "neutral"
+        
+        return jsonify({
+            "symbol": symbol,
+            "trend": trend,
+            "confidence": confidence,
+            "volatility": round(volatility, 1),
+            "direction": direction,
+            "inverted": False,
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "confidence_adjustments": adjustments,
+            "message": f"Análise ADAPTATIVA para {symbol}: {direction} (confiança ajustada)",
+            "recommendation": f"{direction} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
+            "factors": {
+                "technical_analysis": direction,
+                "market_volatility": round(volatility, 1),
+                "confidence_level": confidence,
+                "inversion_mode": "NORMAL",
+                "learning_adjustments": len(adjustments)
+            },
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em analyze: {e}")
+        return jsonify({"error": "Erro na análise", "message": str(e)}), 500
+
+@app.route("/risk", methods=["POST", "OPTIONS"])
+def assess_risk():
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        risk_score, risk_level = calculate_risk_score(data)
+        
+        # Obter parâmetros adaptativos para mostrar no retorno
+        risk_factor = db.get_adaptive_parameter('risk_factor', 1.0)
+        
+        # Mensagens baseadas no nível de risco
+        messages = {
+            "high": "ALTO RISCO - Intervenção necessária (Sistema Adaptativo)",
+            "medium": "Risco moderado - Cautela recomendada (Ajustes ativos)", 
+            "low": "Risco controlado (Parâmetros otimizados)"
+        }
+        
+        recommendations = {
+            "high": "Pare imediatamente e revise estratégia",
+            "medium": "Reduza frequency e monitore de perto",
+            "low": "Continue operando com disciplina"
+        }
+        
+        return jsonify({
+            "level": risk_level,
+            "score": risk_score,
+            "message": messages[risk_level],
+            "recommendation": recommendations[risk_level],
+            "adaptive_risk_factor": risk_factor,
+            "factors": {
+                "martingale_level": data.get("martingaleLevel", 0),
+                "today_pnl": data.get("todayPnL", 0),
+                "win_rate": data.get("winRate", 50),
+                "total_trades": data.get("totalTrades", 0),
+                "risk_factor_applied": risk_factor
+            },
+            "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
+            "signal_mode": "NORMAL + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em risk: {e}")
+        return jsonify({"error": "Erro na avaliação de risco", "message": str(e)}), 500
+
+@app.route("/optimal-duration", methods=["POST", "OPTIONS"])
+def get_optimal_duration():
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        duration_data = optimize_duration(data)
+        
+        return jsonify({
+            **duration_data,
+            "signal_mode": "NORMAL + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "adaptive_optimization": True,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em optimal-duration: {e}")
+        return jsonify({"error": "Erro na otimização de duração", "message": str(e)}), 500
+
+@app.route("/management", methods=["POST", "OPTIONS"])
+def position_management():
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        management_data = manage_position(data)
+        
+        return jsonify({
+            **management_data,
+            "signal_mode": "NORMAL + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em management: {e}")
+        return jsonify({"error": "Erro no gerenciamento", "message": str(e)}), 500
+
+# Middleware de erro global
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -1129,9 +1123,12 @@ def internal_error(error):
     }), 500
 
 if __name__ == "__main__":
+    # Configuração para Render
+    port = int(os.environ.get('PORT', 5000))
     logger.info("🚀 Iniciando IA Trading Bot API com Sistema de Aprendizado")
     logger.info(f"🔑 API Key: {VALID_API_KEY}")
     logger.info("🧠 Sistema de Aprendizado: ATIVADO")
     logger.info("📊 Sinais NORMAIS + Adaptação Inteligente")
-    logger.info(f"📈 Banco de dados: {db.db_path}")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    logger.info(f"📈 Banco de dados: {DB_PATH}")
+    logger.info("🐍 Pure Python - Compatível com Python 3.13")
+    app.run(host="0.0.0.0", port=port, debug=False)
