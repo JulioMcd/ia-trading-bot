@@ -202,8 +202,464 @@ class AdvancedTradingDatabase:
             )
         ''')
         
-        conn.commit()
-        conn.close()
+    def adapt_confidence(self, signal_data):
+        """Adaptar confiança usando MÚLTIPLAS técnicas de aprendizado"""
+        base_confidence = signal_data.get('confidence', 70)
+        adjustments = []
+        total_adjustment = 0
+        
+        # 1. Q-Learning adjustment
+        if LEARNING_CONFIG['reinforcement_learning']:
+            q_direction, q_confidence = self.get_q_learning_signal(signal_data)
+            if q_direction and q_confidence > 0.6:
+                q_adjustment = (q_confidence - 0.5) * 20  # Convert to confidence adjustment
+                if q_direction == signal_data.get('direction'):
+                    adjustments.append(('q_learning_boost', q_adjustment))
+                    total_adjustment += q_adjustment
+                else:
+                    adjustments.append(('q_learning_conflict', -q_adjustment))
+                    total_adjustment -= q_adjustment
+        
+        # 2. Temporal adjustment
+        temporal_adj, temporal_reason = self.get_temporal_adjustment(signal_data)
+        if temporal_adj != 0:
+            adjustments.append((temporal_reason, temporal_adj))
+            total_adjustment += temporal_adj
+        
+        # 3. Pattern-based adjustments (existing logic enhanced)
+        error_patterns = self.get_error_patterns()
+        for pattern in error_patterns:
+            pattern_type = pattern[1]
+            conditions = json.loads(pattern[2])
+            error_rate = pattern[3]
+            
+            pattern_applies = False
+            
+            if pattern_type.startswith('volatility_'):
+                vol = signal_data.get('volatility', 50)
+                if 'min_vol' in conditions and 'max_vol' in conditions:
+                    if conditions['min_vol'] <= vol < conditions['max_vol']:
+                        pattern_applies = True
+            
+            elif pattern_type.startswith('session_'):
+                current_hour = datetime.datetime.now().hour
+                current_session = self._determine_session(current_hour)
+                if conditions.get('market_session') == current_session:
+                    pattern_applies = True
+            
+            elif pattern_type.startswith('martingale_'):
+                if signal_data.get('martingale_level', 0) == conditions.get('martingale_level'):
+                    pattern_applies = True
+            
+            if pattern_applies:
+                pattern_adjustment = -error_rate * 25  # Stronger adjustment for learned patterns
+                adjustments.append((pattern_type, pattern_adjustment))
+                total_adjustment += pattern_adjustment
+        
+        # 4. Sequence-based adjustment
+        if len(self.sequence_memory) >= 3:
+            recent_results = [t.get('result', 0) for t in list(self.sequence_memory)[-3:] if 'result' in t]
+            if len(recent_results) == 3:
+                if sum(recent_results) == 0:  # 3 losses in a row
+                    adjustments.append(('sequence_losing_streak', -10))
+                    total_adjustment -= 10
+                elif sum(recent_results) == 3:  # 3 wins in a row
+                    adjustments.append(('sequence_winning_streak', 5))
+                    total_adjustment += 5
+        
+        # Apply adjustments with dampening
+        adapted_confidence = base_confidence + (total_adjustment * 0.7)  # Dampen aggressive adjustments
+        adapted_confidence = max(50, min(95, adapted_confidence))
+        
+        if adjustments:
+            logger.info(f"🧠 Confiança AVANÇADA: {base_confidence:.1f} → {adapted_confidence:.1f}")
+            logger.info(f"   Ajustes aplicados: {adjustments}")
+        
+        return adapted_confidence, adjustments
+    
+    def get_q_learning_signal(self, signal_data):
+        """Obter sinal baseado em Q-Learning"""
+        if not LEARNING_CONFIG['reinforcement_learning']:
+            return None, 0.0
+            
+        state_hash, state_desc = self.create_state_representation(signal_data)
+        return self.db.get_q_learning_action(state_hash)
+    
+    def create_state_representation(self, signal_data):
+        """Criar representação de estado para Q-Learning"""
+        symbol = signal_data.get('symbol', 'R_50')
+        volatility_bucket = int(signal_data.get('volatility', 50) // 10) * 10
+        hour = datetime.datetime.now().hour
+        
+        state_hash = f"{symbol}_{volatility_bucket}_{hour}"
+        state_description = f"Symbol:{symbol}, Vol:{volatility_bucket}, Hour:{hour}"
+        
+        return state_hash, state_description
+    
+    def get_temporal_adjustment(self, signal_data):
+        """Obter ajuste baseado em análise temporal"""
+        if not LEARNING_CONFIG['temporal_learning']:
+            return 0.0, "temporal_disabled"
+        
+        now = datetime.datetime.now()
+        hour = now.hour
+        day = now.weekday()
+        symbol = signal_data.get('symbol', 'R_50')
+        direction = signal_data.get('direction', 'CALL')
+        
+        # Obter performance temporal
+        success_rate, total_trades = self.db.get_temporal_performance(hour, day, symbol, direction)
+        
+        if total_trades >= 5:
+            # Ajustar confiança baseado na performance temporal
+            if success_rate > 0.65:
+                adjustment = 10  # Horário favorável
+            elif success_rate < 0.35:
+                adjustment = -15  # Horário desfavorável
+            else:
+                adjustment = 0
+                
+            return adjustment, f"temporal_pattern_h{hour}_d{day}"
+        
+        return 0.0, "temporal_insufficient_data"
+        
+    def analyze_error_patterns(self):
+        """Analisar padrões de erro - VERSÃO AVANÇADA"""
+        recent_data = self.db.get_recent_performance(LEARNING_CONFIG['error_pattern_window'])
+        
+        if len(recent_data) < LEARNING_CONFIG['min_samples_for_learning']:
+            return []
+            
+        patterns_found = []
+        
+        # 1. Análise por correlação
+        if LEARNING_CONFIG['correlation_analysis']:
+            self.db.calculate_correlations()
+        
+        # 2. Análise de volatilidade avançada
+        volatility_patterns = self._analyze_volatility_patterns(recent_data)
+        patterns_found.extend(volatility_patterns)
+        
+        # 3. Análise de sequências
+        sequence_patterns = self.analyze_sequence_patterns()
+        patterns_found.extend(sequence_patterns)
+        
+        # 4. Análise de martingale inteligente
+        martingale_patterns = self._analyze_martingale_patterns(recent_data)
+        patterns_found.extend(martingale_patterns)
+        
+        # 5. Análise de performance por sessão
+        session_patterns = self._analyze_session_patterns(recent_data)
+        patterns_found.extend(session_patterns)
+        
+        return patterns_found
+    
+    def adapt_confidence(self, signal_data):
+        """Adaptar confiança usando MÚLTIPLAS técnicas de aprendizado"""
+        base_confidence = signal_data.get('confidence', 70)
+        adjustments = []
+        total_adjustment = 0
+        
+        # 1. Q-Learning adjustment
+        if LEARNING_CONFIG['reinforcement_learning']:
+            q_direction, q_confidence = self.get_q_learning_signal(signal_data)
+            if q_direction and q_confidence > 0.6:
+                q_adjustment = (q_confidence - 0.5) * 20  # Convert to confidence adjustment
+                if q_direction == signal_data.get('direction'):
+                    adjustments.append(('q_learning_boost', q_adjustment))
+                    total_adjustment += q_adjustment
+                else:
+                    adjustments.append(('q_learning_conflict', -q_adjustment))
+                    total_adjustment -= q_adjustment
+        
+        # 2. Temporal adjustment
+        temporal_adj, temporal_reason = self.get_temporal_adjustment(signal_data)
+        if temporal_adj != 0:
+            adjustments.append((temporal_reason, temporal_adj))
+            total_adjustment += temporal_adj
+        
+        # 3. Pattern-based adjustments
+        error_patterns = self.db.get_error_patterns()
+        for pattern in error_patterns:
+            pattern_type = pattern[1]
+            conditions = json.loads(pattern[2])
+            error_rate = pattern[3]
+            
+            pattern_applies = False
+            
+            if pattern_type.startswith('volatility_'):
+                vol = signal_data.get('volatility', 50)
+                if 'min_vol' in conditions and 'max_vol' in conditions:
+                    if conditions['min_vol'] <= vol < conditions['max_vol']:
+                        pattern_applies = True
+            
+            elif pattern_type.startswith('session_'):
+                current_hour = datetime.datetime.now().hour
+                current_session = self._determine_session(current_hour)
+                if conditions.get('market_session') == current_session:
+                    pattern_applies = True
+            
+            elif pattern_type.startswith('martingale_'):
+                if signal_data.get('martingale_level', 0) == conditions.get('martingale_level'):
+                    pattern_applies = True
+            
+            if pattern_applies:
+                pattern_adjustment = -error_rate * 25  # Stronger adjustment for learned patterns
+                adjustments.append((pattern_type, pattern_adjustment))
+                total_adjustment += pattern_adjustment
+        
+        # 4. Sequence-based adjustment
+        if len(self.sequence_memory) >= 3:
+            recent_results = [t.get('result', 0) for t in list(self.sequence_memory)[-3:] if 'result' in t]
+            if len(recent_results) == 3:
+                if sum(recent_results) == 0:  # 3 losses in a row
+                    adjustments.append(('sequence_losing_streak', -10))
+                    total_adjustment -= 10
+                elif sum(recent_results) == 3:  # 3 wins in a row
+                    adjustments.append(('sequence_winning_streak', 5))
+                    total_adjustment += 5
+        
+        # Apply adjustments with dampening
+        adapted_confidence = base_confidence + (total_adjustment * 0.7)  # Dampen aggressive adjustments
+        adapted_confidence = max(50, min(95, adapted_confidence))
+        
+        if adjustments:
+            logger.info(f"🧠 Confiança AVANÇADA: {base_confidence:.1f} → {adapted_confidence:.1f}")
+            logger.info(f"   Ajustes aplicados: {adjustments}")
+        
+        return adapted_confidence, adjustments
+    
+    def _determine_session(self, hour):
+        """Determinar sessão do mercado"""
+        if 0 <= hour < 8:
+            return 'asian'
+        elif 8 <= hour < 16:
+            return 'european'
+        else:
+            return 'american'
+    
+    def _analyze_volatility_patterns(self, recent_data):
+        """Análise avançada de padrões de volatilidade"""
+        patterns = []
+        
+        # Agrupar por faixas de volatilidade mais granulares
+        vol_ranges = {
+            'very_low': (0, 20),
+            'low': (20, 40), 
+            'medium': (40, 60),
+            'high': (60, 80),
+            'very_high': (80, 100)
+        }
+        
+        for range_name, (min_vol, max_vol) in vol_ranges.items():
+            range_signals = [s for s in recent_data if s[7] and min_vol <= s[7] < max_vol]
+            
+            if len(range_signals) >= 8:
+                wins = sum(1 for s in range_signals if s[10] == 1)
+                win_rate = wins / len(range_signals)
+                
+                if win_rate < 0.35 or win_rate > 0.75:
+                    self.db.save_error_pattern(
+                        f'volatility_{range_name}_pattern',
+                        {'volatility_range': range_name, 'min_vol': min_vol, 'max_vol': max_vol},
+                        1 - win_rate if win_rate < 0.35 else 0.25 - win_rate
+                    )
+                    
+                    patterns.append({
+                        'type': f'volatility_{range_name}',
+                        'win_rate': win_rate,
+                        'sample_size': len(range_signals),
+                        'significance': 'high' if len(range_signals) >= 15 else 'medium'
+                    })
+        
+        return patterns
+    
+    def _analyze_martingale_patterns(self, recent_data):
+        """Análise inteligente de padrões de martingale"""
+        patterns = []
+        
+        # Analisar performance por nível de martingale
+        martingale_levels = defaultdict(list)
+        for signal in recent_data:
+            level = signal[12]  # martingale_level
+            result = signal[10]  # result
+            if level is not None and result is not None:
+                martingale_levels[level].append(result)
+        
+        for level, results in martingale_levels.items():
+            if len(results) >= 5 and level > 0:
+                win_rate = sum(results) / len(results)
+                
+                if win_rate < 0.4:
+                    self.db.save_error_pattern(
+                        f'martingale_level_{level}_poor_performance',
+                        {'martingale_level': level},
+                        1 - win_rate
+                    )
+                    
+                    patterns.append({
+                        'type': f'martingale_level_{level}',
+                        'win_rate': win_rate,
+                        'recommendation': 'avoid_high_martingale' if level >= 3 else 'caution_martingale'
+                    })
+        
+        return patterns
+    
+    def _analyze_session_patterns(self, recent_data):
+        """Análise de padrões por sessão de mercado"""
+        patterns = []
+        
+        session_performance = defaultdict(list)
+        for signal in recent_data:
+            session = signal[18] if len(signal) > 18 else 'unknown'  # market_session
+            result = signal[10]  # result
+            if session and result is not None:
+                session_performance[session].append(result)
+        
+        for session, results in session_performance.items():
+            if len(results) >= 10:
+                win_rate = sum(results) / len(results)
+                
+                if win_rate < 0.4 or win_rate > 0.7:
+                    self.db.save_error_pattern(
+                        f'session_{session}_pattern',
+                        {'market_session': session},
+                        abs(0.5 - win_rate)
+                    )
+                    
+                    patterns.append({
+                        'type': f'session_{session}',
+                        'win_rate': win_rate,
+                        'recommendation': 'favorable' if win_rate > 0.6 else 'unfavorable'
+                    })
+        
+        return patterns
+    
+    def update_sequence_memory(self, signal_data):
+        """Atualizar memória de sequência"""
+        self.sequence_memory.append({
+            'direction': signal_data.get('direction'),
+            'confidence': signal_data.get('confidence'),
+            'volatility': signal_data.get('volatility'),
+            'timestamp': signal_data.get('timestamp'),
+            'result': signal_data.get('result')  # Will be updated later
+        })
+        
+    def update_performance_metrics(self):
+        """Atualizar métricas de performance - VERSÃO AVANÇADA"""
+        recent_data = self.db.get_recent_performance(150)
+        
+        if not recent_data:
+            return
+            
+        # Calcular métricas avançadas
+        total_signals = len(recent_data)
+        won_signals = sum(1 for signal in recent_data if signal[10] == 1)
+        accuracy = (won_signals / total_signals) * 100 if total_signals > 0 else 0
+        
+        # Calcular tendência de accuracy (últimos 30 vs 30 anteriores)
+        if total_signals >= 60:
+            recent_30 = recent_data[:30]
+            previous_30 = recent_data[30:60]
+            
+            recent_accuracy = sum(1 for s in recent_30 if s[10] == 1) / 30 * 100
+            previous_accuracy = sum(1 for s in previous_30 if s[10] == 1) / 30 * 100
+            
+            accuracy_trend = recent_accuracy - previous_accuracy
+        else:
+            accuracy_trend = 0
+        
+        # Ajustar parâmetros adaptativos com mais inteligência
+        risk_factor = self.db.get_adaptive_parameter('risk_factor', 1.0)
+        aggression_factor = self.db.get_adaptive_parameter('aggression_factor', 1.0)
+        
+        # Lógica de ajuste mais sofisticada
+        if accuracy < 40:
+            # Performance muito baixa - modo conservador
+            new_risk_factor = max(0.3, risk_factor - 0.15)
+            new_aggression_factor = max(0.5, aggression_factor - 0.1)
+            reason = f'Performance crítica: {accuracy:.1f}%'
+        elif accuracy < 50 and accuracy_trend < -5:
+            # Performance baixa e piorando
+            new_risk_factor = max(0.5, risk_factor - 0.1)
+            new_aggression_factor = max(0.7, aggression_factor - 0.05)
+            reason = f'Performance declinante: {accuracy:.1f}% (trend: {accuracy_trend:.1f}%)'
+        elif accuracy > 70 and accuracy_trend > 5:
+            # Performance excelente e melhorando
+            new_risk_factor = min(1.8, risk_factor + 0.1)
+            new_aggression_factor = min(1.5, aggression_factor + 0.05)
+            reason = f'Performance excelente: {accuracy:.1f}% (trend: +{accuracy_trend:.1f}%)'
+        elif accuracy > 60:
+            # Performance boa
+            new_risk_factor = min(1.3, risk_factor + 0.05)
+            new_aggression_factor = min(1.2, aggression_factor + 0.02)
+            reason = f'Performance boa: {accuracy:.1f}%'
+        else:
+            # Manter parâmetros atuais
+            new_risk_factor = risk_factor
+            new_aggression_factor = aggression_factor
+            reason = f'Performance estável: {accuracy:.1f}%'
+        
+        # Atualizar se houve mudança significativa
+        if abs(new_risk_factor - risk_factor) > 0.02:
+            self.db.update_adaptive_parameter('risk_factor', new_risk_factor, reason)
+            
+        if abs(new_aggression_factor - aggression_factor) > 0.02:
+            self.db.update_adaptive_parameter('aggression_factor', new_aggression_factor, reason)
+        
+        return {
+            'total_signals': total_signals,
+            'accuracy': accuracy,
+            'accuracy_trend': accuracy_trend,
+            'won_signals': won_signals,
+            'risk_factor': new_risk_factor,
+            'aggression_factor': new_aggression_factor
+        }
+        
+    def analyze_sequence_patterns(self):
+        """Analisar padrões de sequência de trades"""
+        if not LEARNING_CONFIG['sequence_learning'] or len(self.sequence_memory) < 3:
+            return []
+        
+        patterns_found = []
+        
+        # Analisar últimas 3-5 operações
+        for length in range(3, min(6, len(self.sequence_memory) + 1)):
+            if len(self.sequence_memory) >= length:
+                sequence = list(self.sequence_memory)[-length:]
+                
+                # Calcular taxa de sucesso da sequência
+                results = [trade.get('result', 0) for trade in sequence if 'result' in trade]
+                if results:
+                    success_rate = sum(results) / len(results)
+                    self.db.save_sequence_pattern(sequence, success_rate)
+                    
+                    patterns_found.append({
+                        'sequence_length': length,
+                        'success_rate': success_rate,
+                        'pattern': sequence
+                    })
+        
+        return patterns_found
+    
+    def _determine_session(self, hour):
+        """Determinar sessão do mercado"""
+        if 0 <= hour < 8:
+            return 'asian'
+        elif 8 <= hour < 16:
+            return 'european'
+        else:
+            return 'american'
+    
+    def update_sequence_memory(self, signal_data):
+        """Atualizar memória de sequência"""
+        self.sequence_memory.append({
+            'direction': signal_data.get('direction'),
+            'confidence': signal_data.get('confidence'),
+            'volatility': signal_data.get('volatility'),
+            'timestamp': signal_data.get('timestamp'),
+            'result': signal_data.get('result')  # Will be updated later
+        })
         
     def save_signal(self, signal_data):
         """Salvar sinal no banco de dados - VERSÃO EXPANDIDA"""
@@ -673,6 +1129,52 @@ class AdvancedLearningEngine:
         self.recent_signals = deque(maxlen=LEARNING_CONFIG['error_pattern_window'])
         self.confidence_adjustments = defaultdict(float)
         self.sequence_memory = deque(maxlen=10)  # Memória de sequência
+        
+    def create_state_representation(self, signal_data):
+        """Criar representação de estado para Q-Learning"""
+        symbol = signal_data.get('symbol', 'R_50')
+        volatility_bucket = int(signal_data.get('volatility', 50) // 10) * 10
+        hour = datetime.datetime.now().hour
+        
+        state_hash = f"{symbol}_{volatility_bucket}_{hour}"
+        state_description = f"Symbol:{symbol}, Vol:{volatility_bucket}, Hour:{hour}"
+        
+        return state_hash, state_description
+    
+    def get_q_learning_signal(self, signal_data):
+        """Obter sinal baseado em Q-Learning"""
+        if not LEARNING_CONFIG['reinforcement_learning']:
+            return None, 0.0
+            
+        state_hash, state_desc = self.create_state_representation(signal_data)
+        return self.db.get_q_learning_action(state_hash)
+    
+    def get_temporal_adjustment(self, signal_data):
+        """Obter ajuste baseado em análise temporal"""
+        if not LEARNING_CONFIG['temporal_learning']:
+            return 0.0, "temporal_disabled"
+        
+        now = datetime.datetime.now()
+        hour = now.hour
+        day = now.weekday()
+        symbol = signal_data.get('symbol', 'R_50')
+        direction = signal_data.get('direction', 'CALL')
+        
+        # Obter performance temporal
+        success_rate, total_trades = self.db.get_temporal_performance(hour, day, symbol, direction)
+        
+        if total_trades >= 5:
+            # Ajustar confiança baseado na performance temporal
+            if success_rate > 0.65:
+                adjustment = 10  # Horário favorável
+            elif success_rate < 0.35:
+                adjustment = -15  # Horário desfavorável
+            else:
+                adjustment = 0
+                
+            return adjustment, f"temporal_pattern_h{hour}_d{day}"
+        
+        return 0.0, "temporal_insufficient_data"
         self.learning_weights = defaultdict(lambda: 1.0)
         
     def create_state_representation(self, signal_data):
