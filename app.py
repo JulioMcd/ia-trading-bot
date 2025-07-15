@@ -6,6 +6,8 @@ import logging
 import sqlite3
 import json
 import threading
+
+db_lock = threading.Lock()
 import time
 import os
 from collections import defaultdict, deque
