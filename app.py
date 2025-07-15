@@ -6,12 +6,12 @@ import logging
 import sqlite3
 import json
 import threading
-
-db_lock = threading.Lock()
 import time
 import os
 from collections import defaultdict, deque
 import math
+from contextlib import contextmanager
+from functools import wraps
 
 app = Flask(__name__)
 CORS(app)
@@ -53,211 +53,283 @@ LEARNING_CONFIG = {
     'dynamic_weighting': True
 }
 
+# ✅ CLASSE PARA GERENCIAR CONEXÕES THREAD-SAFE
+class DatabaseManager:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.local = threading.local()
+        self._lock = threading.Lock()
+    
+    def get_connection(self):
+        if not hasattr(self.local, 'connection'):
+            self.local.connection = sqlite3.connect(
+                self.db_path,
+                timeout=30.0,  # Timeout de 30 segundos
+                isolation_level='IMMEDIATE',
+                check_same_thread=False
+            )
+            # Configurações otimizadas para evitar locks
+            self.local.connection.execute('PRAGMA journal_mode=WAL')
+            self.local.connection.execute('PRAGMA synchronous=NORMAL')
+            self.local.connection.execute('PRAGMA busy_timeout=30000')
+            self.local.connection.execute('PRAGMA temp_store=MEMORY')
+            self.local.connection.execute('PRAGMA cache_size=10000')
+        return self.local.connection
+    
+    @contextmanager
+    def get_cursor(self):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            yield cursor
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            cursor.close()
+
+# ✅ DECORATOR PARA RETRY AUTOMÁTICO
+def retry_on_lock(max_retries=3, delay=0.1):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        logger.warning(f"Database locked, tentativa {attempt + 1}/{max_retries}")
+                        time.sleep(delay * (2 ** attempt))  # Backoff exponencial
+                        continue
+                    raise e
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Erro na operação, tentativa {attempt + 1}/{max_retries}: {e}")
+                        time.sleep(delay)
+                        continue
+                    raise e
+            return None
+        return wrapper
+    return decorator
+
 class AdvancedTradingDatabase:
-    """Classe APRIMORADA para gerenciar o banco de dados SQLite"""
+    """Classe APRIMORADA para gerenciar o banco de dados SQLite com Thread Safety"""
     
     def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
+        self.db_manager = DatabaseManager(db_path)
         self.init_database()
         
+    @retry_on_lock(max_retries=5, delay=0.5)
     def init_database(self):
-        """Inicializar tabelas do banco de dados - VERSÃO AVANÇADA"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Inicializar tabelas do banco de dados - VERSÃO THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Tabela de sinais - EXPANDIDA
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS signals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        original_direction TEXT NOT NULL,
+                        confidence REAL NOT NULL,
+                        entry_price REAL,
+                        volatility REAL,
+                        duration_type TEXT,
+                        duration_value INTEGER,
+                        result INTEGER,
+                        pnl REAL,
+                        martingale_level INTEGER DEFAULT 0,
+                        market_condition TEXT,
+                        technical_factors TEXT,
+                        is_inverted BOOLEAN DEFAULT 0,
+                        consecutive_errors_before INTEGER DEFAULT 0,
+                        inversion_mode TEXT DEFAULT 'normal',
+                        hour_of_day INTEGER,
+                        day_of_week INTEGER,
+                        market_session TEXT,
+                        sequence_position INTEGER DEFAULT 0,
+                        confidence_source TEXT,
+                        learning_weight REAL DEFAULT 1.0,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        feedback_received_at TEXT
+                    )
+                ''')
+                
+                # Q-Learning para aprendizado por reforço
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS q_learning_states (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        state_hash TEXT NOT NULL UNIQUE,
+                        state_description TEXT,
+                        action_call_value REAL DEFAULT 0.0,
+                        action_put_value REAL DEFAULT 0.0,
+                        visits_count INTEGER DEFAULT 0,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        average_reward REAL DEFAULT 0.0,
+                        exploration_count INTEGER DEFAULT 0
+                    )
+                ''')
+                
+                # Padrões de sequência
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS sequence_patterns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sequence_hash TEXT NOT NULL UNIQUE,
+                        sequence_data TEXT NOT NULL,
+                        pattern_length INTEGER NOT NULL,
+                        success_rate REAL DEFAULT 0.0,
+                        occurrences INTEGER DEFAULT 1,
+                        total_reward REAL DEFAULT 0.0,
+                        confidence_multiplier REAL DEFAULT 1.0,
+                        last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Análise temporal
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS temporal_patterns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        hour_of_day INTEGER NOT NULL,
+                        day_of_week INTEGER NOT NULL,
+                        symbol TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        success_rate REAL DEFAULT 0.0,
+                        total_trades INTEGER DEFAULT 0,
+                        won_trades INTEGER DEFAULT 0,
+                        average_confidence REAL DEFAULT 0.0,
+                        volatility_avg REAL DEFAULT 0.0,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(hour_of_day, day_of_week, symbol, direction)
+                    )
+                ''')
+                
+                # Correlações entre variáveis
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS correlation_analysis (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        variable1 TEXT NOT NULL,
+                        variable2 TEXT NOT NULL,
+                        correlation_value REAL NOT NULL,
+                        significance REAL DEFAULT 0.0,
+                        sample_size INTEGER DEFAULT 0,
+                        last_calculated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(variable1, variable2)
+                    )
+                ''')
+                
+                # Histórico de inversões
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS inversion_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        from_mode TEXT NOT NULL,
+                        to_mode TEXT NOT NULL,
+                        consecutive_errors INTEGER NOT NULL,
+                        trigger_reason TEXT,
+                        total_inversions_so_far INTEGER DEFAULT 0,
+                        performance_before REAL DEFAULT 0.0,
+                        adaptive_threshold INTEGER DEFAULT 3,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Padrões de erro
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS error_patterns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pattern_type TEXT NOT NULL,
+                        conditions TEXT NOT NULL,
+                        error_rate REAL NOT NULL,
+                        occurrences INTEGER DEFAULT 1,
+                        confidence_adjustment REAL DEFAULT 0,
+                        severity_score REAL DEFAULT 0.0,
+                        pattern_stability REAL DEFAULT 0.0,
+                        last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Parâmetros adaptativos
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS adaptive_parameters (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        parameter_name TEXT NOT NULL UNIQUE,
+                        parameter_value REAL NOT NULL,
+                        learning_rate REAL DEFAULT 0.1,
+                        momentum REAL DEFAULT 0.0,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        update_reason TEXT,
+                        performance_impact REAL DEFAULT 0.0
+                    )
+                ''')
+                
+                # Índices para performance
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_result ON signals(result)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_q_learning_state_hash ON q_learning_states(state_hash)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_temporal_patterns_composite ON temporal_patterns(hour_of_day, day_of_week, symbol)')
+                
+                logger.info("✅ Banco de dados inicializado com segurança")
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar banco: {e}")
+            raise
         
-        # Tabela de sinais - EXPANDIDA
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS signals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                original_direction TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                entry_price REAL,
-                volatility REAL,
-                duration_type TEXT,
-                duration_value INTEGER,
-                result INTEGER,
-                pnl REAL,
-                martingale_level INTEGER DEFAULT 0,
-                market_condition TEXT,
-                technical_factors TEXT,
-                is_inverted BOOLEAN DEFAULT 0,
-                consecutive_errors_before INTEGER DEFAULT 0,
-                inversion_mode TEXT DEFAULT 'normal',
-                hour_of_day INTEGER,
-                day_of_week INTEGER,
-                market_session TEXT,
-                sequence_position INTEGER DEFAULT 0,
-                confidence_source TEXT,
-                learning_weight REAL DEFAULT 1.0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                feedback_received_at TEXT
-            )
-        ''')
-        
-        # Q-Learning para aprendizado por reforço
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS q_learning_states (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                state_hash TEXT NOT NULL UNIQUE,
-                state_description TEXT,
-                action_call_value REAL DEFAULT 0.0,
-                action_put_value REAL DEFAULT 0.0,
-                visits_count INTEGER DEFAULT 0,
-                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-                average_reward REAL DEFAULT 0.0,
-                exploration_count INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # Padrões de sequência
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sequence_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sequence_hash TEXT NOT NULL UNIQUE,
-                sequence_data TEXT NOT NULL,
-                pattern_length INTEGER NOT NULL,
-                success_rate REAL DEFAULT 0.0,
-                occurrences INTEGER DEFAULT 1,
-                total_reward REAL DEFAULT 0.0,
-                confidence_multiplier REAL DEFAULT 1.0,
-                last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Análise temporal
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS temporal_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                hour_of_day INTEGER NOT NULL,
-                day_of_week INTEGER NOT NULL,
-                symbol TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                success_rate REAL DEFAULT 0.0,
-                total_trades INTEGER DEFAULT 0,
-                won_trades INTEGER DEFAULT 0,
-                average_confidence REAL DEFAULT 0.0,
-                volatility_avg REAL DEFAULT 0.0,
-                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(hour_of_day, day_of_week, symbol, direction)
-            )
-        ''')
-        
-        # Correlações entre variáveis
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS correlation_analysis (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                variable1 TEXT NOT NULL,
-                variable2 TEXT NOT NULL,
-                correlation_value REAL NOT NULL,
-                significance REAL DEFAULT 0.0,
-                sample_size INTEGER DEFAULT 0,
-                last_calculated TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(variable1, variable2)
-            )
-        ''')
-        
-        # Histórico de inversões
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS inversion_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                from_mode TEXT NOT NULL,
-                to_mode TEXT NOT NULL,
-                consecutive_errors INTEGER NOT NULL,
-                trigger_reason TEXT,
-                total_inversions_so_far INTEGER DEFAULT 0,
-                performance_before REAL DEFAULT 0.0,
-                adaptive_threshold INTEGER DEFAULT 3,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Padrões de erro
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS error_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_type TEXT NOT NULL,
-                conditions TEXT NOT NULL,
-                error_rate REAL NOT NULL,
-                occurrences INTEGER DEFAULT 1,
-                confidence_adjustment REAL DEFAULT 0,
-                severity_score REAL DEFAULT 0.0,
-                pattern_stability REAL DEFAULT 0.0,
-                last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Parâmetros adaptativos
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS adaptive_parameters (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parameter_name TEXT NOT NULL UNIQUE,
-                parameter_value REAL NOT NULL,
-                learning_rate REAL DEFAULT 0.1,
-                momentum REAL DEFAULT 0.0,
-                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-                update_reason TEXT,
-                performance_impact REAL DEFAULT 0.0
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        
+    @retry_on_lock(max_retries=3, delay=0.2)
     def save_signal(self, signal_data):
-        """Salvar sinal no banco de dados - VERSÃO EXPANDIDA"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Extrair informações temporais
-        timestamp = datetime.datetime.fromisoformat(signal_data.get('timestamp'))
-        hour_of_day = timestamp.hour
-        day_of_week = timestamp.weekday()
-        
-        # Determinar sessão do mercado
-        market_session = self._determine_market_session(hour_of_day)
-        
-        cursor.execute('''
-            INSERT INTO signals (
-                timestamp, symbol, direction, original_direction, confidence, entry_price, 
-                volatility, duration_type, duration_value, martingale_level,
-                market_condition, technical_factors, is_inverted, consecutive_errors_before, 
-                inversion_mode, hour_of_day, day_of_week, market_session, sequence_position,
-                confidence_source, learning_weight
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            signal_data.get('timestamp'),
-            signal_data.get('symbol', 'R_50'),
-            signal_data.get('direction'),
-            signal_data.get('original_direction'),
-            signal_data.get('confidence'),
-            signal_data.get('entry_price'),
-            signal_data.get('volatility'),
-            signal_data.get('duration_type'),
-            signal_data.get('duration_value'),
-            signal_data.get('martingale_level', 0),
-            signal_data.get('market_condition', 'neutral'),
-            json.dumps(signal_data.get('technical_factors', {})),
-            signal_data.get('is_inverted', False),
-            signal_data.get('consecutive_errors_before', 0),
-            signal_data.get('inversion_mode', 'normal'),
-            hour_of_day,
-            day_of_week,
-            market_session,
-            signal_data.get('sequence_position', 0),
-            signal_data.get('confidence_source', 'technical'),
-            signal_data.get('learning_weight', 1.0)
-        ))
-        
-        signal_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return signal_id
+        """Salvar sinal no banco de dados - VERSÃO THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Extrair informações temporais
+                timestamp = datetime.datetime.fromisoformat(signal_data.get('timestamp'))
+                hour_of_day = timestamp.hour
+                day_of_week = timestamp.weekday()
+                
+                # Determinar sessão do mercado
+                market_session = self._determine_market_session(hour_of_day)
+                
+                cursor.execute('''
+                    INSERT INTO signals (
+                        timestamp, symbol, direction, original_direction, confidence, entry_price, 
+                        volatility, duration_type, duration_value, martingale_level,
+                        market_condition, technical_factors, is_inverted, consecutive_errors_before, 
+                        inversion_mode, hour_of_day, day_of_week, market_session, sequence_position,
+                        confidence_source, learning_weight
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    signal_data.get('timestamp'),
+                    signal_data.get('symbol', 'R_50'),
+                    signal_data.get('direction'),
+                    signal_data.get('original_direction'),
+                    signal_data.get('confidence'),
+                    signal_data.get('entry_price'),
+                    signal_data.get('volatility'),
+                    signal_data.get('duration_type'),
+                    signal_data.get('duration_value'),
+                    signal_data.get('martingale_level', 0),
+                    signal_data.get('market_condition', 'neutral'),
+                    json.dumps(signal_data.get('technical_factors', {})),
+                    signal_data.get('is_inverted', False),
+                    signal_data.get('consecutive_errors_before', 0),
+                    signal_data.get('inversion_mode', 'normal'),
+                    hour_of_day,
+                    day_of_week,
+                    market_session,
+                    signal_data.get('sequence_position', 0),
+                    signal_data.get('confidence_source', 'technical'),
+                    signal_data.get('learning_weight', 1.0)
+                ))
+                
+                signal_id = cursor.lastrowid
+                logger.info(f"✅ Sinal salvo: ID {signal_id}")
+                return signal_id
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar sinal: {e}")
+            raise
     
     def _determine_market_session(self, hour):
         """Determinar sessão do mercado baseada na hora"""
@@ -268,180 +340,184 @@ class AdvancedTradingDatabase:
         else:
             return 'american'
     
+    @retry_on_lock(max_retries=3, delay=0.1)
     def save_q_learning_state(self, state_hash, state_desc, action, reward):
-        """Salvar estado Q-Learning"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Verificar se estado existe
-        cursor.execute('SELECT * FROM q_learning_states WHERE state_hash = ?', (state_hash,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Atualizar Q-Value usando fórmula Q-Learning
-            old_q_value = existing[2] if action == 'CALL' else existing[3]
-            learning_rate = 0.1
-            new_q_value = old_q_value + learning_rate * (reward - old_q_value)
-            
-            if action == 'CALL':
-                cursor.execute('''
-                    UPDATE q_learning_states 
-                    SET action_call_value = ?, visits_count = visits_count + 1, 
-                        last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
-                    WHERE state_hash = ?
-                ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
-            else:
-                cursor.execute('''
-                    UPDATE q_learning_states 
-                    SET action_put_value = ?, visits_count = visits_count + 1,
-                        last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
-                    WHERE state_hash = ?
-                ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
-        else:
-            # Criar novo estado
-            call_value = reward if action == 'CALL' else 0.0
-            put_value = reward if action == 'PUT' else 0.0
-            
-            cursor.execute('''
-                INSERT INTO q_learning_states 
-                (state_hash, state_description, action_call_value, action_put_value, visits_count, average_reward)
-                VALUES (?, ?, ?, ?, 1, ?)
-            ''', (state_hash, state_desc, call_value, put_value, reward))
-        
-        conn.commit()
-        conn.close()
-    
-    def get_q_learning_action(self, state_hash):
-        """Obter melhor ação baseada em Q-Learning"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT action_call_value, action_put_value, visits_count FROM q_learning_states WHERE state_hash = ?', (state_hash,))
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            call_value, put_value, visits = result
-            epsilon = max(0.05, 0.3 / (1 + visits * 0.1))
-            
-            if random.random() < epsilon:
-                return random.choice(['CALL', 'PUT']), 0.5
-            else:
-                if call_value > put_value:
-                    return 'CALL', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
+        """Salvar estado Q-Learning - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Verificar se estado existe
+                cursor.execute('SELECT * FROM q_learning_states WHERE state_hash = ?', (state_hash,))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Atualizar Q-Value usando fórmula Q-Learning
+                    old_q_value = existing[2] if action == 'CALL' else existing[3]
+                    learning_rate = 0.1
+                    new_q_value = old_q_value + learning_rate * (reward - old_q_value)
+                    
+                    if action == 'CALL':
+                        cursor.execute('''
+                            UPDATE q_learning_states 
+                            SET action_call_value = ?, visits_count = visits_count + 1, 
+                                last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
+                            WHERE state_hash = ?
+                        ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
+                    else:
+                        cursor.execute('''
+                            UPDATE q_learning_states 
+                            SET action_put_value = ?, visits_count = visits_count + 1,
+                                last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
+                            WHERE state_hash = ?
+                        ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
                 else:
-                    return 'PUT', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
-        else:
+                    # Criar novo estado
+                    call_value = reward if action == 'CALL' else 0.0
+                    put_value = reward if action == 'PUT' else 0.0
+                    
+                    cursor.execute('''
+                        INSERT INTO q_learning_states 
+                        (state_hash, state_description, action_call_value, action_put_value, visits_count, average_reward)
+                        VALUES (?, ?, ?, ?, 1, ?)
+                    ''', (state_hash, state_desc, call_value, put_value, reward))
+                
+                logger.debug(f"Q-Learning state updated: {state_hash}")
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar Q-Learning state: {e}")
+            raise
+    
+    @retry_on_lock(max_retries=3, delay=0.1)
+    def get_q_learning_action(self, state_hash):
+        """Obter melhor ação baseada em Q-Learning - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('SELECT action_call_value, action_put_value, visits_count FROM q_learning_states WHERE state_hash = ?', (state_hash,))
+                result = cursor.fetchone()
+                
+                if result:
+                    call_value, put_value, visits = result
+                    epsilon = max(0.05, 0.3 / (1 + visits * 0.1))
+                    
+                    if random.random() < epsilon:
+                        return random.choice(['CALL', 'PUT']), 0.5
+                    else:
+                        if call_value > put_value:
+                            return 'CALL', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
+                        else:
+                            return 'PUT', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
+                else:
+                    return random.choice(['CALL', 'PUT']), 0.5
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter Q-Learning action: {e}")
             return random.choice(['CALL', 'PUT']), 0.5
     
+    @retry_on_lock(max_retries=3, delay=0.2)
     def save_sequence_pattern(self, sequence_data, success_rate):
-        """Salvar padrão de sequência"""
-        sequence_hash = hash(str(sequence_data))
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT id, occurrences, total_reward FROM sequence_patterns WHERE sequence_hash = ?', (str(sequence_hash),))
-        existing = cursor.fetchone()
-        
-        if existing:
-            cursor.execute('''
-                UPDATE sequence_patterns 
-                SET success_rate = ?, occurrences = occurrences + 1, 
-                    total_reward = total_reward + ?, last_seen = ?
-                WHERE id = ?
-            ''', (success_rate, success_rate, datetime.datetime.now().isoformat(), existing[0]))
-        else:
-            cursor.execute('''
-                INSERT INTO sequence_patterns 
-                (sequence_hash, sequence_data, pattern_length, success_rate, total_reward)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (str(sequence_hash), json.dumps(sequence_data), len(sequence_data), success_rate, success_rate))
-        
-        conn.commit()
-        conn.close()
+        """Salvar padrão de sequência - THREAD-SAFE"""
+        try:
+            sequence_hash = hash(str(sequence_data))
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('SELECT id, occurrences, total_reward FROM sequence_patterns WHERE sequence_hash = ?', (str(sequence_hash),))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    cursor.execute('''
+                        UPDATE sequence_patterns 
+                        SET success_rate = ?, occurrences = occurrences + 1, 
+                            total_reward = total_reward + ?, last_seen = ?
+                        WHERE id = ?
+                    ''', (success_rate, success_rate, datetime.datetime.now().isoformat(), existing[0]))
+                else:
+                    cursor.execute('''
+                        INSERT INTO sequence_patterns 
+                        (sequence_hash, sequence_data, pattern_length, success_rate, total_reward)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (str(sequence_hash), json.dumps(sequence_data), len(sequence_data), success_rate, success_rate))
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar sequence pattern: {e}")
+            raise
     
+    @retry_on_lock(max_retries=3, delay=0.1)
     def update_temporal_pattern(self, hour, day, symbol, direction, won):
-        """Atualizar padrão temporal"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR IGNORE INTO temporal_patterns 
-            (hour_of_day, day_of_week, symbol, direction, success_rate, total_trades, won_trades)
-            VALUES (?, ?, ?, ?, 0.0, 0, 0)
-        ''', (hour, day, symbol, direction))
-        
-        cursor.execute('''
-            UPDATE temporal_patterns 
-            SET total_trades = total_trades + 1,
-                won_trades = won_trades + ?,
-                success_rate = CAST(won_trades + ? AS REAL) / (total_trades + 1),
-                last_updated = ?
-            WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
-        ''', (won, won, datetime.datetime.now().isoformat(), hour, day, symbol, direction))
-        
-        conn.commit()
-        conn.close()
+        """Atualizar padrão temporal - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO temporal_patterns 
+                    (hour_of_day, day_of_week, symbol, direction, success_rate, total_trades, won_trades)
+                    VALUES (?, ?, ?, ?, 0.0, 0, 0)
+                ''', (hour, day, symbol, direction))
+                
+                cursor.execute('''
+                    UPDATE temporal_patterns 
+                    SET total_trades = total_trades + 1,
+                        won_trades = won_trades + ?,
+                        success_rate = CAST(won_trades + ? AS REAL) / (total_trades + 1),
+                        last_updated = ?
+                    WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
+                ''', (won, won, datetime.datetime.now().isoformat(), hour, day, symbol, direction))
+        except Exception as e:
+            logger.error(f"❌ Erro ao atualizar temporal pattern: {e}")
+            raise
     
+    @retry_on_lock(max_retries=3, delay=0.1)
     def get_temporal_performance(self, hour, day, symbol, direction):
-        """Obter performance temporal"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT success_rate, total_trades FROM temporal_patterns 
-            WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
-        ''', (hour, day, symbol, direction))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result if result and result[1] >= 5 else (0.5, 0)
+        """Obter performance temporal - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('''
+                    SELECT success_rate, total_trades FROM temporal_patterns 
+                    WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
+                ''', (hour, day, symbol, direction))
+                
+                result = cursor.fetchone()
+                return result if result and result[1] >= 5 else (0.5, 0)
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter temporal performance: {e}")
+            return (0.5, 0)
     
+    @retry_on_lock(max_retries=3, delay=0.2)
     def calculate_correlations(self):
-        """Calcular correlações entre variáveis"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Obter dados recentes para análise
-        cursor.execute('''
-            SELECT volatility, confidence, result, martingale_level, hour_of_day, day_of_week
-            FROM signals WHERE result IS NOT NULL 
-            ORDER BY created_at DESC LIMIT 200
-        ''')
-        
-        data = cursor.fetchall()
-        
-        if len(data) < 20:
-            conn.close()
-            return
-        
-        # Calcular correlação simples entre volatilidade e sucesso
-        volatilities = [row[0] for row in data if row[0] is not None]
-        results = [row[2] for row in data if row[0] is not None]
-        
-        if len(volatilities) >= 10:
-            correlation = self._calculate_correlation(volatilities, results)
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO correlation_analysis 
-                (variable1, variable2, correlation_value, sample_size)
-                VALUES (?, ?, ?, ?)
-            ''', ('volatility', 'success_rate', correlation, len(volatilities)))
-        
-        # Calcular outras correlações...
-        confidences = [row[1] for row in data if row[1] is not None]
-        if len(confidences) >= 10:
-            correlation = self._calculate_correlation(confidences, results[:len(confidences)])
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO correlation_analysis 
-                (variable1, variable2, correlation_value, sample_size)
-                VALUES (?, ?, ?, ?)
-            ''', ('confidence', 'success_rate', correlation, len(confidences)))
-        
-        conn.commit()
-        conn.close()
+        """Calcular correlações entre variáveis - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Obter dados recentes para análise
+                cursor.execute('''
+                    SELECT volatility, confidence, result, martingale_level, hour_of_day, day_of_week
+                    FROM signals WHERE result IS NOT NULL 
+                    ORDER BY created_at DESC LIMIT 200
+                ''')
+                
+                data = cursor.fetchall()
+                
+                if len(data) < 20:
+                    return
+                
+                # Calcular correlação simples entre volatilidade e sucesso
+                volatilities = [row[0] for row in data if row[0] is not None]
+                results = [row[2] for row in data if row[0] is not None]
+                
+                if len(volatilities) >= 10:
+                    correlation = self._calculate_correlation(volatilities, results)
+                    
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO correlation_analysis 
+                        (variable1, variable2, correlation_value, sample_size)
+                        VALUES (?, ?, ?, ?)
+                    ''', ('volatility', 'success_rate', correlation, len(volatilities)))
+                
+                # Calcular outras correlações...
+                confidences = [row[1] for row in data if row[1] is not None]
+                if len(confidences) >= 10:
+                    correlation = self._calculate_correlation(confidences, results[:len(confidences)])
+                    
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO correlation_analysis 
+                        (variable1, variable2, correlation_value, sample_size)
+                        VALUES (?, ?, ?, ?)
+                    ''', ('confidence', 'success_rate', correlation, len(confidences)))
+        except Exception as e:
+            logger.error(f"❌ Erro ao calcular correlações: {e}")
+            raise
     
     def _calculate_correlation(self, x, y):
         """Calcular correlação de Pearson simples"""
@@ -460,165 +536,174 @@ class AdvancedTradingDatabase:
         
         return numerator / denominator if denominator != 0 else 0.0
     
+    @retry_on_lock(max_retries=3, delay=0.2)
     def save_inversion_event(self, from_mode, to_mode, consecutive_errors, reason, performance_before=0.0, adaptive_threshold=3):
-        """Salvar evento de inversão"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO inversion_history (
-                timestamp, from_mode, to_mode, consecutive_errors, trigger_reason, 
-                total_inversions_so_far, performance_before, adaptive_threshold
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            datetime.datetime.now().isoformat(),
-            from_mode, to_mode, consecutive_errors, reason,
-            INVERSION_SYSTEM['total_inversions'], performance_before, adaptive_threshold
-        ))
-        
-        conn.commit()
-        conn.close()
+        """Salvar evento de inversão - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('''
+                    INSERT INTO inversion_history (
+                        timestamp, from_mode, to_mode, consecutive_errors, trigger_reason, 
+                        total_inversions_so_far, performance_before, adaptive_threshold
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    datetime.datetime.now().isoformat(),
+                    from_mode, to_mode, consecutive_errors, reason,
+                    INVERSION_SYSTEM['total_inversions'], performance_before, adaptive_threshold
+                ))
+                logger.info(f"✅ Evento de inversão salvo: {from_mode} → {to_mode}")
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar evento de inversão: {e}")
+            raise
     
+    @retry_on_lock(max_retries=3, delay=0.2)
     def update_signal_result(self, signal_id, result, pnl=0):
-        """Atualizar resultado do sinal - COM APRENDIZADO TEMPORAL"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Atualizar sinal
-        cursor.execute('''
-            UPDATE signals 
-            SET result = ?, pnl = ?, feedback_received_at = ?
-            WHERE id = ?
-        ''', (result, pnl, datetime.datetime.now().isoformat(), signal_id))
-        
-        # Obter dados do sinal para aprendizado
-        cursor.execute('''
-            SELECT symbol, direction, hour_of_day, day_of_week, volatility, confidence, technical_factors
-            FROM signals WHERE id = ?
-        ''', (signal_id,))
-        
-        signal_data = cursor.fetchone()
-        if signal_data:
-            symbol, direction, hour, day, volatility, confidence, technical_factors = signal_data
-            
-            # Atualizar padrão temporal
-            self.update_temporal_pattern(hour, day, symbol, direction, result)
-            
-            # Q-Learning: criar estado e salvar resultado
-            if LEARNING_CONFIG['reinforcement_learning']:
-                state_hash = f"{symbol}_{direction}_{hour}_{volatility//10 if volatility else 5}"
-                state_desc = f"Symbol:{symbol}, Direction:{direction}, Hour:{hour}, Vol:{volatility//10*10 if volatility else 50}"
-                reward = 1.0 if result == 1 else -0.5
-                self.save_q_learning_state(state_hash, state_desc, direction, reward)
-        
-        conn.commit()
-        conn.close()
+        """Atualizar resultado do sinal - THREAD-SAFE COM APRENDIZADO TEMPORAL"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Atualizar sinal
+                cursor.execute('''
+                    UPDATE signals 
+                    SET result = ?, pnl = ?, feedback_received_at = ?
+                    WHERE id = ?
+                ''', (result, pnl, datetime.datetime.now().isoformat(), signal_id))
+                
+                # Obter dados do sinal para aprendizado
+                cursor.execute('''
+                    SELECT symbol, direction, hour_of_day, day_of_week, volatility, confidence, technical_factors
+                    FROM signals WHERE id = ?
+                ''', (signal_id,))
+                
+                signal_data = cursor.fetchone()
+                if signal_data:
+                    symbol, direction, hour, day, volatility, confidence, technical_factors = signal_data
+                    
+                    # Atualizar padrão temporal
+                    self.update_temporal_pattern(hour, day, symbol, direction, result)
+                    
+                    # Q-Learning: criar estado e salvar resultado
+                    if LEARNING_CONFIG['reinforcement_learning']:
+                        state_hash = f"{symbol}_{direction}_{hour}_{volatility//10 if volatility else 5}"
+                        state_desc = f"Symbol:{symbol}, Direction:{direction}, Hour:{hour}, Vol:{volatility//10*10 if volatility else 50}"
+                        reward = 1.0 if result == 1 else -0.5
+                        self.save_q_learning_state(state_hash, state_desc, direction, reward)
+                
+                logger.info(f"✅ Resultado do sinal {signal_id} atualizado: {'WIN' if result == 1 else 'LOSS'}")
+        except Exception as e:
+            logger.error(f"❌ Erro ao atualizar resultado do sinal: {e}")
+            raise
     
+    @retry_on_lock(max_retries=3, delay=0.1)
     def get_recent_performance(self, limit=100, symbol=None):
-        """Obter performance recente"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Obter performance recente - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                query = '''
+                    SELECT * FROM signals 
+                    WHERE result IS NOT NULL
+                '''
+                params = []
+                
+                if symbol:
+                    query += ' AND symbol = ?'
+                    params.append(symbol)
+                    
+                query += ' ORDER BY created_at DESC LIMIT ?'
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                results = cursor.fetchall()
+                return results
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter performance recente: {e}")
+            return []
         
-        query = '''
-            SELECT * FROM signals 
-            WHERE result IS NOT NULL
-        '''
-        params = []
-        
-        if symbol:
-            query += ' AND symbol = ?'
-            params.append(symbol)
-            
-        query += ' ORDER BY created_at DESC LIMIT ?'
-        params.append(limit)
-        
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        conn.close()
-        
-        return results
-        
+    @retry_on_lock(max_retries=3, delay=0.1)
     def get_error_patterns(self):
-        """Obter padrões de erro identificados"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM error_patterns ORDER BY error_rate DESC')
-        patterns = cursor.fetchall()
-        conn.close()
-        
-        return patterns
+        """Obter padrões de erro identificados - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('SELECT * FROM error_patterns ORDER BY error_rate DESC')
+                patterns = cursor.fetchall()
+                return patterns
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter error patterns: {e}")
+            return []
     
+    @retry_on_lock(max_retries=3, delay=0.2)
     def save_error_pattern(self, pattern_type, conditions, error_rate):
-        """Salvar padrão de erro identificado"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Salvar padrão de erro identificado - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                # Verificar se padrão já existe
+                cursor.execute(
+                    'SELECT id, occurrences FROM error_patterns WHERE pattern_type = ? AND conditions = ?',
+                    (pattern_type, json.dumps(conditions))
+                )
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Atualizar padrão existente
+                    cursor.execute('''
+                        UPDATE error_patterns 
+                        SET error_rate = ?, occurrences = occurrences + 1, last_seen = ?
+                        WHERE id = ?
+                    ''', (error_rate, datetime.datetime.now().isoformat(), existing[0]))
+                else:
+                    # Criar novo padrão
+                    cursor.execute('''
+                        INSERT INTO error_patterns (pattern_type, conditions, error_rate)
+                        VALUES (?, ?, ?)
+                    ''', (pattern_type, json.dumps(conditions), error_rate))
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar error pattern: {e}")
+            raise
         
-        # Verificar se padrão já existe
-        cursor.execute(
-            'SELECT id, occurrences FROM error_patterns WHERE pattern_type = ? AND conditions = ?',
-            (pattern_type, json.dumps(conditions))
-        )
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Atualizar padrão existente
-            cursor.execute('''
-                UPDATE error_patterns 
-                SET error_rate = ?, occurrences = occurrences + 1, last_seen = ?
-                WHERE id = ?
-            ''', (error_rate, datetime.datetime.now().isoformat(), existing[0]))
-        else:
-            # Criar novo padrão
-            cursor.execute('''
-                INSERT INTO error_patterns (pattern_type, conditions, error_rate)
-                VALUES (?, ?, ?)
-            ''', (pattern_type, json.dumps(conditions), error_rate))
-            
-        conn.commit()
-        conn.close()
-        
+    @retry_on_lock(max_retries=3, delay=0.1)
     def get_adaptive_parameter(self, param_name, default_value):
-        """Obter parâmetro adaptativo"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Obter parâmetro adaptativo - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute(
+                    'SELECT parameter_value FROM adaptive_parameters WHERE parameter_name = ?',
+                    (param_name,)
+                )
+                result = cursor.fetchone()
+                return result[0] if result else default_value
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter parâmetro adaptativo: {e}")
+            return default_value
         
-        cursor.execute(
-            'SELECT parameter_value FROM adaptive_parameters WHERE parameter_name = ?',
-            (param_name,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result[0] if result else default_value
-        
+    @retry_on_lock(max_retries=3, delay=0.2)
     def update_adaptive_parameter(self, param_name, new_value, reason):
-        """Atualizar parâmetro adaptativo"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Atualizar parâmetro adaptativo - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO adaptive_parameters 
+                    (parameter_name, parameter_value, last_updated, update_reason)
+                    VALUES (?, ?, ?, ?)
+                ''', (param_name, new_value, datetime.datetime.now().isoformat(), reason))
+                logger.debug(f"Parâmetro atualizado: {param_name} = {new_value}")
+        except Exception as e:
+            logger.error(f"❌ Erro ao atualizar parâmetro adaptativo: {e}")
+            raise
         
-        cursor.execute('''
-            INSERT OR REPLACE INTO adaptive_parameters 
-            (parameter_name, parameter_value, last_updated, update_reason)
-            VALUES (?, ?, ?, ?)
-        ''', (param_name, new_value, datetime.datetime.now().isoformat(), reason))
-        
-        conn.commit()
-        conn.close()
-        
+    @retry_on_lock(max_retries=3, delay=0.1)
     def get_inversion_history(self, limit=20):
-        """Obter histórico de inversões"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM inversion_history 
-            ORDER BY created_at DESC LIMIT ?
-        ''', (limit,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        return results
+        """Obter histórico de inversões - THREAD-SAFE"""
+        try:
+            with self.db_manager.get_cursor() as cursor:
+                cursor.execute('''
+                    SELECT * FROM inversion_history 
+                    ORDER BY created_at DESC LIMIT ?
+                ''', (limit,))
+                
+                results = cursor.fetchall()
+                return results
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter histórico de inversões: {e}")
+            return []
 
 class EnhancedInversionManager:
     """Gerenciador AVANÇADO do sistema de inversão automática"""
@@ -1191,7 +1276,7 @@ def extract_features(data):
     return prices[-3:], volatility
 
 def background_learning_task():
-    """Tarefa de aprendizado AVANÇADO em background"""
+    """Tarefa de aprendizado AVANÇADO em background - THREAD-SAFE"""
     while True:
         try:
             if LEARNING_CONFIG['learning_enabled']:
@@ -1240,9 +1325,9 @@ def home():
     
     return jsonify({
         "status": "🚀 IA Trading Bot API - SISTEMA DE APRENDIZADO AVANÇADO + INVERSÃO ADAPTATIVA",
-        "version": "5.0.0 - Advanced Learning + Adaptive Inversion + Q-Learning",
-        "description": "API com Q-Learning, Análise Temporal, Sequências e Inversão Adaptativa",
-        "model": "Multi-Layer Learning Engine + Adaptive Inversion System",
+        "version": "5.1.0 - Advanced Learning + Thread-Safe Database + Adaptive Inversion + Q-Learning",
+        "description": "API com Q-Learning, Análise Temporal, Sequências e Inversão Adaptativa - DATABASE THREAD-SAFE",
+        "model": "Multi-Layer Learning Engine + Adaptive Inversion System + Thread-Safe Database",
         "signal_mode": f"{inversion_status['current_mode'].upper()} + ADVANCED_LEARNING",
         
         "advanced_features": {
@@ -1251,7 +1336,18 @@ def home():
             "sequence_patterns": LEARNING_CONFIG['sequence_learning'],
             "correlation_analysis": LEARNING_CONFIG['correlation_analysis'],
             "adaptive_inversion": inversion_status['adaptive_mode'],
-            "dynamic_weighting": LEARNING_CONFIG['dynamic_weighting']
+            "dynamic_weighting": LEARNING_CONFIG['dynamic_weighting'],
+            "thread_safe_database": True,
+            "retry_mechanism": True,
+            "connection_pooling": True
+        },
+        
+        "database_optimizations": {
+            "wal_mode": True,
+            "busy_timeout": "30 seconds",
+            "retry_on_lock": True,
+            "connection_per_thread": True,
+            "automatic_rollback": True
         },
         
         "inversion_system": {
@@ -1287,7 +1383,7 @@ def home():
         
         "learning_config": LEARNING_CONFIG,
         "timestamp": datetime.datetime.now().isoformat(),
-        "source": "Advanced Python AI with Q-Learning + Adaptive Inversion System"
+        "source": "Advanced Python AI with Q-Learning + Adaptive Inversion System + Thread-Safe Database"
     })
 
 @app.route("/signal", methods=["POST", "OPTIONS"])
@@ -1298,7 +1394,7 @@ def home():
 @app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
 @app.route("/prediction", methods=["POST", "OPTIONS"])
 def generate_signal():
-    """Gerar sinal com SISTEMA DE APRENDIZADO AVANÇADO"""
+    """Gerar sinal com SISTEMA DE APRENDIZADO AVANÇADO - THREAD-SAFE"""
     if request.method == "OPTIONS":
         return '', 200
     
@@ -1367,7 +1463,7 @@ def generate_signal():
             }
         }
         
-        # Salvar sinal no banco de dados
+        # Salvar sinal no banco de dados - THREAD-SAFE
         signal_id = db.save_signal(signal_data)
         
         # Atualizar memória de sequência
@@ -1400,7 +1496,8 @@ def generate_signal():
                 "q_learning_used": analysis_result['q_learning_used'],
                 "learning_applied": analysis_result['learning_applied'],
                 "confidence_adjustments": analysis_result['adjustments'],
-                "sequence_position": len(learning_engine.sequence_memory)
+                "sequence_position": len(learning_engine.sequence_memory),
+                "thread_safe_database": True
             },
             
             "inversion_status": {
@@ -1421,7 +1518,7 @@ def generate_signal():
             },
             
             "factors": {
-                "technical_model": "Advanced Multi-Layer Learning + Adaptive Inversion",
+                "technical_model": "Advanced Multi-Layer Learning + Adaptive Inversion + Thread-Safe DB",
                 "volatility_factor": volatility,
                 "historical_performance": win_rate,
                 "signal_inversion": "ATIVO" if analysis_result['is_inverted'] else "INATIVO",
@@ -1432,7 +1529,7 @@ def generate_signal():
             },
             
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "Advanced AI with Q-Learning + Adaptive Inversion + Multi-Layer Learning"
+            "source": "Advanced AI with Q-Learning + Adaptive Inversion + Multi-Layer Learning + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1497,10 +1594,11 @@ def analyze_market():
                 "confidence_level": confidence,
                 "inversion_mode": analysis_result['inversion_mode'],
                 "learning_adjustments": len(analysis_result['adjustments']),
-                "signal_inverted": analysis_result['is_inverted']
+                "signal_inverted": analysis_result['is_inverted'],
+                "database_thread_safe": True
             },
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1581,13 +1679,14 @@ def assess_risk():
                 "total_trades": total_trades,
                 "risk_factor_applied": risk_factor,
                 "consecutive_errors": inversion_status['consecutive_errors'],
-                "inversion_mode": inversion_status['current_mode']
+                "inversion_mode": inversion_status['current_mode'],
+                "database_thread_safe": True
             },
             "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
             "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1659,8 +1758,9 @@ def get_optimal_duration():
             "learning_active": LEARNING_CONFIG['learning_enabled'],
             "inversion_system": inversion_status,
             "adaptive_optimization": True,
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1749,8 +1849,9 @@ def position_management():
             "inversion_status": inversion_status,
             "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
             "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1759,7 +1860,7 @@ def position_management():
 
 @app.route("/feedback", methods=["POST", "OPTIONS"])
 def receive_feedback():
-    """Endpoint para receber feedback - SISTEMA DE APRENDIZADO + INVERSÃO"""
+    """Endpoint para receber feedback - SISTEMA DE APRENDIZADO + INVERSÃO - THREAD-SAFE"""
     if request.method == "OPTIONS":
         return '', 200
     
@@ -1772,7 +1873,7 @@ def receive_feedback():
         signal_id = data.get("signal_id")  # ID do sinal original
         pnl = data.get("pnl", 0)
         
-        # 🧠 SISTEMA DE APRENDIZADO ATIVO
+        # 🧠 SISTEMA DE APRENDIZADO ATIVO - THREAD-SAFE
         if signal_id:
             # Atualizar resultado no banco de dados
             db.update_signal_result(signal_id, result, pnl)
@@ -1801,7 +1902,7 @@ def receive_feedback():
         inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
-            "message": "Feedback recebido - Sistema de inversão automática + aprendizado ativo",
+            "message": "Feedback recebido - Sistema de inversão automática + aprendizado ativo - Thread-Safe",
             "signal_id": signal_id,
             "result_recorded": result == 1,
             "total_trades": performance_stats['total_trades'],
@@ -1815,8 +1916,9 @@ def receive_feedback():
                 "last_inversion": inversion_status['last_inversion']
             },
             "patterns_analysis": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "Sistema de Inversão Automática + Aprendizado Pure Python"
+            "source": "Sistema de Inversão Automática + Aprendizado Pure Python + Thread-Safe Database"
         })
         
     except Exception as e:
@@ -1825,7 +1927,7 @@ def receive_feedback():
 
 @app.route("/learning-stats", methods=["GET"])
 def get_learning_stats():
-    """Obter estatísticas AVANÇADAS do sistema de aprendizado"""
+    """Obter estatísticas AVANÇADAS do sistema de aprendizado - THREAD-SAFE"""
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
@@ -1837,36 +1939,36 @@ def get_learning_stats():
         won_signals = sum(1 for signal in recent_data if signal[10] == 1)
         accuracy = (won_signals / total_signals * 100) if total_signals > 0 else 0
         
-        # Estatísticas Q-Learning
+        # Estatísticas Q-Learning - THREAD-SAFE
         q_learning_stats = {}
         if LEARNING_CONFIG['reinforcement_learning']:
-            conn = sqlite3.connect(db.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
-            q_stats = cursor.fetchone()
-            
-            cursor.execute('''
-                SELECT state_hash, visits_count, average_reward 
-                FROM q_learning_states 
-                ORDER BY visits_count DESC LIMIT 5
-            ''')
-            top_states = cursor.fetchall()
-            
-            conn.close()
-            
-            q_learning_stats = {
-                "total_states": q_stats[0] if q_stats else 0,
-                "average_visits": round(q_stats[1], 2) if q_stats and q_stats[1] else 0,
-                "average_reward": round(q_stats[2], 3) if q_stats and q_stats[2] else 0,
-                "top_learned_states": [
-                    {
-                        "state": state[0],
-                        "visits": state[1],
-                        "avg_reward": round(state[2], 3)
-                    } for state in top_states
-                ]
-            }
+            try:
+                with db.db_manager.get_cursor() as cursor:
+                    cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
+                    q_stats = cursor.fetchone()
+                    
+                    cursor.execute('''
+                        SELECT state_hash, visits_count, average_reward 
+                        FROM q_learning_states 
+                        ORDER BY visits_count DESC LIMIT 5
+                    ''')
+                    top_states = cursor.fetchall()
+                    
+                    q_learning_stats = {
+                        "total_states": q_stats[0] if q_stats else 0,
+                        "average_visits": round(q_stats[1], 2) if q_stats and q_stats[1] else 0,
+                        "average_reward": round(q_stats[2], 3) if q_stats and q_stats[2] else 0,
+                        "top_learned_states": [
+                            {
+                                "state": state[0],
+                                "visits": state[1],
+                                "avg_reward": round(state[2], 3)
+                            } for state in top_states
+                        ]
+                    }
+            except Exception as e:
+                logger.error(f"Erro ao obter Q-Learning stats: {e}")
+                q_learning_stats = {"error": "Não foi possível obter estatísticas Q-Learning"}
         
         # Padrões de erro identificados
         error_patterns = db.get_error_patterns()
@@ -1910,7 +2012,7 @@ def get_learning_stats():
             "recent_patterns": [
                 {
                     "type": pattern[1],
-                    "conditions": json.loads(pattern[2]),
+                    "conditions": json.loads(pattern[2]) if pattern[2] else {},
                     "error_rate": pattern[3],
                     "occurrences": pattern[4]
                 } for pattern in error_patterns[:8]
@@ -1923,6 +2025,7 @@ def get_learning_stats():
             },
             
             "learning_config": LEARNING_CONFIG,
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat()
         })
         
@@ -1932,29 +2035,25 @@ def get_learning_stats():
 
 @app.route("/q-learning-stats", methods=["GET"])
 def get_q_learning_stats():
-    """Obter estatísticas do Q-Learning"""
+    """Obter estatísticas do Q-Learning - THREAD-SAFE"""
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
     try:
-        conn = sqlite3.connect(db.db_path)
-        cursor = conn.cursor()
-        
-        # Obter estados Q-Learning
-        cursor.execute('''
-            SELECT state_hash, state_description, action_call_value, action_put_value, 
-                   visits_count, average_reward
-            FROM q_learning_states 
-            ORDER BY visits_count DESC LIMIT 20
-        ''')
-        
-        q_states = cursor.fetchall()
-        
-        # Estatísticas gerais
-        cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
-        general_stats = cursor.fetchone()
-        
-        conn.close()
+        with db.db_manager.get_cursor() as cursor:
+            # Obter estados Q-Learning
+            cursor.execute('''
+                SELECT state_hash, state_description, action_call_value, action_put_value, 
+                       visits_count, average_reward
+                FROM q_learning_states 
+                ORDER BY visits_count DESC LIMIT 20
+            ''')
+            
+            q_states = cursor.fetchall()
+            
+            # Estatísticas gerais
+            cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
+            general_stats = cursor.fetchone()
         
         return jsonify({
             "q_learning_enabled": LEARNING_CONFIG['reinforcement_learning'],
@@ -1975,6 +2074,7 @@ def get_q_learning_stats():
                 for state in q_states
             ],
             "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat()
         })
         
@@ -1984,7 +2084,7 @@ def get_q_learning_stats():
 
 @app.route("/inversion-status", methods=["GET"])
 def get_inversion_status():
-    """Obter status detalhado do sistema de inversão"""
+    """Obter status detalhado do sistema de inversão - THREAD-SAFE"""
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
@@ -2010,6 +2110,7 @@ def get_inversion_status():
                 "alternates_between_modes": True,
                 "adaptive_threshold": True
             },
+            "database_thread_safe": True,
             "timestamp": datetime.datetime.now().isoformat()
         })
         
@@ -2020,13 +2121,18 @@ def get_inversion_status():
 # Middleware de erro global
 @app.errorhandler(404)
 def not_found(error):
-    inversion_status = inversion_manager.get_inversion_status()
+    try:
+        inversion_status = inversion_manager.get_inversion_status()
+    except:
+        inversion_status = {"current_mode": "unknown", "error": "Database connection failed"}
+    
     return jsonify({
         "error": "Endpoint não encontrado",
         "available_endpoints": ["/", "/signal", "/advanced-signal", "/analyze", "/risk", "/optimal-duration", "/management", "/feedback", "/learning-stats", "/inversion-status", "/q-learning-stats"],
-        "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+        "signal_mode": f"{inversion_status.get('current_mode', 'unknown').upper()} + LEARNING",
         "learning_active": LEARNING_CONFIG['learning_enabled'],
         "inversion_system": inversion_status,
+        "database_thread_safe": True,
         "timestamp": datetime.datetime.now().isoformat()
     }), 404
 
@@ -2038,8 +2144,21 @@ def internal_error(error):
         "message": "Entre em contato com o suporte",
         "learning_system": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
         "inversion_system": "Ativo" if INVERSION_SYSTEM['active'] else "Inativo",
+        "database_thread_safe": True,
         "timestamp": datetime.datetime.now().isoformat()
     }), 500
+
+def cleanup_database_connections():
+    """Limpar conexões do banco ao encerrar"""
+    try:
+        if hasattr(db.db_manager.local, 'connection'):
+            db.db_manager.local.connection.close()
+            logger.info("✅ Conexões do banco fechadas")
+    except Exception as e:
+        logger.error(f"Erro ao fechar conexões: {e}")
+
+import atexit
+atexit.register(cleanup_database_connections)
 
 if __name__ == "__main__":
     # Configuração para Render
@@ -2055,6 +2174,9 @@ if __name__ == "__main__":
     logger.info(f"📊 Banco de dados: {DB_PATH}")
     logger.info("🐍 Pure Python - Compatível com Python 3.13")
     logger.info(f"⚙️ Threshold adaptativo de inversão: {'ATIVO' if INVERSION_SYSTEM['adaptive_threshold'] else 'FIXO'}")
+    logger.info("🔒 DATABASE THREAD-SAFE: ATIVADO")
+    logger.info("🔄 RETRY AUTOMÁTICO: ATIVADO")
+    logger.info("⚡ WAL MODE + BUSY TIMEOUT: ATIVADO")
     
     # Verificar conectividade do banco de dados
     try:
@@ -2073,6 +2195,8 @@ if __name__ == "__main__":
     logger.info(f"   - Inversão adaptativa com threshold dinâmico")
     logger.info(f"   - Parâmetros adaptativos de risco")
     logger.info(f"   - Sistema de aprendizado por reforço")
+    logger.info(f"   - DATABASE THREAD-SAFE com retry automático")
+    logger.info(f"   - WAL mode + timeout de 30s + backoff exponencial")
     logger.info("=" * 60)
     
     # Inicializar Flask app
