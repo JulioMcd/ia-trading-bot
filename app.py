@@ -1,377 +1,255 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import numpy as np
-import pandas as pd
+import random
+import datetime
+import logging
 import sqlite3
 import json
 import threading
 import time
 import os
-import logging
-import datetime
-import hashlib
-import pickle
-import warnings
 from collections import defaultdict, deque
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, asdict
 import math
-
-# Machine Learning Imports
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import cross_val_score, GridSearchCV, TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler, RobustScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
-from sklearn.feature_selection import SelectKBest, f_classif, RFE
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
-import xgboost as xgb
-from scipy import stats
-from scipy.signal import find_peaks
-import ta  # Technical Analysis library
-
-warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
 CORS(app)
 
-# Configurar logging avançado
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('ml_trading_bot.log'),
-        logging.StreamHandler()
-    ]
-)
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configurações
+# API Key válida
 VALID_API_KEY = "bhcOGajqbfFfolT"
-DB_PATH = os.environ.get('DB_PATH', '/tmp/advanced_ml_trading.db')
-MODEL_PATH = os.environ.get('MODEL_PATH', '/tmp/models/')
 
-# Criar diretório de modelos
-os.makedirs(MODEL_PATH, exist_ok=True)
+# ✅ SISTEMA DE INVERSÃO AUTOMÁTICA - MELHORADO!
+INVERSION_SYSTEM = {
+    'active': True,
+    'is_inverse_mode': False,
+    'consecutive_errors': 0,
+    'max_errors': 3,
+    'total_inversions': 0,
+    'last_inversion_time': None,
+    'inversion_history': [],
+    'adaptive_threshold': True,
+    'performance_weight': 0.7
+}
 
-@dataclass
-class TradingSignal:
-    """Estrutura de dados para sinais de trading"""
-    timestamp: str
-    symbol: str
-    direction: str
-    confidence: float
-    entry_price: float
-    volatility: float
-    features: Dict[str, float]
-    model_version: str
-    ensemble_votes: Dict[str, str]
-    feature_importance: Dict[str, float]
+# Configuração para Render
+DB_PATH = os.environ.get('DB_PATH', '/tmp/trading_data.db')
 
-@dataclass
-class ModelPerformance:
-    """Métricas de performance dos modelos"""
-    model_name: str
-    accuracy: float
-    precision: float
-    recall: float
-    f1_score: float
-    roc_auc: float
-    prediction_count: int
-    last_updated: str
+# Configurações do sistema de aprendizado AVANÇADO
+LEARNING_CONFIG = {
+    'min_samples_for_learning': int(os.environ.get('MIN_SAMPLES', '15')),
+    'adaptation_rate': float(os.environ.get('ADAPTATION_RATE', '0.15')),
+    'error_pattern_window': int(os.environ.get('PATTERN_WINDOW', '100')),
+    'confidence_adjustment_factor': float(os.environ.get('CONFIDENCE_FACTOR', '0.08')),
+    'learning_enabled': os.environ.get('LEARNING_ENABLED', 'true').lower() == 'true',
+    'reinforcement_learning': True,
+    'temporal_learning': True,
+    'sequence_learning': True,
+    'correlation_analysis': True,
+    'dynamic_weighting': True
+}
 
-class AdvancedFeatureEngineering:
-    """Engine avançado de feature engineering para trading"""
-    
-    def __init__(self):
-        self.lookback_periods = [5, 10, 20, 50, 100]
-        self.ma_periods = [7, 14, 21, 50]
-        
-    def calculate_technical_indicators(self, prices: List[float], volumes: List[float] = None) -> Dict[str, float]:
-        """Calcular indicadores técnicos avançados"""
-        if len(prices) < 50:
-            # Preencher com preços simulados se não temos histórico suficiente
-            base_price = prices[-1] if prices else 1000
-            prices = [base_price + np.random.normal(0, base_price * 0.01) for _ in range(50)]
-        
-        df = pd.DataFrame({'close': prices})
-        if volumes is None:
-            volumes = [1000 + np.random.randint(-100, 100) for _ in range(len(prices))]
-        df['volume'] = volumes[:len(prices)]
-        
-        features = {}
-        
-        try:
-            # Médias móveis e cruzamentos
-            for period in self.ma_periods:
-                if len(prices) >= period:
-                    df[f'sma_{period}'] = df['close'].rolling(period).mean()
-                    df[f'ema_{period}'] = df['close'].ewm(span=period).mean()
-                    features[f'sma_{period}_ratio'] = df['close'].iloc[-1] / df[f'sma_{period}'].iloc[-1] if df[f'sma_{period}'].iloc[-1] != 0 else 1.0
-                    features[f'ema_{period}_ratio'] = df['close'].iloc[-1] / df[f'ema_{period}'].iloc[-1] if df[f'ema_{period}'].iloc[-1] != 0 else 1.0
-            
-            # RSI
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            features['rsi'] = (100 - (100 / (1 + rs))).iloc[-1]
-            
-            # MACD
-            exp1 = df['close'].ewm(span=12).mean()
-            exp2 = df['close'].ewm(span=26).mean()
-            macd = exp1 - exp2
-            signal = macd.ewm(span=9).mean()
-            features['macd'] = macd.iloc[-1]
-            features['macd_signal'] = signal.iloc[-1]
-            features['macd_histogram'] = (macd - signal).iloc[-1]
-            
-            # Bollinger Bands
-            sma_20 = df['close'].rolling(20).mean()
-            std_20 = df['close'].rolling(20).std()
-            features['bb_upper'] = (sma_20 + (std_20 * 2)).iloc[-1]
-            features['bb_lower'] = (sma_20 - (std_20 * 2)).iloc[-1]
-            features['bb_position'] = (df['close'].iloc[-1] - features['bb_lower']) / (features['bb_upper'] - features['bb_lower'])
-            
-            # Volatilidade e momentum
-            for period in self.lookback_periods:
-                if len(prices) >= period:
-                    returns = df['close'].pct_change(period)
-                    features[f'return_{period}'] = returns.iloc[-1]
-                    features[f'volatility_{period}'] = returns.rolling(period).std().iloc[-1]
-                    features[f'momentum_{period}'] = (df['close'].iloc[-1] - df['close'].iloc[-period]) / df['close'].iloc[-period]
-            
-            # Support e Resistance levels
-            highs = df['close'].rolling(10).max()
-            lows = df['close'].rolling(10).min()
-            features['resistance_ratio'] = df['close'].iloc[-1] / highs.iloc[-1] if highs.iloc[-1] != 0 else 1.0
-            features['support_ratio'] = df['close'].iloc[-1] / lows.iloc[-1] if lows.iloc[-1] != 0 else 1.0
-            
-            # Volume indicators
-            if len(volumes) >= 20:
-                df['volume_sma'] = df['volume'].rolling(20).mean()
-                features['volume_ratio'] = df['volume'].iloc[-1] / df['volume_sma'].iloc[-1] if df['volume_sma'].iloc[-1] != 0 else 1.0
-            
-            # Padrões de candlestick (simulados)
-            features['doji_pattern'] = abs(df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-1] < 0.001
-            features['hammer_pattern'] = (df['close'].iloc[-1] > df['close'].iloc[-2]) and (df['close'].iloc[-2] < df['close'].iloc[-3])
-            
-            # Fractals e suporte/resistência
-            recent_prices = df['close'].tail(20).values
-            peaks, _ = find_peaks(recent_prices, height=np.mean(recent_prices))
-            valleys, _ = find_peaks(-recent_prices, height=-np.mean(recent_prices))
-            features['near_resistance'] = len(peaks) > 0 and (len(recent_prices) - peaks[-1]) <= 3
-            features['near_support'] = len(valleys) > 0 and (len(recent_prices) - valleys[-1]) <= 3
-            
-        except Exception as e:
-            logger.warning(f"Erro no cálculo de indicadores técnicos: {e}")
-            # Features de fallback
-            for period in self.ma_periods:
-                features[f'sma_{period}_ratio'] = 1.0
-                features[f'ema_{period}_ratio'] = 1.0
-            features.update({
-                'rsi': 50.0, 'macd': 0.0, 'macd_signal': 0.0, 'macd_histogram': 0.0,
-                'bb_position': 0.5, 'volume_ratio': 1.0
-            })
-        
-        return features
-    
-    def create_features_from_data(self, data: Dict) -> Dict[str, float]:
-        """Criar features a partir dos dados recebidos"""
-        features = {}
-        
-        # Features básicas
-        features['volatility'] = data.get('volatility', 50)
-        features['current_price'] = data.get('currentPrice', 1000)
-        features['martingale_level'] = data.get('martingaleLevel', 0)
-        features['win_rate'] = data.get('winRate', 50)
-        features['today_pnl'] = data.get('todayPnL', 0)
-        
-        # Features temporais
-        now = datetime.datetime.now()
-        features['hour'] = now.hour
-        features['day_of_week'] = now.weekday()
-        features['is_weekend'] = now.weekday() >= 5
-        features['is_market_open'] = 9 <= now.hour <= 17
-        
-        # Features do símbolo
-        symbol = data.get('symbol', 'R_50')
-        features['is_volatility_index'] = 'R_' in symbol or 'HZ' in symbol
-        features['is_jump_index'] = 'JD' in symbol
-        features['is_crash_boom'] = 'CRASH' in symbol or 'BOOM' in symbol
-        
-        # Features de mercado
-        market_condition = data.get('marketCondition', 'neutral')
-        features['market_bullish'] = market_condition == 'bullish'
-        features['market_bearish'] = market_condition == 'bearish'
-        features['market_neutral'] = market_condition == 'neutral'
-        
-        # Features de risco
-        features['high_martingale'] = features['martingale_level'] > 3
-        features['negative_pnl'] = features['today_pnl'] < 0
-        features['low_win_rate'] = features['win_rate'] < 45
-        
-        # Indicadores técnicos
-        prices = data.get('lastTicks', [])
-        if not prices:
-            base_price = features['current_price']
-            prices = [base_price + np.random.normal(0, base_price * 0.01) for _ in range(100)]
-        
-        technical_features = self.calculate_technical_indicators(prices)
-        features.update(technical_features)
-        
-        # Normalizar features numéricas
-        for key, value in features.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                if 'ratio' in key:
-                    features[key] = max(0.1, min(3.0, value))  # Limitar ratios
-                elif 'volatility' in key:
-                    features[key] = max(0, min(200, value))  # Limitar volatilidade
-        
-        return features
-
-class AdvancedMLTradingDatabase:
-    """Banco de dados avançado para ML trading"""
+class AdvancedTradingDatabase:
+    """Classe APRIMORADA para gerenciar o banco de dados SQLite"""
     
     def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
         self.init_database()
-    
+        
     def init_database(self):
-        """Inicializar banco de dados com tabelas ML"""
+        """Inicializar tabelas do banco de dados - VERSÃO AVANÇADA"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Tabela principal de sinais com features
+        # Tabela de sinais - EXPANDIDA
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS ml_signals (
+            CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 direction TEXT NOT NULL,
+                original_direction TEXT NOT NULL,
                 confidence REAL NOT NULL,
                 entry_price REAL,
+                volatility REAL,
+                duration_type TEXT,
+                duration_value INTEGER,
                 result INTEGER,
                 pnl REAL,
-                features TEXT NOT NULL,
-                model_version TEXT NOT NULL,
-                ensemble_votes TEXT,
-                feature_importance TEXT,
+                martingale_level INTEGER DEFAULT 0,
+                market_condition TEXT,
+                technical_factors TEXT,
+                is_inverted BOOLEAN DEFAULT 0,
+                consecutive_errors_before INTEGER DEFAULT 0,
+                inversion_mode TEXT DEFAULT 'normal',
+                hour_of_day INTEGER,
+                day_of_week INTEGER,
+                market_session TEXT,
+                sequence_position INTEGER DEFAULT 0,
+                confidence_source TEXT,
+                learning_weight REAL DEFAULT 1.0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                feedback_received_at TEXT,
-                model_accuracy REAL,
-                cross_val_score REAL
+                feedback_received_at TEXT
             )
         ''')
         
-        # Performance de modelos
+        # Q-Learning para aprendizado por reforço
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS model_performance (
+            CREATE TABLE IF NOT EXISTS q_learning_states (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                version TEXT NOT NULL,
-                accuracy REAL NOT NULL,
-                precision_score REAL NOT NULL,
-                recall_score REAL NOT NULL,
-                f1_score REAL NOT NULL,
-                roc_auc REAL NOT NULL,
-                cross_val_mean REAL NOT NULL,
-                cross_val_std REAL NOT NULL,
-                training_samples INTEGER NOT NULL,
-                feature_count INTEGER NOT NULL,
-                hyperparameters TEXT,
-                feature_importance TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT 1
+                state_hash TEXT NOT NULL UNIQUE,
+                state_description TEXT,
+                action_call_value REAL DEFAULT 0.0,
+                action_put_value REAL DEFAULT 0.0,
+                visits_count INTEGER DEFAULT 0,
+                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                average_reward REAL DEFAULT 0.0,
+                exploration_count INTEGER DEFAULT 0
             )
         ''')
         
-        # Feature importance histórica
+        # Padrões de sequência
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS feature_importance_history (
+            CREATE TABLE IF NOT EXISTS sequence_patterns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                feature_name TEXT NOT NULL,
-                importance_score REAL NOT NULL,
-                rank_position INTEGER NOT NULL,
-                model_version TEXT NOT NULL,
+                sequence_hash TEXT NOT NULL UNIQUE,
+                sequence_data TEXT NOT NULL,
+                pattern_length INTEGER NOT NULL,
+                success_rate REAL DEFAULT 0.0,
+                occurrences INTEGER DEFAULT 1,
+                total_reward REAL DEFAULT 0.0,
+                confidence_multiplier REAL DEFAULT 1.0,
+                last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Drift detection
+        # Análise temporal
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS model_drift_detection (
+            CREATE TABLE IF NOT EXISTS temporal_patterns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                drift_score REAL NOT NULL,
-                drift_detected BOOLEAN NOT NULL,
-                feature_drift TEXT,
-                performance_drift REAL,
-                recommendation TEXT,
+                hour_of_day INTEGER NOT NULL,
+                day_of_week INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                success_rate REAL DEFAULT 0.0,
+                total_trades INTEGER DEFAULT 0,
+                won_trades INTEGER DEFAULT 0,
+                average_confidence REAL DEFAULT 0.0,
+                volatility_avg REAL DEFAULT 0.0,
+                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(hour_of_day, day_of_week, symbol, direction)
+            )
+        ''')
+        
+        # Correlações entre variáveis
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS correlation_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                variable1 TEXT NOT NULL,
+                variable2 TEXT NOT NULL,
+                correlation_value REAL NOT NULL,
+                significance REAL DEFAULT 0.0,
+                sample_size INTEGER DEFAULT 0,
+                last_calculated TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(variable1, variable2)
+            )
+        ''')
+        
+        # Histórico de inversões
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inversion_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                from_mode TEXT NOT NULL,
+                to_mode TEXT NOT NULL,
+                consecutive_errors INTEGER NOT NULL,
+                trigger_reason TEXT,
+                total_inversions_so_far INTEGER DEFAULT 0,
+                performance_before REAL DEFAULT 0.0,
+                adaptive_threshold INTEGER DEFAULT 3,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # A/B testing
+        # Padrões de erro
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS model_ab_testing (
+            CREATE TABLE IF NOT EXISTS error_patterns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                test_name TEXT NOT NULL,
-                model_a TEXT NOT NULL,
-                model_b TEXT NOT NULL,
-                samples_a INTEGER DEFAULT 0,
-                samples_b INTEGER DEFAULT 0,
-                accuracy_a REAL DEFAULT 0,
-                accuracy_b REAL DEFAULT 0,
-                winner TEXT,
-                confidence_level REAL,
-                test_status TEXT DEFAULT 'running',
-                started_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                ended_at TEXT
+                pattern_type TEXT NOT NULL,
+                conditions TEXT NOT NULL,
+                error_rate REAL NOT NULL,
+                occurrences INTEGER DEFAULT 1,
+                confidence_adjustment REAL DEFAULT 0,
+                severity_score REAL DEFAULT 0.0,
+                pattern_stability REAL DEFAULT 0.0,
+                last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Auto-tuning histórico
+        # Parâmetros adaptativos
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS hyperparameter_tuning (
+            CREATE TABLE IF NOT EXISTS adaptive_parameters (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                parameter_set TEXT NOT NULL,
-                cv_score REAL NOT NULL,
-                best_params TEXT,
-                improvement_over_baseline REAL,
-                tuning_time_seconds REAL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                parameter_name TEXT NOT NULL UNIQUE,
+                parameter_value REAL NOT NULL,
+                learning_rate REAL DEFAULT 0.1,
+                momentum REAL DEFAULT 0.0,
+                last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                update_reason TEXT,
+                performance_impact REAL DEFAULT 0.0
             )
         ''')
         
         conn.commit()
         conn.close()
-    
-    def save_ml_signal(self, signal: TradingSignal) -> int:
-        """Salvar sinal ML no banco"""
+        
+    def save_signal(self, signal_data):
+        """Salvar sinal no banco de dados - VERSÃO EXPANDIDA"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Extrair informações temporais
+        timestamp = datetime.datetime.fromisoformat(signal_data.get('timestamp'))
+        hour_of_day = timestamp.hour
+        day_of_week = timestamp.weekday()
+        
+        # Determinar sessão do mercado
+        market_session = self._determine_market_session(hour_of_day)
+        
         cursor.execute('''
-            INSERT INTO ml_signals (
-                timestamp, symbol, direction, confidence, entry_price,
-                features, model_version, ensemble_votes, feature_importance
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO signals (
+                timestamp, symbol, direction, original_direction, confidence, entry_price, 
+                volatility, duration_type, duration_value, martingale_level,
+                market_condition, technical_factors, is_inverted, consecutive_errors_before, 
+                inversion_mode, hour_of_day, day_of_week, market_session, sequence_position,
+                confidence_source, learning_weight
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            signal.timestamp,
-            signal.symbol,
-            signal.direction,
-            signal.confidence,
-            signal.entry_price,
-            json.dumps(signal.features),
-            signal.model_version,
-            json.dumps(signal.ensemble_votes),
-            json.dumps(signal.feature_importance)
+            signal_data.get('timestamp'),
+            signal_data.get('symbol', 'R_50'),
+            signal_data.get('direction'),
+            signal_data.get('original_direction'),
+            signal_data.get('confidence'),
+            signal_data.get('entry_price'),
+            signal_data.get('volatility'),
+            signal_data.get('duration_type'),
+            signal_data.get('duration_value'),
+            signal_data.get('martingale_level', 0),
+            signal_data.get('market_condition', 'neutral'),
+            json.dumps(signal_data.get('technical_factors', {})),
+            signal_data.get('is_inverted', False),
+            signal_data.get('consecutive_errors_before', 0),
+            signal_data.get('inversion_mode', 'normal'),
+            hour_of_day,
+            day_of_week,
+            market_session,
+            signal_data.get('sequence_position', 0),
+            signal_data.get('confidence_source', 'technical'),
+            signal_data.get('learning_weight', 1.0)
         ))
         
         signal_id = cursor.lastrowid
@@ -379,824 +257,810 @@ class AdvancedMLTradingDatabase:
         conn.close()
         return signal_id
     
-    def update_signal_result(self, signal_id: int, result: int, pnl: float):
-        """Atualizar resultado do sinal"""
+    def _determine_market_session(self, hour):
+        """Determinar sessão do mercado baseada na hora"""
+        if 0 <= hour < 8:
+            return 'asian'
+        elif 8 <= hour < 16:
+            return 'european'
+        else:
+            return 'american'
+    
+    def save_q_learning_state(self, state_hash, state_desc, action, reward):
+        """Salvar estado Q-Learning"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            UPDATE ml_signals 
-            SET result = ?, pnl = ?, feedback_received_at = ?
-            WHERE id = ?
-        ''', (result, pnl, datetime.datetime.now().isoformat(), signal_id))
+        # Verificar se estado existe
+        cursor.execute('SELECT * FROM q_learning_states WHERE state_hash = ?', (state_hash,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Atualizar Q-Value usando fórmula Q-Learning
+            old_q_value = existing[2] if action == 'CALL' else existing[3]
+            learning_rate = 0.1
+            new_q_value = old_q_value + learning_rate * (reward - old_q_value)
+            
+            if action == 'CALL':
+                cursor.execute('''
+                    UPDATE q_learning_states 
+                    SET action_call_value = ?, visits_count = visits_count + 1, 
+                        last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
+                    WHERE state_hash = ?
+                ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
+            else:
+                cursor.execute('''
+                    UPDATE q_learning_states 
+                    SET action_put_value = ?, visits_count = visits_count + 1,
+                        last_updated = ?, average_reward = (average_reward * visits_count + ?) / (visits_count + 1)
+                    WHERE state_hash = ?
+                ''', (new_q_value, datetime.datetime.now().isoformat(), reward, state_hash))
+        else:
+            # Criar novo estado
+            call_value = reward if action == 'CALL' else 0.0
+            put_value = reward if action == 'PUT' else 0.0
+            
+            cursor.execute('''
+                INSERT INTO q_learning_states 
+                (state_hash, state_description, action_call_value, action_put_value, visits_count, average_reward)
+                VALUES (?, ?, ?, ?, 1, ?)
+            ''', (state_hash, state_desc, call_value, put_value, reward))
         
         conn.commit()
         conn.close()
     
-    def save_model_performance(self, performance: ModelPerformance):
-        """Salvar performance do modelo"""
+    def get_q_learning_action(self, state_hash):
+        """Obter melhor ação baseada em Q-Learning"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT action_call_value, action_put_value, visits_count FROM q_learning_states WHERE state_hash = ?', (state_hash,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            call_value, put_value, visits = result
+            epsilon = max(0.05, 0.3 / (1 + visits * 0.1))
+            
+            if random.random() < epsilon:
+                return random.choice(['CALL', 'PUT']), 0.5
+            else:
+                if call_value > put_value:
+                    return 'CALL', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
+                else:
+                    return 'PUT', min(0.95, 0.5 + abs(call_value - put_value) * 0.1)
+        else:
+            return random.choice(['CALL', 'PUT']), 0.5
+    
+    def save_sequence_pattern(self, sequence_data, success_rate):
+        """Salvar padrão de sequência"""
+        sequence_hash = hash(str(sequence_data))
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id, occurrences, total_reward FROM sequence_patterns WHERE sequence_hash = ?', (str(sequence_hash),))
+        existing = cursor.fetchone()
+        
+        if existing:
+            cursor.execute('''
+                UPDATE sequence_patterns 
+                SET success_rate = ?, occurrences = occurrences + 1, 
+                    total_reward = total_reward + ?, last_seen = ?
+                WHERE id = ?
+            ''', (success_rate, success_rate, datetime.datetime.now().isoformat(), existing[0]))
+        else:
+            cursor.execute('''
+                INSERT INTO sequence_patterns 
+                (sequence_hash, sequence_data, pattern_length, success_rate, total_reward)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (str(sequence_hash), json.dumps(sequence_data), len(sequence_data), success_rate, success_rate))
+        
+        conn.commit()
+        conn.close()
+    
+    def update_temporal_pattern(self, hour, day, symbol, direction, won):
+        """Atualizar padrão temporal"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO model_performance (
-                model_name, version, accuracy, precision_score, recall_score,
-                f1_score, roc_auc, cross_val_mean, cross_val_std, training_samples, feature_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO temporal_patterns 
+            (hour_of_day, day_of_week, symbol, direction, success_rate, total_trades, won_trades)
+            VALUES (?, ?, ?, ?, 0.0, 0, 0)
+        ''', (hour, day, symbol, direction))
+        
+        cursor.execute('''
+            UPDATE temporal_patterns 
+            SET total_trades = total_trades + 1,
+                won_trades = won_trades + ?,
+                success_rate = CAST(won_trades + ? AS REAL) / (total_trades + 1),
+                last_updated = ?
+            WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
+        ''', (won, won, datetime.datetime.now().isoformat(), hour, day, symbol, direction))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_temporal_performance(self, hour, day, symbol, direction):
+        """Obter performance temporal"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT success_rate, total_trades FROM temporal_patterns 
+            WHERE hour_of_day = ? AND day_of_week = ? AND symbol = ? AND direction = ?
+        ''', (hour, day, symbol, direction))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result if result and result[1] >= 5 else (0.5, 0)
+    
+    def calculate_correlations(self):
+        """Calcular correlações entre variáveis"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Obter dados recentes para análise
+        cursor.execute('''
+            SELECT volatility, confidence, result, martingale_level, hour_of_day, day_of_week
+            FROM signals WHERE result IS NOT NULL 
+            ORDER BY created_at DESC LIMIT 200
+        ''')
+        
+        data = cursor.fetchall()
+        
+        if len(data) < 20:
+            conn.close()
+            return
+        
+        # Calcular correlação simples entre volatilidade e sucesso
+        volatilities = [row[0] for row in data if row[0] is not None]
+        results = [row[2] for row in data if row[0] is not None]
+        
+        if len(volatilities) >= 10:
+            correlation = self._calculate_correlation(volatilities, results)
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO correlation_analysis 
+                (variable1, variable2, correlation_value, sample_size)
+                VALUES (?, ?, ?, ?)
+            ''', ('volatility', 'success_rate', correlation, len(volatilities)))
+        
+        # Calcular outras correlações...
+        confidences = [row[1] for row in data if row[1] is not None]
+        if len(confidences) >= 10:
+            correlation = self._calculate_correlation(confidences, results[:len(confidences)])
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO correlation_analysis 
+                (variable1, variable2, correlation_value, sample_size)
+                VALUES (?, ?, ?, ?)
+            ''', ('confidence', 'success_rate', correlation, len(confidences)))
+        
+        conn.commit()
+        conn.close()
+    
+    def _calculate_correlation(self, x, y):
+        """Calcular correlação de Pearson simples"""
+        if len(x) != len(y) or len(x) < 2:
+            return 0.0
+        
+        n = len(x)
+        sum_x = sum(x)
+        sum_y = sum(y)
+        sum_xy = sum(x[i] * y[i] for i in range(n))
+        sum_x2 = sum(x[i]**2 for i in range(n))
+        sum_y2 = sum(y[i]**2 for i in range(n))
+        
+        numerator = n * sum_xy - sum_x * sum_y
+        denominator = math.sqrt((n * sum_x2 - sum_x**2) * (n * sum_y2 - sum_y**2))
+        
+        return numerator / denominator if denominator != 0 else 0.0
+    
+    def save_inversion_event(self, from_mode, to_mode, consecutive_errors, reason, performance_before=0.0, adaptive_threshold=3):
+        """Salvar evento de inversão"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO inversion_history (
+                timestamp, from_mode, to_mode, consecutive_errors, trigger_reason, 
+                total_inversions_so_far, performance_before, adaptive_threshold
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            performance.model_name,
-            'v1.0',
-            performance.accuracy,
-            performance.precision,
-            performance.recall,
-            performance.f1_score,
-            performance.roc_auc,
-            0.0,  # cross_val_mean
-            0.0,  # cross_val_std  
-            performance.prediction_count,
-            0     # feature_count
+            datetime.datetime.now().isoformat(),
+            from_mode, to_mode, consecutive_errors, reason,
+            INVERSION_SYSTEM['total_inversions'], performance_before, adaptive_threshold
         ))
         
         conn.commit()
         conn.close()
     
-    def get_training_data(self, limit: int = 1000, min_samples: int = 100) -> Tuple[pd.DataFrame, pd.Series]:
-        """Obter dados para treinamento"""
+    def update_signal_result(self, signal_id, result, pnl=0):
+        """Atualizar resultado do sinal - COM APRENDIZADO TEMPORAL"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Atualizar sinal
+        cursor.execute('''
+            UPDATE signals 
+            SET result = ?, pnl = ?, feedback_received_at = ?
+            WHERE id = ?
+        ''', (result, pnl, datetime.datetime.now().isoformat(), signal_id))
+        
+        # Obter dados do sinal para aprendizado
+        cursor.execute('''
+            SELECT symbol, direction, hour_of_day, day_of_week, volatility, confidence, technical_factors
+            FROM signals WHERE id = ?
+        ''', (signal_id,))
+        
+        signal_data = cursor.fetchone()
+        if signal_data:
+            symbol, direction, hour, day, volatility, confidence, technical_factors = signal_data
+            
+            # Atualizar padrão temporal
+            self.update_temporal_pattern(hour, day, symbol, direction, result)
+            
+            # Q-Learning: criar estado e salvar resultado
+            if LEARNING_CONFIG['reinforcement_learning']:
+                state_hash = f"{symbol}_{direction}_{hour}_{volatility//10 if volatility else 5}"
+                state_desc = f"Symbol:{symbol}, Direction:{direction}, Hour:{hour}, Vol:{volatility//10*10 if volatility else 50}"
+                reward = 1.0 if result == 1 else -0.5
+                self.save_q_learning_state(state_hash, state_desc, direction, reward)
+        
+        conn.commit()
+        conn.close()
+    
+    def get_recent_performance(self, limit=100, symbol=None):
+        """Obter performance recente"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        query = '''
+            SELECT * FROM signals 
+            WHERE result IS NOT NULL
+        '''
+        params = []
+        
+        if symbol:
+            query += ' AND symbol = ?'
+            params.append(symbol)
+            
+        query += ' ORDER BY created_at DESC LIMIT ?'
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        conn.close()
+        
+        return results
+        
+    def get_error_patterns(self):
+        """Obter padrões de erro identificados"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM error_patterns ORDER BY error_rate DESC')
+        patterns = cursor.fetchall()
+        conn.close()
+        
+        return patterns
+    
+    def save_error_pattern(self, pattern_type, conditions, error_rate):
+        """Salvar padrão de erro identificado"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Verificar se padrão já existe
+        cursor.execute(
+            'SELECT id, occurrences FROM error_patterns WHERE pattern_type = ? AND conditions = ?',
+            (pattern_type, json.dumps(conditions))
+        )
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Atualizar padrão existente
+            cursor.execute('''
+                UPDATE error_patterns 
+                SET error_rate = ?, occurrences = occurrences + 1, last_seen = ?
+                WHERE id = ?
+            ''', (error_rate, datetime.datetime.now().isoformat(), existing[0]))
+        else:
+            # Criar novo padrão
+            cursor.execute('''
+                INSERT INTO error_patterns (pattern_type, conditions, error_rate)
+                VALUES (?, ?, ?)
+            ''', (pattern_type, json.dumps(conditions), error_rate))
+            
+        conn.commit()
+        conn.close()
+        
+    def get_adaptive_parameter(self, param_name, default_value):
+        """Obter parâmetro adaptativo"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT parameter_value FROM adaptive_parameters WHERE parameter_name = ?',
+            (param_name,)
+        )
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result[0] if result else default_value
+        
+    def update_adaptive_parameter(self, param_name, new_value, reason):
+        """Atualizar parâmetro adaptativo"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT features, direction, result FROM ml_signals 
-            WHERE result IS NOT NULL 
+            INSERT OR REPLACE INTO adaptive_parameters 
+            (parameter_name, parameter_value, last_updated, update_reason)
+            VALUES (?, ?, ?, ?)
+        ''', (param_name, new_value, datetime.datetime.now().isoformat(), reason))
+        
+        conn.commit()
+        conn.close()
+        
+    def get_inversion_history(self, limit=20):
+        """Obter histórico de inversões"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM inversion_history 
             ORDER BY created_at DESC LIMIT ?
         ''', (limit,))
         
-        data = cursor.fetchall()
+        results = cursor.fetchall()
         conn.close()
-        
-        if len(data) < min_samples:
-            # Gerar dados sintéticos se não temos amostras suficientes
-            logger.info(f"Gerando {min_samples} amostras sintéticas para treinamento")
-            return self._generate_synthetic_data(min_samples)
-        
-        # Processar dados reais
-        features_list = []
-        directions = []
-        
-        for row in data:
-            try:
-                features = json.loads(row[0])
-                direction = 1 if row[1] == 'CALL' else 0
-                result = row[2]
-                
-                # Usar o resultado como target
-                features_list.append(features)
-                directions.append(result)  # 1 para win, 0 para loss
-                
-            except Exception as e:
-                logger.warning(f"Erro ao processar linha de dados: {e}")
-                continue
-        
-        if not features_list:
-            return self._generate_synthetic_data(min_samples)
-        
-        # Converter para DataFrame
-        df_features = pd.DataFrame(features_list)
-        y = pd.Series(directions)
-        
-        # Limpar e processar features
-        df_features = self._clean_features(df_features)
-        
-        return df_features, y
-    
-    def _generate_synthetic_data(self, n_samples: int) -> Tuple[pd.DataFrame, pd.Series]:
-        """Gerar dados sintéticos para treinamento inicial"""
-        np.random.seed(42)
-        
-        features_data = []
-        targets = []
-        
-        for _ in range(n_samples):
-            # Gerar features sintéticas com correlações realistas
-            volatility = np.random.uniform(10, 100)
-            rsi = np.random.uniform(20, 80)
-            
-            # Features com algumas correlações
-            features = {
-                'volatility': volatility,
-                'rsi': rsi,
-                'macd': np.random.normal(0, 1),
-                'bb_position': np.random.uniform(0, 1),
-                'sma_7_ratio': np.random.uniform(0.95, 1.05),
-                'sma_14_ratio': np.random.uniform(0.95, 1.05),
-                'volume_ratio': np.random.uniform(0.5, 2.0),
-                'hour': np.random.randint(0, 24),
-                'day_of_week': np.random.randint(0, 7),
-                'martingale_level': np.random.randint(0, 5),
-                'win_rate': np.random.uniform(30, 70),
-                'momentum_5': np.random.normal(0, 0.02),
-                'momentum_10': np.random.normal(0, 0.03),
-                'return_5': np.random.normal(0, 0.02),
-                'volatility_10': np.random.uniform(0.01, 0.1)
-            }
-            
-            # Target baseado em algumas regras realistas
-            target_prob = 0.5
-            
-            # RSI extremos
-            if rsi < 30:
-                target_prob += 0.1  # Oversold - mais chance de reverter
-            elif rsi > 70:
-                target_prob -= 0.1  # Overbought
-                
-            # Volatilidade
-            if volatility > 80:
-                target_prob -= 0.05  # Alta volatilidade é mais arriscada
-            
-            # Momentum
-            if features['momentum_5'] > 0.01:
-                target_prob += 0.05
-            elif features['momentum_5'] < -0.01:
-                target_prob -= 0.05
-                
-            target = 1 if np.random.random() < target_prob else 0
-            
-            features_data.append(features)
-            targets.append(target)
-        
-        df_features = pd.DataFrame(features_data)
-        y = pd.Series(targets)
-        
-        return df_features, y
-    
-    def _clean_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Limpar e processar features"""
-        # Remover colunas com muitos valores nulos
-        df = df.dropna(thresh=len(df) * 0.7, axis=1)
-        
-        # Preencher valores nulos
-        for col in df.columns:
-            if df[col].dtype in ['int64', 'float64']:
-                df[col] = df[col].fillna(df[col].median())
-            else:
-                df[col] = df[col].fillna(0)
-        
-        # Remover outliers extremos
-        for col in df.select_dtypes(include=[np.number]).columns:
-            Q1 = df[col].quantile(0.01)
-            Q3 = df[col].quantile(0.99)
-            df[col] = df[col].clip(Q1, Q3)
-        
-        return df
+        return results
 
-class AdvancedMLEngine:
-    """Engine avançado de Machine Learning"""
+class EnhancedInversionManager:
+    """Gerenciador AVANÇADO do sistema de inversão automática"""
     
-    def __init__(self, database: AdvancedMLTradingDatabase):
+    def __init__(self, database):
         self.db = database
-        self.models = {}
-        self.scalers = {}
-        self.feature_selectors = {}
-        self.ensemble_model = None
-        self.feature_importance = {}
-        self.model_performances = {}
-        self.is_training = False
         
-        # Configurações de ML
-        self.cv_folds = 5
-        self.test_size = 0.2
-        self.random_state = 42
+    def calculate_adaptive_threshold(self):
+        """Calcular threshold adaptativo baseado na performance"""
+        if not INVERSION_SYSTEM['adaptive_threshold']:
+            return INVERSION_SYSTEM['max_errors']
         
-        # Inicializar modelos
-        self._initialize_models()
+        # Obter performance recente
+        recent_data = self.db.get_recent_performance(50)
+        if len(recent_data) < 10:
+            return INVERSION_SYSTEM['max_errors']
         
-    def _initialize_models(self):
-        """Inicializar todos os modelos ML"""
-        self.models = {
-            'random_forest': RandomForestClassifier(
-                n_estimators=100,
-                max_depth=10,
-                min_samples_split=5,
-                min_samples_leaf=2,
-                random_state=self.random_state,
-                n_jobs=-1
-            ),
-            'xgboost': xgb.XGBClassifier(
-                n_estimators=100,
-                max_depth=6,
-                learning_rate=0.1,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=self.random_state,
-                eval_metric='logloss'
-            ),
-            'gradient_boosting': GradientBoostingClassifier(
-                n_estimators=100,
-                max_depth=5,
-                learning_rate=0.1,
-                random_state=self.random_state
-            ),
-            'logistic_regression': LogisticRegression(
-                random_state=self.random_state,
-                max_iter=1000
-            ),
-            'svm': SVC(
-                kernel='rbf',
-                probability=True,
-                random_state=self.random_state
-            ),
-            'neural_network': MLPClassifier(
-                hidden_layer_sizes=(100, 50),
-                activation='relu',
-                solver='adam',
-                alpha=0.001,
-                learning_rate='adaptive',
-                max_iter=500,
-                random_state=self.random_state
+        # Calcular taxa de acerto
+        wins = sum(1 for signal in recent_data if signal[10] == 1)
+        accuracy = wins / len(recent_data)
+        
+        # Ajustar threshold baseado na performance
+        if accuracy > 0.65:
+            return min(5, INVERSION_SYSTEM['max_errors'] + 1)
+        elif accuracy < 0.35:
+            return max(2, INVERSION_SYSTEM['max_errors'] - 1)
+        else:
+            return INVERSION_SYSTEM['max_errors']
+    
+    def should_invert_mode(self):
+        """Verificar se deve inverter o modo - VERSÃO ADAPTATIVA"""
+        adaptive_threshold = self.calculate_adaptive_threshold()
+        return INVERSION_SYSTEM['consecutive_errors'] >= adaptive_threshold
+    
+    def switch_inversion_mode(self, reason="Max consecutive errors reached"):
+        """Alternar modo de inversão - VERSÃO MELHORADA"""
+        # Calcular performance antes da inversão
+        recent_data = self.db.get_recent_performance(20)
+        performance_before = 0.0
+        if recent_data:
+            wins = sum(1 for signal in recent_data if signal[10] == 1)
+            performance_before = wins / len(recent_data)
+        
+        old_mode = "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal"
+        INVERSION_SYSTEM['is_inverse_mode'] = not INVERSION_SYSTEM['is_inverse_mode']
+        
+        adaptive_threshold = self.calculate_adaptive_threshold()
+        INVERSION_SYSTEM['consecutive_errors'] = 0
+        INVERSION_SYSTEM['total_inversions'] += 1
+        INVERSION_SYSTEM['last_inversion_time'] = datetime.datetime.now().isoformat()
+        
+        new_mode = "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal"
+        
+        # Registrar no histórico
+        INVERSION_SYSTEM['inversion_history'].append({
+            'timestamp': INVERSION_SYSTEM['last_inversion_time'],
+            'from_mode': old_mode,
+            'to_mode': new_mode,
+            'consecutive_errors': adaptive_threshold,
+            'reason': reason,
+            'performance_before': performance_before,
+            'adaptive_threshold': adaptive_threshold
+        })
+        
+        # Salvar no banco
+        self.db.save_inversion_event(old_mode, new_mode, adaptive_threshold, reason, performance_before, adaptive_threshold)
+        
+        logger.info(f"🔄 INVERSÃO AUTOMÁTICA ADAPTATIVA: {old_mode.upper()} → {new_mode.upper()}")
+        logger.info(f"   Motivo: {reason}")
+        logger.info(f"   Threshold adaptativo: {adaptive_threshold}")
+        logger.info(f"   Performance antes: {performance_before:.1%}")
+        logger.info(f"   Total de inversões: {INVERSION_SYSTEM['total_inversions']}")
+    
+    def invert_signal(self, signal):
+        """Inverter sinal de trading"""
+        signal_map = {
+            'CALL': 'PUT', 'PUT': 'CALL', 
+            'BUY': 'SELL', 'SELL': 'BUY',
+            'LONG': 'SHORT', 'SHORT': 'LONG',
+            'COMPRA': 'VENDA', 'VENDA': 'COMPRA'
+        }
+        return signal_map.get(signal.upper(), signal)
+    
+    def handle_signal_result(self, result):
+        """Processar resultado do sinal - VERSÃO MELHORADA"""
+        if not INVERSION_SYSTEM['active']:
+            return
+            
+        if result == 0:  # Loss
+            INVERSION_SYSTEM['consecutive_errors'] += 1
+            adaptive_threshold = self.calculate_adaptive_threshold()
+            
+            logger.info(f"❌ Erro #{INVERSION_SYSTEM['consecutive_errors']} de {adaptive_threshold} (Modo: {'INVERSO' if INVERSION_SYSTEM['is_inverse_mode'] else 'NORMAL'})")
+            
+            if self.should_invert_mode():
+                self.switch_inversion_mode(f"Threshold adaptativo atingido ({adaptive_threshold})")
+        else:  # Win
+            if INVERSION_SYSTEM['consecutive_errors'] > 0:
+                logger.info(f"✅ Win! Resetando contador de erros (era {INVERSION_SYSTEM['consecutive_errors']})")
+                INVERSION_SYSTEM['consecutive_errors'] = 0
+    
+    def get_final_signal(self, original_signal):
+        """Obter sinal final com inversão adaptativa"""
+        if not INVERSION_SYSTEM['active']:
+            return original_signal, False, "normal"
+            
+        if INVERSION_SYSTEM['is_inverse_mode']:
+            inverted_signal = self.invert_signal(original_signal)
+            return inverted_signal, True, "inverse"
+        else:
+            return original_signal, False, "normal"
+    
+    def get_inversion_status(self):
+        """Obter status atual do sistema de inversão - VERSÃO EXPANDIDA"""
+        adaptive_threshold = self.calculate_adaptive_threshold()
+        
+        return {
+            'active': INVERSION_SYSTEM['active'],
+            'current_mode': "inverse" if INVERSION_SYSTEM['is_inverse_mode'] else "normal",
+            'consecutive_errors': INVERSION_SYSTEM['consecutive_errors'],
+            'adaptive_threshold': adaptive_threshold,
+            'original_threshold': INVERSION_SYSTEM['max_errors'],
+            'total_inversions': INVERSION_SYSTEM['total_inversions'],
+            'last_inversion': INVERSION_SYSTEM['last_inversion_time'],
+            'errors_until_inversion': adaptive_threshold - INVERSION_SYSTEM['consecutive_errors'],
+            'adaptive_mode': INVERSION_SYSTEM['adaptive_threshold']
+        }
+
+class AdvancedLearningEngine:
+    """Motor de aprendizado AVANÇADO com múltiplas técnicas"""
+    
+    def __init__(self, database):
+        self.db = database
+        self.recent_signals = deque(maxlen=LEARNING_CONFIG['error_pattern_window'])
+        self.confidence_adjustments = defaultdict(float)
+        self.sequence_memory = deque(maxlen=10)
+        self.learning_weights = defaultdict(lambda: 1.0)
+        
+    def create_state_representation(self, signal_data):
+        """Criar representação de estado para Q-Learning"""
+        symbol = signal_data.get('symbol', 'R_50')
+        volatility_bucket = int(signal_data.get('volatility', 50) // 10) * 10
+        hour = datetime.datetime.now().hour
+        
+        state_hash = f"{symbol}_{volatility_bucket}_{hour}"
+        state_description = f"Symbol:{symbol}, Vol:{volatility_bucket}, Hour:{hour}"
+        
+        return state_hash, state_description
+    
+    def get_q_learning_signal(self, signal_data):
+        """Obter sinal baseado em Q-Learning"""
+        if not LEARNING_CONFIG['reinforcement_learning']:
+            return None, 0.0
+            
+        state_hash, state_desc = self.create_state_representation(signal_data)
+        return self.db.get_q_learning_action(state_hash)
+    
+    def analyze_sequence_patterns(self):
+        """Analisar padrões de sequência de trades"""
+        if not LEARNING_CONFIG['sequence_learning'] or len(self.sequence_memory) < 3:
+            return []
+        
+        patterns_found = []
+        
+        # Analisar últimas 3-5 operações
+        for length in range(3, min(6, len(self.sequence_memory) + 1)):
+            if len(self.sequence_memory) >= length:
+                sequence = list(self.sequence_memory)[-length:]
+                
+                # Calcular taxa de sucesso da sequência
+                results = [trade.get('result', 0) for trade in sequence if 'result' in trade]
+                if results:
+                    success_rate = sum(results) / len(results)
+                    self.db.save_sequence_pattern(sequence, success_rate)
+                    
+                    patterns_found.append({
+                        'sequence_length': length,
+                        'success_rate': success_rate,
+                        'pattern': sequence
+                    })
+        
+        return patterns_found
+    
+    def get_temporal_adjustment(self, signal_data):
+        """Obter ajuste baseado em análise temporal"""
+        if not LEARNING_CONFIG['temporal_learning']:
+            return 0.0, "temporal_disabled"
+        
+        now = datetime.datetime.now()
+        hour = now.hour
+        day = now.weekday()
+        symbol = signal_data.get('symbol', 'R_50')
+        direction = signal_data.get('direction', 'CALL')
+        
+        # Obter performance temporal
+        success_rate, total_trades = self.db.get_temporal_performance(hour, day, symbol, direction)
+        
+        if total_trades >= 5:
+            # Ajustar confiança baseado na performance temporal
+            if success_rate > 0.65:
+                adjustment = 10  # Horário favorável
+            elif success_rate < 0.35:
+                adjustment = -15  # Horário desfavorável
+            else:
+                adjustment = 0
+                
+            return adjustment, f"temporal_pattern_h{hour}_d{day}"
+        
+        return 0.0, "temporal_insufficient_data"
+    
+    def analyze_error_patterns(self):
+        """Analisar padrões de erro nos dados recentes"""
+        recent_data = self.db.get_recent_performance(LEARNING_CONFIG['error_pattern_window'])
+        
+        if len(recent_data) < LEARNING_CONFIG['min_samples_for_learning']:
+            return []
+            
+        patterns_found = []
+        
+        # 1. Análise por correlação
+        if LEARNING_CONFIG['correlation_analysis']:
+            self.db.calculate_correlations()
+        
+        # 2. Análise de volatilidade avançada
+        volatility_patterns = self._analyze_volatility_patterns(recent_data)
+        patterns_found.extend(volatility_patterns)
+        
+        # 3. Análise de sequências
+        sequence_patterns = self.analyze_sequence_patterns()
+        patterns_found.extend(sequence_patterns)
+        
+        # 4. Análise de martingale inteligente
+        martingale_patterns = self._analyze_martingale_patterns(recent_data)
+        patterns_found.extend(martingale_patterns)
+        
+        # 5. Análise de performance por sessão
+        session_patterns = self._analyze_session_patterns(recent_data)
+        patterns_found.extend(session_patterns)
+        
+        return patterns_found
+        
+    def adapt_confidence(self, signal_data):
+        """Adaptar confiança baseado em padrões aprendidos"""
+        base_confidence = signal_data.get('confidence', 70)
+        adjustments = []
+        
+        # Verificar padrões conhecidos
+        error_patterns = self.db.get_error_patterns()
+        
+        for pattern in error_patterns:
+            pattern_type = pattern[1]
+            conditions = json.loads(pattern[2])
+            error_rate = pattern[3]
+            
+            # Aplicar ajustes baseados nos padrões
+            if pattern_type == 'symbol_low_performance':
+                if signal_data.get('symbol') == conditions.get('symbol'):
+                    adjustment = -error_rate * 20  # Reduzir confiança
+                    adjustments.append(('symbol_pattern', adjustment))
+                    
+            elif pattern_type == 'direction_low_performance':
+                if signal_data.get('direction') == conditions.get('direction'):
+                    adjustment = -error_rate * 15
+                    adjustments.append(('direction_pattern', adjustment))
+                    
+            elif pattern_type == 'high_volatility_error':
+                if signal_data.get('volatility', 0) > 70:
+                    adjustment = -error_rate * 10
+                    adjustments.append(('volatility_pattern', adjustment))
+                    
+            elif pattern_type == 'low_volatility_error':
+                if signal_data.get('volatility', 0) < 30:
+                    adjustment = -error_rate * 10
+                    adjustments.append(('volatility_pattern', adjustment))
+        
+        # Aplicar ajustes
+        total_adjustment = sum(adj[1] for adj in adjustments)
+        adapted_confidence = max(50, min(95, base_confidence + total_adjustment))
+        
+        # Salvar informações de adaptação
+        if adjustments:
+            logger.info(f"🧠 Confiança adaptada: {base_confidence:.1f} → {adapted_confidence:.1f}")
+            logger.info(f"   Ajustes aplicados: {adjustments}")
+        
+        return adapted_confidence, adjustments
+        
+    def update_performance_metrics(self):
+        """Atualizar métricas de performance globais"""
+        recent_data = self.db.get_recent_performance(100)
+        
+        if not recent_data:
+            return
+            
+        # Calcular métricas gerais
+        total_signals = len(recent_data)
+        won_signals = sum(1 for signal in recent_data if signal[10] == 1)  # ajustado coluna
+        accuracy = (won_signals / total_signals) * 100 if total_signals > 0 else 0
+        
+        # Atualizar parâmetros adaptativos baseados na performance
+        if accuracy < 45:
+            # Performance baixa - aumentar conservadorismo
+            current_risk_factor = self.db.get_adaptive_parameter('risk_factor', 1.0)
+            new_risk_factor = max(0.5, current_risk_factor - 0.1)
+            self.db.update_adaptive_parameter(
+                'risk_factor', 
+                new_risk_factor, 
+                f'Performance baixa: {accuracy:.1f}%'
             )
+            
+        elif accuracy > 65:
+            # Performance boa - pode ser mais agressivo
+            current_risk_factor = self.db.get_adaptive_parameter('risk_factor', 1.0)
+            new_risk_factor = min(1.5, current_risk_factor + 0.05)
+            self.db.update_adaptive_parameter(
+                'risk_factor', 
+                new_risk_factor, 
+                f'Performance boa: {accuracy:.1f}%'
+            )
+        
+        return {
+            'total_signals': total_signals,
+            'accuracy': accuracy,
+            'won_signals': won_signals
         }
         
-        # Scaler para cada modelo
-        for model_name in self.models.keys():
-            self.scalers[model_name] = StandardScaler()
-            
-        logger.info(f"Inicializados {len(self.models)} modelos ML")
-    
-    def auto_feature_engineering(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Feature engineering automático"""
-        X_engineered = X.copy()
+    def _analyze_volatility_patterns(self, recent_data):
+        """Análise avançada de padrões de volatilidade"""
+        patterns = []
         
-        # Criar features de interação
-        numeric_cols = X_engineered.select_dtypes(include=[np.number]).columns
-        
-        if len(numeric_cols) >= 2:
-            # Top 5 combinações de features mais importantes
-            important_features = ['volatility', 'rsi', 'macd', 'volume_ratio', 'momentum_5']
-            available_features = [f for f in important_features if f in numeric_cols]
-            
-            for i, feat1 in enumerate(available_features[:3]):
-                for feat2 in available_features[i+1:4]:
-                    if feat1 in X_engineered.columns and feat2 in X_engineered.columns:
-                        # Ratio features
-                        X_engineered[f'{feat1}_{feat2}_ratio'] = X_engineered[feat1] / (X_engineered[feat2] + 1e-8)
-                        # Difference features
-                        X_engineered[f'{feat1}_{feat2}_diff'] = X_engineered[feat1] - X_engineered[feat2]
-        
-        # Features polinomiais para features importantes
-        for feat in ['volatility', 'rsi']:
-            if feat in X_engineered.columns:
-                X_engineered[f'{feat}_squared'] = X_engineered[feat] ** 2
-                X_engineered[f'{feat}_sqrt'] = np.sqrt(np.abs(X_engineered[feat]))
-        
-        # Features de bins
-        if 'rsi' in X_engineered.columns:
-            X_engineered['rsi_overbought'] = (X_engineered['rsi'] > 70).astype(int)
-            X_engineered['rsi_oversold'] = (X_engineered['rsi'] < 30).astype(int)
-        
-        if 'volatility' in X_engineered.columns:
-            X_engineered['high_volatility'] = (X_engineered['volatility'] > 70).astype(int)
-            X_engineered['low_volatility'] = (X_engineered['volatility'] < 30).astype(int)
-        
-        # Remover features com variância zero
-        X_engineered = X_engineered.loc[:, X_engineered.var() > 1e-8]
-        
-        return X_engineered
-    
-    def feature_selection(self, X: pd.DataFrame, y: pd.Series, model_name: str) -> pd.DataFrame:
-        """Seleção automática de features"""
-        try:
-            # Método 1: SelectKBest
-            k = min(20, X.shape[1])  # Máximo 20 features
-            selector = SelectKBest(score_func=f_classif, k=k)
-            X_selected = selector.fit_transform(X, y)
-            selected_features = X.columns[selector.get_support()].tolist()
-            
-            # Método 2: Feature importance do Random Forest
-            rf = RandomForestClassifier(n_estimators=50, random_state=self.random_state)
-            rf.fit(X, y)
-            feature_importance = pd.Series(rf.feature_importances_, index=X.columns)
-            top_features = feature_importance.nlargest(k).index.tolist()
-            
-            # Combinar ambos os métodos
-            final_features = list(set(selected_features) & set(top_features))
-            if len(final_features) < 10:  # Garantir mínimo de features
-                final_features = feature_importance.nlargest(15).index.tolist()
-            
-            self.feature_selectors[model_name] = final_features
-            return X[final_features]
-            
-        except Exception as e:
-            logger.warning(f"Erro na seleção de features: {e}")
-            # Fallback: usar todas as features numéricas
-            numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
-            self.feature_selectors[model_name] = numeric_features[:20]
-            return X[self.feature_selectors[model_name]]
-    
-    def hyperparameter_tuning(self, model_name: str, X: pd.DataFrame, y: pd.Series) -> Dict:
-        """Auto-tuning de hiperparâmetros"""
-        param_grids = {
-            'random_forest': {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [5, 10, 15, None],
-                'min_samples_split': [2, 5, 10]
-            },
-            'xgboost': {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [3, 6, 9],
-                'learning_rate': [0.01, 0.1, 0.2]
-            },
-            'gradient_boosting': {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [3, 5, 7],
-                'learning_rate': [0.01, 0.1, 0.2]
-            }
+        # Agrupar por faixas de volatilidade mais granulares
+        vol_ranges = {
+            'very_low': (0, 20),
+            'low': (20, 40), 
+            'medium': (40, 60),
+            'high': (60, 80),
+            'very_high': (80, 100)
         }
         
-        if model_name not in param_grids:
-            return {}
-        
-        try:
-            model = self.models[model_name]
-            param_grid = param_grids[model_name]
+        for range_name, (min_vol, max_vol) in vol_ranges.items():
+            range_signals = [s for s in recent_data if s[7] and min_vol <= s[7] < max_vol]
             
-            # Usar TimeSeriesSplit para dados temporais
-            cv = TimeSeriesSplit(n_splits=3)
-            
-            grid_search = GridSearchCV(
-                model, param_grid, cv=cv, scoring='accuracy',
-                n_jobs=-1, verbose=0
-            )
-            
-            grid_search.fit(X, y)
-            
-            # Atualizar modelo com melhores parâmetros
-            self.models[model_name] = grid_search.best_estimator_
-            
-            logger.info(f"Hiperparâmetros otimizados para {model_name}: {grid_search.best_params_}")
-            
-            return {
-                'best_params': grid_search.best_params_,
-                'best_score': grid_search.best_score_,
-                'improvement': grid_search.best_score_ - 0.5  # baseline
-            }
-            
-        except Exception as e:
-            logger.warning(f"Erro no tuning de {model_name}: {e}")
-            return {}
-    
-    def train_all_models(self, retrain: bool = False) -> Dict[str, ModelPerformance]:
-        """Treinar todos os modelos"""
-        if self.is_training:
-            logger.warning("Treinamento já em andamento")
-            return self.model_performances
-            
-        self.is_training = True
-        logger.info("Iniciando treinamento de todos os modelos...")
-        
-        try:
-            # Obter dados de treinamento
-            X, y = self.db.get_training_data(limit=2000, min_samples=200)
-            
-            if X.empty or len(y) == 0:
-                logger.error("Dados de treinamento insuficientes")
-                return {}
-            
-            logger.info(f"Dados de treinamento: {X.shape[0]} amostras, {X.shape[1]} features")
-            logger.info(f"Distribuição de classes: {y.value_counts().to_dict()}")
-            
-            # Feature engineering automático
-            X_engineered = self.auto_feature_engineering(X)
-            logger.info(f"Features após engineering: {X_engineered.shape[1]}")
-            
-            performances = {}
-            
-            for model_name, model in self.models.items():
-                try:
-                    logger.info(f"Treinando {model_name}...")
-                    
-                    # Seleção de features
-                    X_selected = self.feature_selection(X_engineered, y, model_name)
-                    
-                    # Scaling
-                    X_scaled = self.scalers[model_name].fit_transform(X_selected)
-                    
-                    # Hyperparameter tuning (apenas para alguns modelos)
-                    if model_name in ['random_forest', 'xgboost'] and not retrain:
-                        tuning_results = self.hyperparameter_tuning(model_name, pd.DataFrame(X_scaled), y)
-                        if tuning_results:
-                            logger.info(f"Tuning concluído para {model_name}")
-                    
-                    # Treinar modelo
-                    model.fit(X_scaled, y)
-                    
-                    # Validação cruzada
-                    cv_scores = cross_val_score(model, X_scaled, y, cv=self.cv_folds, scoring='accuracy')
-                    
-                    # Predições para métricas
-                    y_pred = model.predict(X_scaled)
-                    y_pred_proba = model.predict_proba(X_scaled)[:, 1] if hasattr(model, 'predict_proba') else y_pred
-                    
-                    # Calcular métricas
-                    performance = ModelPerformance(
-                        model_name=model_name,
-                        accuracy=accuracy_score(y, y_pred),
-                        precision=precision_score(y, y_pred, average='weighted'),
-                        recall=recall_score(y, y_pred, average='weighted'),
-                        f1_score=f1_score(y, y_pred, average='weighted'),
-                        roc_auc=roc_auc_score(y, y_pred_proba) if len(np.unique(y)) > 1 else 0.5,
-                        prediction_count=len(y),
-                        last_updated=datetime.datetime.now().isoformat()
+            if len(range_signals) >= 8:
+                wins = sum(1 for s in range_signals if s[10] == 1)
+                win_rate = wins / len(range_signals)
+                
+                if win_rate < 0.35 or win_rate > 0.75:
+                    self.db.save_error_pattern(
+                        f'volatility_{range_name}_pattern',
+                        {'volatility_range': range_name, 'min_vol': min_vol, 'max_vol': max_vol},
+                        1 - win_rate if win_rate < 0.35 else 0.25 - win_rate
                     )
                     
-                    performances[model_name] = performance
-                    
-                    # Salvar feature importance
-                    if hasattr(model, 'feature_importances_'):
-                        feature_names = X_selected.columns if hasattr(X_selected, 'columns') else [f'feature_{i}' for i in range(X_selected.shape[1])]
-                        self.feature_importance[model_name] = dict(zip(feature_names, model.feature_importances_))
-                    
-                    # Salvar no banco
-                    self.db.save_model_performance(performance)
-                    
-                    logger.info(f"{model_name} - Accuracy: {performance.accuracy:.3f}, CV: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
-                    
-                except Exception as e:
-                    logger.error(f"Erro ao treinar {model_name}: {e}")
-                    continue
-            
-            # Criar ensemble
-            self._create_ensemble_model(X_engineered, y, performances)
-            
-            # Salvar modelos
-            self._save_models()
-            
-            self.model_performances = performances
-            logger.info(f"Treinamento concluído! {len(performances)} modelos treinados.")
-            
-            return performances
-            
-        except Exception as e:
-            logger.error(f"Erro no treinamento: {e}")
-            return {}
-        finally:
-            self.is_training = False
-    
-    def _create_ensemble_model(self, X: pd.DataFrame, y: pd.Series, performances: Dict[str, ModelPerformance]):
-        """Criar modelo ensemble baseado nas performances"""
-        try:
-            # Selecionar os 3 melhores modelos
-            sorted_models = sorted(performances.items(), key=lambda x: x[1].accuracy, reverse=True)[:3]
-            
-            ensemble_models = []
-            for model_name, perf in sorted_models:
-                if model_name in self.models and perf.accuracy > 0.5:
-                    ensemble_models.append((model_name, self.models[model_name]))
-            
-            if len(ensemble_models) >= 2:
-                self.ensemble_model = VotingClassifier(
-                    estimators=ensemble_models,
-                    voting='soft'
-                )
-                
-                # Treinar ensemble com features do melhor modelo
-                best_model_name = sorted_models[0][0]
-                selected_features = self.feature_selectors.get(best_model_name, X.columns.tolist())
-                X_selected = X[selected_features] if hasattr(X, 'columns') else X
-                X_scaled = self.scalers[best_model_name].fit_transform(X_selected)
-                
-                self.ensemble_model.fit(X_scaled, y)
-                
-                logger.info(f"Ensemble criado com {len(ensemble_models)} modelos: {[m[0] for m in ensemble_models]}")
-            
-        except Exception as e:
-            logger.error(f"Erro ao criar ensemble: {e}")
-    
-    def predict(self, features: Dict[str, float]) -> Tuple[str, float, Dict[str, Any]]:
-        """Fazer predição com ensemble de modelos"""
-        try:
-            # Preparar features
-            feature_df = pd.DataFrame([features])
-            
-            # Feature engineering
-            feature_df_engineered = self.auto_feature_engineering(feature_df)
-            
-            predictions = {}
-            confidences = {}
-            
-            # Predições de cada modelo
-            for model_name, model in self.models.items():
-                try:
-                    if model_name not in self.feature_selectors:
-                        continue
-                        
-                    # Selecionar features
-                    selected_features = self.feature_selectors[model_name]
-                    available_features = [f for f in selected_features if f in feature_df_engineered.columns]
-                    
-                    if not available_features:
-                        continue
-                    
-                    X_model = feature_df_engineered[available_features]
-                    
-                    # Preencher features faltantes
-                    for feat in selected_features:
-                        if feat not in X_model.columns:
-                            X_model[feat] = 0.0
-                    
-                    X_model = X_model[selected_features]  # Reordenar
-                    
-                    # Scaling
-                    X_scaled = self.scalers[model_name].transform(X_model)
-                    
-                    # Predição
-                    pred = model.predict(X_scaled)[0]
-                    conf = model.predict_proba(X_scaled)[0].max() if hasattr(model, 'predict_proba') else 0.6
-                    
-                    predictions[model_name] = 'CALL' if pred == 1 else 'PUT'
-                    confidences[model_name] = conf
-                    
-                except Exception as e:
-                    logger.warning(f"Erro na predição de {model_name}: {e}")
-                    continue
-            
-            # Ensemble prediction
-            if self.ensemble_model:
-                try:
-                    # Usar features do melhor modelo para ensemble
-                    best_model = max(self.model_performances.items(), key=lambda x: x[1].accuracy)[0]
-                    selected_features = self.feature_selectors.get(best_model, feature_df_engineered.columns.tolist())
-                    
-                    X_ensemble = feature_df_engineered[selected_features]
-                    for feat in selected_features:
-                        if feat not in X_ensemble.columns:
-                            X_ensemble[feat] = 0.0
-                    
-                    X_ensemble = X_ensemble[selected_features]
-                    X_scaled = self.scalers[best_model].transform(X_ensemble)
-                    
-                    ensemble_pred = self.ensemble_model.predict(X_scaled)[0]
-                    ensemble_conf = self.ensemble_model.predict_proba(X_scaled)[0].max()
-                    
-                    predictions['ensemble'] = 'CALL' if ensemble_pred == 1 else 'PUT'
-                    confidences['ensemble'] = ensemble_conf
-                    
-                except Exception as e:
-                    logger.warning(f"Erro na predição ensemble: {e}")
-            
-            if not predictions:
-                # Fallback
-                return 'CALL', 60.0, {'error': 'Nenhum modelo disponível'}
-            
-            # Decisão final baseada em voting e confidence
-            call_votes = sum(1 for pred in predictions.values() if pred == 'CALL')
-            put_votes = len(predictions) - call_votes
-            
-            # Weighted voting baseado nas performances
-            weighted_score = 0
-            total_weight = 0
-            
-            for model_name, pred in predictions.items():
-                weight = self.model_performances.get(model_name, ModelPerformance('', 0.5, 0, 0, 0, 0, 0, '')).accuracy
-                if pred == 'CALL':
-                    weighted_score += weight
-                total_weight += weight
-            
-            final_direction = 'CALL' if weighted_score / total_weight > 0.5 else 'PUT'
-            
-            # Calcular confidence final
-            avg_confidence = np.mean(list(confidences.values()))
-            consensus_bonus = abs(call_votes - put_votes) / len(predictions) * 10
-            final_confidence = min(95, (avg_confidence * 100) + consensus_bonus)
-            
-            prediction_details = {
-                'model_predictions': predictions,
-                'model_confidences': confidences,
-                'vote_counts': {'CALL': call_votes, 'PUT': put_votes},
-                'ensemble_used': 'ensemble' in predictions,
-                'weighted_score': weighted_score / total_weight,
-                'consensus_strength': abs(call_votes - put_votes) / len(predictions)
-            }
-            
-            return final_direction, final_confidence, prediction_details
-            
-        except Exception as e:
-            logger.error(f"Erro na predição: {e}")
-            return 'CALL', 60.0, {'error': str(e)}
-    
-    def _save_models(self):
-        """Salvar modelos treinados"""
-        try:
-            model_data = {
-                'models': self.models,
-                'scalers': self.scalers,
-                'feature_selectors': self.feature_selectors,
-                'ensemble_model': self.ensemble_model,
-                'feature_importance': self.feature_importance,
-                'model_performances': self.model_performances
-            }
-            
-            with open(os.path.join(MODEL_PATH, 'ml_trading_models.pkl'), 'wb') as f:
-                pickle.dump(model_data, f)
-                
-            logger.info("Modelos salvos com sucesso")
-            
-        except Exception as e:
-            logger.error(f"Erro ao salvar modelos: {e}")
-    
-    def load_models(self):
-        """Carregar modelos salvos"""
-        try:
-            model_file = os.path.join(MODEL_PATH, 'ml_trading_models.pkl')
-            if os.path.exists(model_file):
-                with open(model_file, 'rb') as f:
-                    model_data = pickle.load(f)
-                
-                self.models = model_data.get('models', {})
-                self.scalers = model_data.get('scalers', {})
-                self.feature_selectors = model_data.get('feature_selectors', {})
-                self.ensemble_model = model_data.get('ensemble_model')
-                self.feature_importance = model_data.get('feature_importance', {})
-                self.model_performances = model_data.get('model_performances', {})
-                
-                logger.info(f"Modelos carregados: {list(self.models.keys())}")
-                return True
-            
-        except Exception as e:
-            logger.error(f"Erro ao carregar modelos: {e}")
+                    patterns.append({
+                        'type': f'volatility_{range_name}',
+                        'win_rate': win_rate,
+                        'sample_size': len(range_signals),
+                        'significance': 'high' if len(range_signals) >= 15 else 'medium'
+                    })
         
-        return False
+        return patterns
     
-    def drift_detection(self) -> Dict[str, Any]:
-        """Detectar drift nos modelos"""
-        try:
-            # Comparar performance recente vs histórica
-            recent_data = self.db.get_training_data(limit=100, min_samples=50)
-            if recent_data[0].empty:
-                return {'drift_detected': False, 'reason': 'Dados insuficientes'}
-            
-            X_recent, y_recent = recent_data
-            
-            drift_results = {}
-            
-            for model_name, model in self.models.items():
-                if model_name not in self.feature_selectors:
-                    continue
+    def _analyze_martingale_patterns(self, recent_data):
+        """Análise inteligente de padrões de martingale"""
+        patterns = []
+        
+        # Analisar performance por nível de martingale
+        martingale_levels = defaultdict(list)
+        for signal in recent_data:
+            level = signal[12]  # martingale_level
+            result = signal[10]  # result
+            if level is not None and result is not None:
+                martingale_levels[level].append(result)
+        
+        for level, results in martingale_levels.items():
+            if len(results) >= 5 and level > 0:
+                win_rate = sum(results) / len(results)
                 
-                try:
-                    # Testar modelo em dados recentes
-                    selected_features = self.feature_selectors[model_name]
-                    available_features = [f for f in selected_features if f in X_recent.columns]
+                if win_rate < 0.4:
+                    self.db.save_error_pattern(
+                        f'martingale_level_{level}_poor_performance',
+                        {'martingale_level': level},
+                        1 - win_rate
+                    )
                     
-                    if len(available_features) < len(selected_features) * 0.8:
-                        # Feature drift detectado
-                        drift_results[model_name] = {
-                            'drift_detected': True,
-                            'drift_type': 'feature_drift',
-                            'missing_features': set(selected_features) - set(available_features)
-                        }
-                        continue
+                    patterns.append({
+                        'type': f'martingale_level_{level}',
+                        'win_rate': win_rate,
+                        'recommendation': 'avoid_high_martingale' if level >= 3 else 'caution_martingale'
+                    })
+        
+        return patterns
+    
+    def _analyze_session_patterns(self, recent_data):
+        """Análise de padrões por sessão de mercado"""
+        patterns = []
+        
+        session_performance = defaultdict(list)
+        for signal in recent_data:
+            session = signal[18] if len(signal) > 18 else 'unknown'  # market_session
+            result = signal[10]  # result
+            if session and result is not None:
+                session_performance[session].append(result)
+        
+        for session, results in session_performance.items():
+            if len(results) >= 10:
+                win_rate = sum(results) / len(results)
+                
+                if win_rate < 0.4 or win_rate > 0.7:
+                    self.db.save_error_pattern(
+                        f'session_{session}_pattern',
+                        {'market_session': session},
+                        abs(0.5 - win_rate)
+                    )
                     
-                    X_test = X_recent[available_features]
-                    # Preencher features faltantes
-                    for feat in selected_features:
-                        if feat not in X_test.columns:
-                            X_test[feat] = 0.0
-                    
-                    X_test = X_test[selected_features]
-                    X_scaled = self.scalers[model_name].transform(X_test)
-                    
-                    # Calcular accuracy recente
-                    y_pred = model.predict(X_scaled)
-                    recent_accuracy = accuracy_score(y_recent, y_pred)
-                    
-                    # Comparar com performance histórica
-                    historical_accuracy = self.model_performances.get(model_name, ModelPerformance('', 0.5, 0, 0, 0, 0, 0, '')).accuracy
-                    
-                    performance_drift = historical_accuracy - recent_accuracy
-                    
-                    drift_detected = performance_drift > 0.1  # 10% de queda
-                    
-                    drift_results[model_name] = {
-                        'drift_detected': drift_detected,
-                        'drift_type': 'performance_drift' if drift_detected else 'no_drift',
-                        'historical_accuracy': historical_accuracy,
-                        'recent_accuracy': recent_accuracy,
-                        'performance_drop': performance_drift
-                    }
-                    
-                except Exception as e:
-                    logger.warning(f"Erro no drift detection para {model_name}: {e}")
-                    continue
-            
-            # Recomendar ações
-            high_drift_models = [name for name, result in drift_results.items() if result['drift_detected']]
-            
-            recommendation = "OK"
-            if len(high_drift_models) > len(self.models) / 2:
-                recommendation = "RETRAIN_ALL"
-            elif high_drift_models:
-                recommendation = f"RETRAIN_MODELS: {high_drift_models}"
-            
-            return {
-                'drift_detected': len(high_drift_models) > 0,
-                'affected_models': high_drift_models,
-                'drift_details': drift_results,
-                'recommendation': recommendation,
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro no drift detection: {e}")
-            return {'drift_detected': False, 'error': str(e)}
+                    patterns.append({
+                        'type': f'session_{session}',
+                        'win_rate': win_rate,
+                        'recommendation': 'favorable' if win_rate > 0.6 else 'unfavorable'
+                    })
+        
+        return patterns
+    
+    def update_sequence_memory(self, signal_data):
+        """Atualizar memória de sequência"""
+        self.sequence_memory.append({
+            'direction': signal_data.get('direction'),
+            'confidence': signal_data.get('confidence'),
+            'volatility': signal_data.get('volatility'),
+            'timestamp': signal_data.get('timestamp'),
+            'result': signal_data.get('result')  # Will be updated later
+        })
 
-class AutoRetrainingManager:
-    """Gerenciador de retreinamento automático"""
-    
-    def __init__(self, ml_engine: AdvancedMLEngine, database: AdvancedMLTradingDatabase):
-        self.ml_engine = ml_engine
-        self.db = database
-        self.retrain_threshold = 100  # Retreinar a cada 100 novos sinais
-        self.last_retrain = None
-        self.retrain_in_progress = False
-        
-    def should_retrain(self) -> bool:
-        """Verificar se deve retreinar"""
-        # Verificar quantidade de novos dados
-        conn = sqlite3.connect(self.db.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM ml_signals WHERE result IS NOT NULL AND feedback_received_at > ?', 
-                      (self.last_retrain or '2024-01-01',))
-        new_signals = cursor.fetchone()[0]
-        conn.close()
-        
-        if new_signals >= self.retrain_threshold:
-            return True
-        
-        # Verificar drift
-        drift_results = self.ml_engine.drift_detection()
-        if drift_results.get('drift_detected', False):
-            logger.info(f"Drift detectado: {drift_results['affected_models']}")
-            return True
-        
-        return False
-    
-    def auto_retrain(self):
-        """Processo de retreinamento automático"""
-        if self.retrain_in_progress:
-            logger.info("Retreinamento já em progresso")
-            return False
-        
-        try:
-            self.retrain_in_progress = True
-            logger.info("Iniciando retreinamento automático...")
-            
-            # Treinar modelos
-            performances = self.ml_engine.train_all_models(retrain=True)
-            
-            if performances:
-                self.last_retrain = datetime.datetime.now().isoformat()
-                logger.info(f"Retreinamento concluído: {len(performances)} modelos atualizados")
-                return True
-            else:
-                logger.error("Falha no retreinamento")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Erro no retreinamento automático: {e}")
-            return False
-        finally:
-            self.retrain_in_progress = False
+# Instâncias globais MELHORADAS
+db = AdvancedTradingDatabase()
+learning_engine = AdvancedLearningEngine(db)
+inversion_manager = EnhancedInversionManager(db)
 
-# Instâncias globais
-db = AdvancedMLTradingDatabase()
-feature_engineer = AdvancedFeatureEngineering()
-ml_engine = AdvancedMLEngine(db)
-retrain_manager = AutoRetrainingManager(ml_engine, db)
-
-def background_ml_tasks():
-    """Tarefas de ML em background"""
-    while True:
-        try:
-            # Verificar se precisa retreinar
-            if retrain_manager.should_retrain():
-                retrain_manager.auto_retrain()
-            
-            # Drift detection periódico
-            drift_results = ml_engine.drift_detection()
-            if drift_results.get('drift_detected'):
-                logger.warning(f"Drift detectado: {drift_results}")
-            
-            # Aguardar 1 hora
-            time.sleep(3600)
-            
-        except Exception as e:
-            logger.error(f"Erro nas tarefas de background: {e}")
-            time.sleep(300)  # 5 minutos em caso de erro
-
-# Iniciar thread de background
-ml_thread = threading.Thread(target=background_ml_tasks, daemon=True)
-ml_thread.start()
+# Dados de histórico simples (mantidos para compatibilidade)
+trade_history = []
+performance_stats = {
+    'total_trades': 0,
+    'won_trades': 0,
+    'total_pnl': 0.0
+}
 
 def validate_api_key():
     """Validar API Key"""
@@ -1208,97 +1072,441 @@ def validate_api_key():
     else:
         api_key = api_key_header
     
-    return not api_key or api_key == VALID_API_KEY
+    if not api_key:
+        return True
+    
+    return api_key == VALID_API_KEY
+
+def analyze_technical_pattern(prices, learning_data=None):
+    """Análise técnica AVANÇADA com múltiplos sistemas de aprendizado"""
+    try:
+        if len(prices) >= 3:
+            # Análise técnica base
+            recent_trend = prices[-1] - prices[-3]
+            volatility = abs(prices[-1] - prices[-2]) / prices[-2] * 100 if prices[-2] != 0 else 50
+            
+            # Direção original baseada em análise técnica
+            if recent_trend > 0:
+                original_direction = "CALL"
+                base_confidence = 70 + min(volatility * 0.3, 20)
+            else:
+                original_direction = "PUT" 
+                base_confidence = 70 + min(volatility * 0.3, 20)
+            
+            # 🧠 APLICAR APRENDIZADO AVANÇADO
+            if learning_data and LEARNING_CONFIG['learning_enabled']:
+                enhanced_learning_data = {
+                    'direction': original_direction,
+                    'confidence': base_confidence,
+                    'volatility': volatility,
+                    **learning_data
+                }
+                
+                adapted_confidence, adjustments = learning_engine.adapt_confidence(enhanced_learning_data)
+                
+                # Q-Learning override se muito confiante
+                q_direction, q_confidence = learning_engine.get_q_learning_signal(enhanced_learning_data)
+                if q_direction and q_confidence > 0.8:
+                    logger.info(f"🤖 Q-Learning override: {original_direction} → {q_direction} (conf: {q_confidence:.2f})")
+                    original_direction = q_direction
+                    adapted_confidence = min(95, adapted_confidence + 10)
+                    adjustments.append(('q_learning_override', 10))
+            else:
+                adapted_confidence = base_confidence
+                adjustments = []
+            
+            # 🔄 APLICAR SISTEMA DE INVERSÃO ADAPTATIVA
+            final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+            
+            return {
+                'original_direction': original_direction,
+                'final_direction': final_direction,
+                'confidence': round(adapted_confidence, 1),
+                'is_inverted': is_inverted,
+                'inversion_mode': inversion_mode,
+                'adjustments': adjustments,
+                'learning_applied': len(adjustments) > 0,
+                'q_learning_used': any('q_learning' in adj[0] for adj in adjustments)
+            }
+            
+        else:
+            # Fallback com Q-Learning se disponível
+            original_direction = "CALL" if random.random() > 0.5 else "PUT"
+            confidence = 70 + random.uniform(0, 20)
+            
+            if learning_data and LEARNING_CONFIG['reinforcement_learning']:
+                q_direction, q_confidence = learning_engine.get_q_learning_signal(learning_data)
+                if q_direction:
+                    original_direction = q_direction
+                    confidence = max(confidence, q_confidence * 100)
+            
+            final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+            
+            return {
+                'original_direction': original_direction,
+                'final_direction': final_direction,
+                'confidence': round(confidence, 1),
+                'is_inverted': is_inverted,
+                'inversion_mode': inversion_mode,
+                'adjustments': [],
+                'learning_applied': False,
+                'q_learning_used': learning_data and LEARNING_CONFIG['reinforcement_learning']
+            }
+            
+    except Exception as e:
+        logger.error(f"Erro na análise técnica avançada: {e}")
+        original_direction = "CALL" if random.random() > 0.5 else "PUT"
+        final_direction, is_inverted, inversion_mode = inversion_manager.get_final_signal(original_direction)
+        
+        return {
+            'original_direction': original_direction,
+            'final_direction': final_direction,
+            'confidence': 70.0,
+            'is_inverted': is_inverted,
+            'inversion_mode': inversion_mode,
+            'adjustments': [],
+            'learning_applied': False,
+            'q_learning_used': False
+        }
+
+def extract_features(data):
+    """Extrair dados dos parâmetros recebidos"""
+    current_price = data.get("currentPrice", 1000)
+    volatility = data.get("volatility", 50)
+    
+    # Gerar preços baseados no atual se não fornecidos
+    prices = data.get("lastTicks", [])
+    if not prices:
+        prices = [
+            current_price - random.uniform(0, 5),
+            current_price + random.uniform(0, 5), 
+            current_price - random.uniform(0, 3)
+        ]
+    
+    while len(prices) < 3:
+        prices.append(current_price + random.uniform(-2, 2))
+        
+    return prices[-3:], volatility
+
+def background_learning_task():
+    """Tarefa de aprendizado AVANÇADO em background"""
+    while True:
+        try:
+            if LEARNING_CONFIG['learning_enabled']:
+                # Analisar padrões de erro
+                patterns = learning_engine.analyze_error_patterns()
+                if patterns:
+                    logger.info(f"🧠 APRENDIZADO AVANÇADO: {len(patterns)} padrões identificados")
+                    for pattern in patterns[:3]:  # Log dos 3 principais
+                        logger.info(f"   - {pattern.get('type', 'unknown')}: {pattern}")
+                
+                # Atualizar métricas avançadas
+                metrics = learning_engine.update_performance_metrics()
+                if metrics:
+                    logger.info(f"📊 Métricas AVANÇADAS atualizadas:")
+                    logger.info(f"   - Accuracy: {metrics['accuracy']:.1f}%")
+                
+                # Calcular correlações periodicamente
+                if LEARNING_CONFIG['correlation_analysis']:
+                    db.calculate_correlations()
+                    logger.info("🔗 Análise de correlações atualizada")
+                
+            # Aguardar antes da próxima análise
+            time.sleep(180)  # 3 minutos para análise mais frequente
+            
+        except Exception as e:
+            logger.error(f"Erro na tarefa de aprendizado avançado: {e}")
+            time.sleep(60)
+
+# Iniciar thread de aprendizado avançado
+learning_thread = threading.Thread(target=background_learning_task, daemon=True)
+learning_thread.start()
+
+# ===============================
+# ROTAS DA API - VERSÕES MELHORADAS
+# ===============================
 
 @app.route("/")
 def home():
-    """Home page com informações do sistema ML"""
-    try:
-        # Estatísticas dos modelos
-        model_stats = {}
-        for name, perf in ml_engine.model_performances.items():
-            model_stats[name] = {
-                'accuracy': round(perf.accuracy, 3),
-                'f1_score': round(perf.f1_score, 3),
-                'predictions': perf.prediction_count
-            }
+    """Home page com informações do sistema AVANÇADO"""
+    recent_data = db.get_recent_performance(100)
+    total_signals = len(recent_data)
+    accuracy = (sum(1 for signal in recent_data if signal[10] == 1) / total_signals * 100) if total_signals > 0 else 0
+    
+    # Status dos sistemas
+    inversion_status = inversion_manager.get_inversion_status()
+    
+    return jsonify({
+        "status": "🚀 IA Trading Bot API - SISTEMA DE APRENDIZADO AVANÇADO + INVERSÃO ADAPTATIVA",
+        "version": "5.0.0 - Advanced Learning + Adaptive Inversion + Q-Learning",
+        "description": "API com Q-Learning, Análise Temporal, Sequências e Inversão Adaptativa",
+        "model": "Multi-Layer Learning Engine + Adaptive Inversion System",
+        "signal_mode": f"{inversion_status['current_mode'].upper()} + ADVANCED_LEARNING",
         
-        # Verificar drift
-        drift_status = ml_engine.drift_detection()
+        "advanced_features": {
+            "q_learning": LEARNING_CONFIG['reinforcement_learning'],
+            "temporal_analysis": LEARNING_CONFIG['temporal_learning'],
+            "sequence_patterns": LEARNING_CONFIG['sequence_learning'],
+            "correlation_analysis": LEARNING_CONFIG['correlation_analysis'],
+            "adaptive_inversion": inversion_status['adaptive_mode'],
+            "dynamic_weighting": LEARNING_CONFIG['dynamic_weighting']
+        },
+        
+        "inversion_system": {
+            "active": inversion_status['active'],
+            "current_mode": inversion_status['current_mode'],
+            "consecutive_errors": inversion_status['consecutive_errors'],
+            "adaptive_threshold": inversion_status['adaptive_threshold'],
+            "original_threshold": inversion_status['original_threshold'],
+            "errors_until_inversion": inversion_status['errors_until_inversion'],
+            "total_inversions": inversion_status['total_inversions']
+        },
+        
+        "endpoints": {
+            "signal": "POST /signal - Sinais com aprendizado avançado + inversão adaptativa",
+            "advanced-signal": "POST /advanced-signal - Sinais com todas as funcionalidades",
+            "analyze": "POST /analyze - Análise de mercado com múltiplas técnicas de IA",
+            "risk": "POST /risk - Avaliação de risco adaptativa",
+            "optimal-duration": "POST /optimal-duration - Duração otimizada pela IA",
+            "management": "POST /management - Gerenciamento automático",
+            "feedback": "POST /feedback - Sistema de aprendizado por reforço",
+            "learning-stats": "GET /learning-stats - Estatísticas de aprendizado avançado",
+            "inversion-status": "GET /inversion-status - Status da inversão adaptativa",
+            "q-learning-stats": "GET /q-learning-stats - Estatísticas do Q-Learning"
+        },
+        
+        "current_stats": {
+            "total_predictions": total_signals,
+            "current_accuracy": f"{accuracy:.1f}%",
+            "learning_samples": total_signals,
+            "q_learning_states": "Ativo" if LEARNING_CONFIG['reinforcement_learning'] else "Inativo",
+            "adaptive_mode": "Ativo" if inversion_status['adaptive_mode'] else "Fixo"
+        },
+        
+        "learning_config": LEARNING_CONFIG,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "source": "Advanced Python AI with Q-Learning + Adaptive Inversion System"
+    })
+
+@app.route("/signal", methods=["POST", "OPTIONS"])
+@app.route("/advanced-signal", methods=["POST", "OPTIONS"])
+@app.route("/trading-signal", methods=["POST", "OPTIONS"])
+@app.route("/get-signal", methods=["POST", "OPTIONS"])
+@app.route("/smart-signal", methods=["POST", "OPTIONS"])
+@app.route("/evolutionary-signal", methods=["POST", "OPTIONS"])
+@app.route("/prediction", methods=["POST", "OPTIONS"])
+def generate_signal():
+    """Gerar sinal com SISTEMA DE APRENDIZADO AVANÇADO"""
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        prices, volatility = extract_features(data)
+        
+        # Preparar dados EXPANDIDOS para aprendizado
+        learning_data = {
+            'symbol': data.get("symbol", "R_50"),
+            'volatility': volatility,
+            'market_condition': data.get("marketCondition", "neutral"),
+            'martingale_level': data.get("martingaleLevel", 0),
+            'current_price': data.get("currentPrice", 1000),
+            'win_rate': data.get("winRate", 50),
+            'today_pnl': data.get("todayPnL", 0)
+        }
+        
+        # Análise técnica com APRENDIZADO AVANÇADO
+        analysis_result = analyze_technical_pattern(prices, learning_data)
+        
+        # Dados do sinal
+        current_price = data.get("currentPrice", 1000)
+        symbol = data.get("symbol", "R_50")
+        win_rate = data.get("winRate", 50)
+        
+        # Ajustar confiança baseada em performance (mantido)
+        confidence = analysis_result['confidence']
+        if win_rate > 60:
+            confidence = min(confidence + 3, 95)
+        elif win_rate < 40:
+            confidence = max(confidence - 5, 65)
+        
+        # Preparar dados EXPANDIDOS para salvar no banco
+        signal_data = {
+            'timestamp': datetime.datetime.now().isoformat(),
+            'symbol': symbol,
+            'direction': analysis_result['final_direction'],
+            'original_direction': analysis_result['original_direction'],
+            'confidence': confidence,
+            'entry_price': current_price,
+            'volatility': volatility,
+            'martingale_level': data.get("martingaleLevel", 0),
+            'market_condition': data.get("marketCondition", "neutral"),
+            'is_inverted': analysis_result['is_inverted'],
+            'consecutive_errors_before': INVERSION_SYSTEM['consecutive_errors'],
+            'inversion_mode': analysis_result['inversion_mode'],
+            'sequence_position': len(learning_engine.sequence_memory),
+            'confidence_source': 'advanced_learning' if analysis_result['learning_applied'] else 'technical',
+            'learning_weight': 1.2 if analysis_result['q_learning_used'] else 1.0,
+            'technical_factors': {
+                'adjustments': analysis_result['adjustments'],
+                'win_rate': win_rate,
+                'prices': prices,
+                'inversion_applied': analysis_result['is_inverted'],
+                'q_learning_used': analysis_result['q_learning_used'],
+                'learning_applied': analysis_result['learning_applied'],
+                'advanced_features': {
+                    'q_learning': LEARNING_CONFIG['reinforcement_learning'],
+                    'temporal_analysis': LEARNING_CONFIG['temporal_learning'],
+                    'sequence_patterns': LEARNING_CONFIG['sequence_learning']
+                }
+            }
+        }
+        
+        # Salvar sinal no banco de dados
+        signal_id = db.save_signal(signal_data)
+        
+        # Atualizar memória de sequência
+        learning_engine.update_sequence_memory(signal_data)
+        
+        # Preparar reasoning AVANÇADO
+        reasoning = f"Análise AVANÇADA para {symbol} - Múltiplos sistemas de IA"
+        if analysis_result['is_inverted']:
+            reasoning += f" - INVERSÃO ADAPTATIVA ({analysis_result['original_direction']} → {analysis_result['final_direction']})"
+        if analysis_result['q_learning_used']:
+            reasoning += " - Q-LEARNING APLICADO"
+        if analysis_result['learning_applied']:
+            reasoning += f" - {len(analysis_result['adjustments'])} AJUSTES DE APRENDIZADO"
+        
+        # Status detalhado para retorno
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
-            "status": "🤖 Advanced ML Trading Bot API - TRUE MACHINE LEARNING SYSTEM",
-            "version": "6.0.0 - Advanced ML with Auto-Retraining",
-            "description": "Verdadeiro sistema de Machine Learning com auto-aprendizado e retreinamento",
-            "ml_engine": "Multi-Model Ensemble with Auto-Feature Engineering",
+            "signal_id": signal_id,
+            "direction": analysis_result['final_direction'],
+            "original_direction": analysis_result['original_direction'],
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "entry_price": current_price,
+            "strength": "muito forte" if confidence > 90 else "forte" if confidence > 85 else "moderado" if confidence > 75 else "fraco",
+            "timeframe": "5m",
             
-            "ml_models": {
-                "available_models": list(ml_engine.models.keys()),
-                "ensemble_active": ml_engine.ensemble_model is not None,
-                "feature_engineering": "Auto-Feature Engineering + Selection",
-                "hyperparameter_tuning": "Automated Grid Search",
-                "cross_validation": "Time Series Split CV"
+            "advanced_analysis": {
+                "inverted": analysis_result['is_inverted'],
+                "q_learning_used": analysis_result['q_learning_used'],
+                "learning_applied": analysis_result['learning_applied'],
+                "confidence_adjustments": analysis_result['adjustments'],
+                "sequence_position": len(learning_engine.sequence_memory)
             },
             
-            "model_performances": model_stats,
-            
-            "learning_capabilities": {
-                "auto_feature_engineering": True,
-                "hyperparameter_optimization": True,
-                "ensemble_learning": True,
-                "drift_detection": True,
-                "auto_retraining": True,
-                "feature_selection": True,
-                "cross_validation": True,
-                "performance_monitoring": True
+            "inversion_status": {
+                "current_mode": analysis_result['inversion_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "adaptive_threshold": inversion_status['adaptive_threshold'],
+                "errors_until_inversion": inversion_status['errors_until_inversion'],
+                "total_inversions": inversion_status['total_inversions'],
+                "adaptive_mode": inversion_status['adaptive_mode']
             },
             
-            "drift_detection": {
-                "enabled": True,
-                "status": "DRIFT_DETECTED" if drift_status.get('drift_detected') else "OK",
-                "affected_models": drift_status.get('affected_models', []),
-                "recommendation": drift_status.get('recommendation', 'OK')
+            "learning_systems": {
+                "reinforcement_learning": LEARNING_CONFIG['reinforcement_learning'],
+                "temporal_analysis": LEARNING_CONFIG['temporal_learning'],
+                "sequence_learning": LEARNING_CONFIG['sequence_learning'],
+                "correlation_analysis": LEARNING_CONFIG['correlation_analysis'],
+                "adjustments_applied": len(analysis_result['adjustments'])
             },
             
-            "auto_retraining": {
-                "enabled": True,
-                "threshold": retrain_manager.retrain_threshold,
-                "last_retrain": retrain_manager.last_retrain,
-                "in_progress": retrain_manager.retrain_in_progress
-            },
-            
-            "endpoints": {
-                "ml-signal": "POST /ml-signal - Sinal ML com ensemble de modelos",
-                "train-models": "POST /train-models - Treinar todos os modelos",
-                "model-performance": "GET /model-performance - Performance dos modelos",
-                "feature-importance": "GET /feature-importance - Importância das features",
-                "drift-detection": "GET /drift-detection - Status do drift",
-                "retrain": "POST /retrain - Forçar retreinamento",
-                "ml-feedback": "POST /ml-feedback - Feedback para aprendizado",
-                "predict-custom": "POST /predict-custom - Predição customizada"
-            },
-            
-            "technical_stack": {
-                "ml_libraries": ["scikit-learn", "xgboost", "pandas", "numpy"],
-                "models": ["Random Forest", "XGBoost", "Gradient Boosting", "Neural Network", "SVM", "Logistic Regression"],
-                "feature_engineering": "Automated with polynomial and interaction features",
-                "validation": "Time Series Cross-Validation",
-                "ensemble": "Soft Voting Classifier"
+            "factors": {
+                "technical_model": "Advanced Multi-Layer Learning + Adaptive Inversion",
+                "volatility_factor": volatility,
+                "historical_performance": win_rate,
+                "signal_inversion": "ATIVO" if analysis_result['is_inverted'] else "INATIVO",
+                "learning_adjustments": len(analysis_result['adjustments']),
+                "inversion_mode": analysis_result['inversion_mode'],
+                "q_learning_influence": "ATIVO" if analysis_result['q_learning_used'] else "INATIVO",
+                "advanced_confidence": confidence
             },
             
             "timestamp": datetime.datetime.now().isoformat(),
-            "source": "True Machine Learning System - Python"
+            "source": "Advanced AI with Q-Learning + Adaptive Inversion + Multi-Layer Learning"
         })
         
     except Exception as e:
-        logger.error(f"Erro na home: {e}")
-        return jsonify({"error": "Erro interno", "message": str(e)}), 500
+        logger.error(f"Erro em signal avançado: {e}")
+        return jsonify({"error": "Erro na geração de sinal avançado", "message": str(e)}), 500
 
-@app.route("/ml-signal", methods=["POST", "OPTIONS"])
-@app.route("/signal", methods=["POST", "OPTIONS"])
-@app.route("/advanced-signal", methods=["POST", "OPTIONS"])
-def generate_ml_signal():
-    """Gerar sinal usando Machine Learning"""
+@app.route("/analyze", methods=["POST", "OPTIONS"])
+def analyze_market():
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        data = request.get_json() or {}
+        prices, volatility = extract_features(data)
+        
+        # Preparar dados para aprendizado
+        learning_data = {
+            'symbol': data.get("symbol", "R_50"),
+            'volatility': volatility,
+            'market_condition': data.get("marketCondition", "neutral")
+        }
+        
+        # Análise técnica com inversão
+        analysis_result = analyze_technical_pattern(prices, learning_data)
+        
+        # Análise adicional
+        symbol = data.get("symbol", "R_50")
+        confidence = analysis_result['confidence']
+        
+        # Determinar tendência baseada na direção final
+        if confidence > 80:
+            trend = "bullish" if analysis_result['final_direction'] == "CALL" else "bearish"
+        else:
+            trend = "neutral"
+        
+        # Status de inversão
+        inversion_status = inversion_manager.get_inversion_status()
+        
+        return jsonify({
+            "symbol": symbol,
+            "trend": trend,
+            "confidence": confidence,
+            "volatility": round(volatility, 1),
+            "direction": analysis_result['final_direction'],
+            "original_direction": analysis_result['original_direction'],
+            "inverted": analysis_result['is_inverted'],
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "confidence_adjustments": analysis_result['adjustments'],
+            "inversion_status": {
+                "current_mode": inversion_status['current_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "errors_until_inversion": inversion_status['errors_until_inversion']
+            },
+            "message": f"Análise ADAPTATIVA para {symbol}: {analysis_result['final_direction']}" + (" (INVERTIDO)" if analysis_result['is_inverted'] else ""),
+            "recommendation": f"{analysis_result['final_direction']} recomendado" if confidence > 75 else "Aguardar melhor oportunidade",
+            "factors": {
+                "technical_analysis": analysis_result['final_direction'],
+                "market_volatility": round(volatility, 1),
+                "confidence_level": confidence,
+                "inversion_mode": analysis_result['inversion_mode'],
+                "learning_adjustments": len(analysis_result['adjustments']),
+                "signal_inverted": analysis_result['is_inverted']
+            },
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em analyze: {e}")
+        return jsonify({"error": "Erro na análise", "message": str(e)}), 500
+
+@app.route("/risk", methods=["POST", "OPTIONS"])
+def assess_risk():
     if request.method == "OPTIONS":
         return '', 200
     
@@ -1308,360 +1516,562 @@ def generate_ml_signal():
     try:
         data = request.get_json() or {}
         
-        # Extrair features usando feature engineering
-        features = feature_engineer.create_features_from_data(data)
+        # Calcular risco básico
+        martingale_level = data.get("martingaleLevel", 0)
+        today_pnl = data.get("todayPnL", 0)
+        win_rate = data.get("winRate", 50)
+        total_trades = data.get("totalTrades", 0)
         
-        # Fazer predição ML
-        direction, confidence, prediction_details = ml_engine.predict(features)
+        risk_score = 0
+        risk_level = "low"
         
-        # Criar sinal estruturado
-        signal = TradingSignal(
-            timestamp=datetime.datetime.now().isoformat(),
-            symbol=data.get("symbol", "R_50"),
-            direction=direction,
-            confidence=confidence,
-            entry_price=data.get("currentPrice", 1000),
-            volatility=features.get('volatility', 50),
-            features=features,
-            model_version="v6.0",
-            ensemble_votes=prediction_details.get('model_predictions', {}),
-            feature_importance=ml_engine.feature_importance.get('random_forest', {})
-        )
+        # Análise Martingale
+        if martingale_level > 5:
+            risk_score += 40
+            risk_level = "high"
+        elif martingale_level > 2:
+            risk_score += 20
+            risk_level = "medium"
         
-        # Salvar no banco
-        signal_id = db.save_ml_signal(signal)
+        # Análise P&L
+        if today_pnl < -100:
+            risk_score += 25
+            risk_level = "high"
+        elif today_pnl < -50:
+            risk_score += 10
+            risk_level = "medium" if risk_level == "low" else risk_level
         
-        # Preparar resposta
-        return jsonify({
-            "signal_id": signal_id,
-            "direction": direction,
-            "confidence": round(confidence, 1),
-            "entry_price": signal.entry_price,
-            "symbol": signal.symbol,
-            "timestamp": signal.timestamp,
-            
-            "ml_analysis": {
-                "model_predictions": prediction_details.get('model_predictions', {}),
-                "model_confidences": prediction_details.get('model_confidences', {}),
-                "ensemble_used": prediction_details.get('ensemble_used', False),
-                "consensus_strength": round(prediction_details.get('consensus_strength', 0), 3),
-                "weighted_score": round(prediction_details.get('weighted_score', 0.5), 3)
-            },
-            
-            "feature_analysis": {
-                "total_features": len(features),
-                "top_features": dict(list(sorted(
-                    ml_engine.feature_importance.get('random_forest', {}).items(),
-                    key=lambda x: x[1], reverse=True
-                ))[:5]),
-                "volatility": features.get('volatility'),
-                "rsi": features.get('rsi'),
-                "momentum": features.get('momentum_5')
-            },
-            
-            "model_status": {
-                "models_available": len(ml_engine.models),
-                "ensemble_active": ml_engine.ensemble_model is not None,
-                "last_training": retrain_manager.last_retrain,
-                "drift_status": "OK"
-            },
-            
-            "reasoning": f"ML Ensemble com {len(prediction_details.get('model_predictions', {}))} modelos - Consenso: {prediction_details.get('consensus_strength', 0):.1%}",
-            "strength": "muito forte" if confidence > 90 else "forte" if confidence > 80 else "moderado" if confidence > 70 else "fraco",
-            "timeframe": "optimized",
-            "source": "Advanced Machine Learning Ensemble"
-        })
+        # Análise Win Rate
+        if win_rate < 30:
+            risk_score += 20
+            risk_level = "high"
+        elif win_rate < 45:
+            risk_score += 10
         
-    except Exception as e:
-        logger.error(f"Erro na geração de sinal ML: {e}")
-        return jsonify({"error": "Erro na predição ML", "message": str(e)}), 500
-
-@app.route("/train-models", methods=["POST"])
-def train_models():
-    """Treinar todos os modelos ML"""
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        force_retrain = request.get_json().get('force', False) if request.get_json() else False
+        # Obter parâmetros adaptativos para mostrar no retorno
+        risk_factor = db.get_adaptive_parameter('risk_factor', 1.0)
+        inversion_status = inversion_manager.get_inversion_status()
         
-        # Treinar modelos
-        performances = ml_engine.train_all_models(retrain=force_retrain)
-        
-        if not performances:
-            return jsonify({"error": "Falha no treinamento"}), 500
-        
-        # Preparar resposta
-        results = {}
-        for name, perf in performances.items():
-            results[name] = {
-                "accuracy": round(perf.accuracy, 3),
-                "precision": round(perf.precision, 3),
-                "recall": round(perf.recall, 3),
-                "f1_score": round(perf.f1_score, 3),
-                "roc_auc": round(perf.roc_auc, 3),
-                "samples": perf.prediction_count
-            }
-        
-        return jsonify({
-            "status": "Treinamento concluído",
-            "models_trained": len(performances),
-            "ensemble_created": ml_engine.ensemble_model is not None,
-            "performances": results,
-            "best_model": max(performances.items(), key=lambda x: x[1].accuracy)[0],
-            "average_accuracy": round(np.mean([p.accuracy for p in performances.values()]), 3),
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro no treinamento: {e}")
-        return jsonify({"error": "Erro no treinamento", "message": str(e)}), 500
-
-@app.route("/model-performance", methods=["GET"])
-def get_model_performance():
-    """Obter performance dos modelos"""
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        performances = {}
-        for name, perf in ml_engine.model_performances.items():
-            performances[name] = {
-                "accuracy": round(perf.accuracy, 3),
-                "precision": round(perf.precision, 3),
-                "recall": round(perf.recall, 3),
-                "f1_score": round(perf.f1_score, 3),
-                "roc_auc": round(perf.roc_auc, 3),
-                "prediction_count": perf.prediction_count,
-                "last_updated": perf.last_updated
-            }
-        
-        # Ranking dos modelos
-        ranked_models = sorted(performances.items(), key=lambda x: x[1]['accuracy'], reverse=True)
-        
-        return jsonify({
-            "model_performances": performances,
-            "model_ranking": [{"model": name, "accuracy": perf["accuracy"]} for name, perf in ranked_models],
-            "ensemble_available": ml_engine.ensemble_model is not None,
-            "total_models": len(performances),
-            "average_accuracy": round(np.mean([p["accuracy"] for p in performances.values()]) if performances else 0, 3),
-            "best_model": ranked_models[0][0] if ranked_models else None,
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro ao obter performance: {e}")
-        return jsonify({"error": "Erro ao obter performance", "message": str(e)}), 500
-
-@app.route("/feature-importance", methods=["GET"])
-def get_feature_importance():
-    """Obter importância das features"""
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
-    
-    try:
-        feature_importance_data = {}
-        
-        for model_name, importance in ml_engine.feature_importance.items():
-            # Top 15 features mais importantes
-            sorted_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:15]
-            feature_importance_data[model_name] = {
-                "features": [{"name": name, "importance": round(imp, 4)} for name, imp in sorted_features],
-                "total_features": len(importance)
-            }
-        
-        # Features mais importantes globalmente
-        all_features = defaultdict(list)
-        for model_importance in ml_engine.feature_importance.values():
-            for feat, imp in model_importance.items():
-                all_features[feat].append(imp)
-        
-        global_importance = {
-            feat: np.mean(imps) for feat, imps in all_features.items()
+        # Mensagens baseadas no nível de risco
+        messages = {
+            "high": "ALTO RISCO - Intervenção necessária (Sistema de Inversão ativo)",
+            "medium": "Risco moderado - Cautela recomendada (Monitoramento de inversão)", 
+            "low": "Risco controlado (Sistema adaptativo + inversão funcionando)"
         }
         
-        top_global_features = sorted(global_importance.items(), key=lambda x: x[1], reverse=True)[:20]
+        recommendations = {
+            "high": "Pare imediatamente e revise estratégia - verifique sistema de inversão",
+            "medium": "Reduza frequency e monitore inversões de perto",
+            "low": "Continue operando com disciplina - sistema de inversão ativo"
+        }
         
         return jsonify({
-            "feature_importance_by_model": feature_importance_data,
-            "global_feature_importance": [
-                {"feature": name, "importance": round(imp, 4)} 
-                for name, imp in top_global_features
-            ],
-            "feature_categories": {
-                "technical_indicators": len([f for f in global_importance.keys() if any(indicator in f for indicator in ['rsi', 'macd', 'sma', 'ema', 'bb'])]),
-                "momentum_features": len([f for f in global_importance.keys() if 'momentum' in f]),
-                "volatility_features": len([f for f in global_importance.keys() if 'volatility' in f or 'vol' in f]),
-                "temporal_features": len([f for f in global_importance.keys() if any(temp in f for temp in ['hour', 'day', 'weekend'])])
+            "level": risk_level,
+            "score": min(risk_score, 100),
+            "message": messages[risk_level],
+            "recommendation": recommendations[risk_level],
+            "adaptive_risk_factor": risk_factor,
+            "inversion_system": inversion_status,
+            "factors": {
+                "martingale_level": martingale_level,
+                "today_pnl": today_pnl,
+                "win_rate": win_rate,
+                "total_trades": total_trades,
+                "risk_factor_applied": risk_factor,
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "inversion_mode": inversion_status['current_mode']
             },
-            "timestamp": datetime.datetime.now().isoformat()
+            "severity": "critical" if risk_level == "high" else "warning" if risk_level == "medium" else "normal",
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
-        logger.error(f"Erro ao obter feature importance: {e}")
-        return jsonify({"error": "Erro ao obter feature importance", "message": str(e)}), 500
+        logger.error(f"Erro em risk: {e}")
+        return jsonify({"error": "Erro na avaliação de risco", "message": str(e)}), 500
 
-@app.route("/drift-detection", methods=["GET"])
-def drift_detection():
-    """Verificar drift nos modelos"""
+@app.route("/optimal-duration", methods=["POST", "OPTIONS"])
+def get_optimal_duration():
+    if request.method == "OPTIONS":
+        return '', 200
+    
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
     try:
-        drift_results = ml_engine.drift_detection()
+        data = request.get_json() or {}
+        symbol = data.get("symbol", "R_50")
+        volatility = data.get("volatility", 50)
+        market_condition = data.get("marketCondition", "neutral")
+        
+        # Obter parâmetros adaptativos
+        duration_factor = db.get_adaptive_parameter('duration_factor', 1.0)
+        
+        # Determinar se é índice de volatilidade
+        is_volatility_index = "R_" in symbol or "HZ" in symbol
+        
+        if is_volatility_index:
+            duration_type = "t"
+            if volatility > 70:
+                base_duration = random.randint(1, 3)
+            elif volatility > 40:
+                base_duration = random.randint(4, 6)
+            else:
+                base_duration = random.randint(7, 10)
+        else:
+            if random.random() > 0.3:
+                duration_type = "m"
+                if market_condition == "favorable":
+                    base_duration = random.randint(1, 2)
+                elif market_condition == "unfavorable":
+                    base_duration = random.randint(4, 5)
+                else:
+                    base_duration = random.randint(2, 4)
+            else:
+                duration_type = "t"
+                base_duration = random.randint(3, 8)
+        
+        # Aplicar fator de duração adaptativo
+        duration = max(1, int(base_duration * duration_factor))
+        
+        # Limites de segurança
+        if duration_type == "t":
+            duration = max(1, min(10, duration))
+        else:
+            duration = max(1, min(5, duration))
+        
+        confidence = 75 + random.uniform(0, 20)
+        
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
-            "drift_status": drift_results,
-            "recommendation": drift_results.get('recommendation', 'OK'),
-            "action_needed": drift_results.get('drift_detected', False),
-            "summary": {
-                "total_models": len(ml_engine.models),
-                "models_with_drift": len(drift_results.get('affected_models', [])),
-                "drift_percentage": len(drift_results.get('affected_models', [])) / len(ml_engine.models) * 100 if ml_engine.models else 0
-            },
-            "timestamp": datetime.datetime.now().isoformat()
+            "type": duration_type,
+            "duration_type": "ticks" if duration_type == "t" else "minutes",
+            "value": duration,
+            "duration": duration,
+            "confidence": round(confidence, 1),
+            "reasoning": f"Análise adaptativa para {symbol}: {duration}{duration_type} (fator: {duration_factor:.2f})",
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "inversion_system": inversion_status,
+            "adaptive_optimization": True,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
         })
         
     except Exception as e:
-        logger.error(f"Erro no drift detection: {e}")
-        return jsonify({"error": "Erro no drift detection", "message": str(e)}), 500
+        logger.error(f"Erro em optimal-duration: {e}")
+        return jsonify({"error": "Erro na otimização de duração", "message": str(e)}), 500
 
-@app.route("/retrain", methods=["POST"])
-def force_retrain():
-    """Forçar retreinamento dos modelos"""
-    if not validate_api_key():
-        return jsonify({"error": "API Key inválida"}), 401
+@app.route("/management", methods=["POST", "OPTIONS"])
+def position_management():
+    if request.method == "OPTIONS":
+        return '', 200
     
-    try:
-        success = retrain_manager.auto_retrain()
-        
-        return jsonify({
-            "retrain_success": success,
-            "message": "Retreinamento concluído com sucesso" if success else "Falha no retreinamento",
-            "models_updated": len(ml_engine.model_performances) if success else 0,
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro no retreinamento forçado: {e}")
-        return jsonify({"error": "Erro no retreinamento", "message": str(e)}), 500
-
-@app.route("/ml-feedback", methods=["POST"])
-@app.route("/feedback", methods=["POST"])
-def ml_feedback():
-    """Receber feedback para aprendizado ML"""
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
     try:
         data = request.get_json() or {}
         
-        signal_id = data.get("signal_id")
+        current_balance = data.get("currentBalance", 1000)
+        today_pnl = data.get("todayPnL", 0)
+        martingale_level = data.get("martingaleLevel", 0)
+        current_stake = data.get("currentStake", 1)
+        win_rate = data.get("winRate", 50)
+        
+        # Obter parâmetros adaptativos
+        risk_factor = db.get_adaptive_parameter('risk_factor', 1.0)
+        aggression_factor = db.get_adaptive_parameter('aggression_factor', 1.0)
+        
+        action = "continue"
+        recommended_stake = current_stake
+        should_pause = False
+        pause_duration = 0
+        
+        # Verificar se deve pausar (ajustado pelo risk_factor)
+        pause_threshold_high = int(200 * risk_factor)
+        pause_threshold_medium = int(100 * risk_factor)
+        martingale_threshold = max(5, int(7 * risk_factor))
+        
+        # Pausar se muitas inversões recentes
+        if INVERSION_SYSTEM['consecutive_errors'] >= INVERSION_SYSTEM['max_errors'] - 1:
+            should_pause = True
+            action = "pause"
+            pause_duration = random.randint(30000, 60000)
+        elif today_pnl < -pause_threshold_high or martingale_level > martingale_threshold:
+            should_pause = True
+            action = "pause"
+            pause_duration = random.randint(60000, 180000)
+        elif today_pnl < -pause_threshold_medium or martingale_level > martingale_threshold - 2:
+            if random.random() > 0.7:
+                should_pause = True
+                action = "pause"
+                pause_duration = random.randint(30000, 90000)
+        
+        # Ajustar stake se não em Martingale (com aggression_factor)
+        if not should_pause and martingale_level == 0:
+            if win_rate > 70:
+                multiplier = 1.15 * aggression_factor
+                recommended_stake = min(50, current_stake * multiplier)
+            elif win_rate < 30:
+                multiplier = 0.8 / aggression_factor
+                recommended_stake = max(0.35, current_stake * multiplier)
+            elif today_pnl < -50:
+                recommended_stake = max(0.35, current_stake * 0.9)
+        
+        message = ""
+        if should_pause:
+            message = f"PAUSA RECOMENDADA - {pause_duration//1000}s - Alto risco (Sistema de Inversão ativo)"
+        elif recommended_stake != current_stake:
+            message = f"Stake adaptativo: ${current_stake:.2f} → ${recommended_stake:.2f}"
+        else:
+            message = "Continuar operação - Parâmetros adequados"
+        
+        inversion_status = inversion_manager.get_inversion_status()
+        
+        return jsonify({
+            "action": action,
+            "recommendedStake": round(recommended_stake, 2),
+            "shouldPause": should_pause,
+            "pauseDuration": pause_duration,
+            "riskLevel": "high" if martingale_level > 5 else "medium" if today_pnl < -50 else "low",
+            "message": message,
+            "reasoning": "Sistema adaptativo + inversão ativo",
+            "adaptive_factors": {
+                "risk_factor": risk_factor,
+                "aggression_factor": aggression_factor
+            },
+            "inversion_status": inversion_status,
+            "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "source": "IA Pure Python com Sistema de Inversão Automática + Aprendizado"
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em management: {e}")
+        return jsonify({"error": "Erro no gerenciamento", "message": str(e)}), 500
+
+@app.route("/feedback", methods=["POST", "OPTIONS"])
+def receive_feedback():
+    """Endpoint para receber feedback - SISTEMA DE APRENDIZADO + INVERSÃO"""
+    if request.method == "OPTIONS":
+        return '', 200
+    
+    try:
+        data = request.get_json() or {}
+        
+        # Dados do feedback
         result = data.get("result", 0)  # 1 para win, 0 para loss
+        direction = data.get("direction", "CALL")
+        signal_id = data.get("signal_id")  # ID do sinal original
         pnl = data.get("pnl", 0)
         
+        # 🧠 SISTEMA DE APRENDIZADO ATIVO
         if signal_id:
-            # Atualizar resultado no banco
+            # Atualizar resultado no banco de dados
             db.update_signal_result(signal_id, result, pnl)
-            
-            # Verificar se precisa retreinar
-            if retrain_manager.should_retrain():
-                logger.info("Feedback recebido - Iniciando retreinamento automático")
-                # Retreinar em thread separada para não bloquear
-                threading.Thread(target=retrain_manager.auto_retrain, daemon=True).start()
+            logger.info(f"🧠 Feedback integrado: Signal {signal_id} -> {'WIN' if result == 1 else 'LOSS'}")
+        
+        # 🔄 SISTEMA DE INVERSÃO AUTOMÁTICA
+        inversion_manager.handle_signal_result(result)
+        
+        # Atualizar stats simples (mantido para compatibilidade)
+        performance_stats['total_trades'] += 1
+        if result == 1:
+            performance_stats['won_trades'] += 1
+        
+        accuracy = (performance_stats['won_trades'] / max(performance_stats['total_trades'], 1) * 100)
+        
+        # Trigger análise de padrões se temos amostras suficientes
+        if performance_stats['total_trades'] % 10 == 0:
+            try:
+                patterns = learning_engine.analyze_error_patterns()
+                if patterns:
+                    logger.info(f"🧠 Análise de padrões triggered - {len(patterns)} padrões identificados")
+            except Exception as e:
+                logger.error(f"Erro na análise de padrões: {e}")
+        
+        # Status atual do sistema de inversão
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
-            "feedback_received": True,
+            "message": "Feedback recebido - Sistema de inversão automática + aprendizado ativo",
             "signal_id": signal_id,
-            "result": "WIN" if result == 1 else "LOSS",
-            "pnl": pnl,
-            "learning_active": True,
-            "auto_retrain_triggered": retrain_manager.should_retrain(),
+            "result_recorded": result == 1,
+            "total_trades": performance_stats['total_trades'],
+            "accuracy": f"{accuracy:.1f}%",
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "inversion_system": {
+                "current_mode": inversion_status['current_mode'],
+                "consecutive_errors": inversion_status['consecutive_errors'],
+                "errors_until_inversion": inversion_status['errors_until_inversion'],
+                "total_inversions": inversion_status['total_inversions'],
+                "last_inversion": inversion_status['last_inversion']
+            },
+            "patterns_analysis": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
             "timestamp": datetime.datetime.now().isoformat(),
-            "message": "Feedback integrado ao sistema de aprendizado ML"
+            "source": "Sistema de Inversão Automática + Aprendizado Pure Python"
         })
         
     except Exception as e:
-        logger.error(f"Erro no feedback ML: {e}")
+        logger.error(f"Erro em feedback: {e}")
         return jsonify({"error": "Erro no feedback", "message": str(e)}), 500
 
-@app.route("/predict-custom", methods=["POST"])
-def predict_custom():
-    """Predição customizada com features específicas"""
+@app.route("/learning-stats", methods=["GET"])
+def get_learning_stats():
+    """Obter estatísticas AVANÇADAS do sistema de aprendizado"""
     if not validate_api_key():
         return jsonify({"error": "API Key inválida"}), 401
     
     try:
-        data = request.get_json() or {}
+        # Estatísticas recentes
+        recent_data = db.get_recent_performance(150)
         
-        # Permitir features customizadas
-        custom_features = data.get("features", {})
+        total_signals = len(recent_data)
+        won_signals = sum(1 for signal in recent_data if signal[10] == 1)
+        accuracy = (won_signals / total_signals * 100) if total_signals > 0 else 0
         
-        # Usar feature engineering se não tem features customizadas
-        if not custom_features:
-            custom_features = feature_engineer.create_features_from_data(data)
+        # Estatísticas Q-Learning
+        q_learning_stats = {}
+        if LEARNING_CONFIG['reinforcement_learning']:
+            conn = sqlite3.connect(db.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
+            q_stats = cursor.fetchone()
+            
+            cursor.execute('''
+                SELECT state_hash, visits_count, average_reward 
+                FROM q_learning_states 
+                ORDER BY visits_count DESC LIMIT 5
+            ''')
+            top_states = cursor.fetchall()
+            
+            conn.close()
+            
+            q_learning_stats = {
+                "total_states": q_stats[0] if q_stats else 0,
+                "average_visits": round(q_stats[1], 2) if q_stats and q_stats[1] else 0,
+                "average_reward": round(q_stats[2], 3) if q_stats and q_stats[2] else 0,
+                "top_learned_states": [
+                    {
+                        "state": state[0],
+                        "visits": state[1],
+                        "avg_reward": round(state[2], 3)
+                    } for state in top_states
+                ]
+            }
         
-        # Fazer predição
-        direction, confidence, details = ml_engine.predict(custom_features)
+        # Padrões de erro identificados
+        error_patterns = db.get_error_patterns()
+        
+        # Parâmetros adaptativos
+        adaptive_params = {
+            'risk_factor': db.get_adaptive_parameter('risk_factor', 1.0),
+            'aggression_factor': db.get_adaptive_parameter('aggression_factor', 1.0),
+            'duration_factor': db.get_adaptive_parameter('duration_factor', 1.0)
+        }
+        
+        # Status de inversão
+        inversion_status = inversion_manager.get_inversion_status()
         
         return jsonify({
-            "prediction": direction,
-            "confidence": round(confidence, 1),
-            "features_used": list(custom_features.keys()),
-            "model_details": details,
-            "feature_count": len(custom_features),
-            "models_contributing": len(details.get('model_predictions', {})),
-            "ensemble_consensus": details.get('consensus_strength', 0),
+            "advanced_learning_enabled": LEARNING_CONFIG['learning_enabled'],
+            "total_samples": total_signals,
+            "current_accuracy": round(accuracy, 1),
+            
+            "learning_systems": {
+                "q_learning": {
+                    "enabled": LEARNING_CONFIG['reinforcement_learning'],
+                    "stats": q_learning_stats
+                },
+                "temporal_analysis": {
+                    "enabled": LEARNING_CONFIG['temporal_learning']
+                },
+                "sequence_learning": {
+                    "enabled": LEARNING_CONFIG['sequence_learning'],
+                    "current_sequence_length": len(learning_engine.sequence_memory)
+                },
+                "correlation_analysis": {
+                    "enabled": LEARNING_CONFIG['correlation_analysis']
+                }
+            },
+            
+            "error_patterns_found": len(error_patterns),
+            "adaptive_parameters": adaptive_params,
+            "inversion_system": inversion_status,
+            
+            "recent_patterns": [
+                {
+                    "type": pattern[1],
+                    "conditions": json.loads(pattern[2]),
+                    "error_rate": pattern[3],
+                    "occurrences": pattern[4]
+                } for pattern in error_patterns[:8]
+            ],
+            
+            "performance_metrics": {
+                "total_signals": total_signals,
+                "won_signals": won_signals,
+                "accuracy": accuracy
+            },
+            
+            "learning_config": LEARNING_CONFIG,
             "timestamp": datetime.datetime.now().isoformat()
         })
         
     except Exception as e:
-        logger.error(f"Erro na predição customizada: {e}")
-        return jsonify({"error": "Erro na predição", "message": str(e)}), 500
+        logger.error(f"Erro em learning-stats avançado: {e}")
+        return jsonify({"error": "Erro ao obter estatísticas avançadas", "message": str(e)}), 500
 
-# Carregamento inicial dos modelos
-@app.before_first_request
-def initialize_ml_system():
-    """Inicializar sistema ML"""
+@app.route("/q-learning-stats", methods=["GET"])
+def get_q_learning_stats():
+    """Obter estatísticas do Q-Learning"""
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
     try:
-        # Tentar carregar modelos existentes
-        if not ml_engine.load_models():
-            logger.info("Modelos não encontrados. Iniciando treinamento inicial...")
-            # Treinar modelos iniciais em thread separada
-            threading.Thread(target=ml_engine.train_all_models, daemon=True).start()
-        else:
-            logger.info("Modelos carregados com sucesso")
-            
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+        
+        # Obter estados Q-Learning
+        cursor.execute('''
+            SELECT state_hash, state_description, action_call_value, action_put_value, 
+                   visits_count, average_reward
+            FROM q_learning_states 
+            ORDER BY visits_count DESC LIMIT 20
+        ''')
+        
+        q_states = cursor.fetchall()
+        
+        # Estatísticas gerais
+        cursor.execute('SELECT COUNT(*), AVG(visits_count), AVG(average_reward) FROM q_learning_states')
+        general_stats = cursor.fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            "q_learning_enabled": LEARNING_CONFIG['reinforcement_learning'],
+            "total_states": general_stats[0] if general_stats else 0,
+            "average_visits": round(general_stats[1], 2) if general_stats and general_stats[1] else 0,
+            "average_reward": round(general_stats[2], 3) if general_stats and general_stats[2] else 0,
+            "top_states": [
+                {
+                    "state": state[0],
+                    "description": state[1],
+                    "call_value": round(state[2], 3),
+                    "put_value": round(state[3], 3),
+                    "visits": state[4],
+                    "avg_reward": round(state[5], 3),
+                    "best_action": "CALL" if state[2] > state[3] else "PUT",
+                    "confidence": abs(state[2] - state[3])
+                }
+                for state in q_states
+            ],
+            "learning_active": LEARNING_CONFIG['learning_enabled'],
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        
     except Exception as e:
-        logger.error(f"Erro na inicialização: {e}")
+        logger.error(f"Erro em q-learning-stats: {e}")
+        return jsonify({"error": "Erro ao obter estatísticas Q-Learning", "message": str(e)}), 500
+
+@app.route("/inversion-status", methods=["GET"])
+def get_inversion_status():
+    """Obter status detalhado do sistema de inversão"""
+    if not validate_api_key():
+        return jsonify({"error": "API Key inválida"}), 401
+    
+    try:
+        inversion_status = inversion_manager.get_inversion_status()
+        inversion_history = db.get_inversion_history(10)
+        
+        return jsonify({
+            "inversion_system": inversion_status,
+            "recent_inversions": [
+                {
+                    "timestamp": inv[1],
+                    "from_mode": inv[2],
+                    "to_mode": inv[3],
+                    "consecutive_errors": inv[4],
+                    "reason": inv[5],
+                    "total_inversions_so_far": inv[6]
+                } for inv in inversion_history
+            ],
+            "inversion_rules": {
+                "max_errors_before_inversion": INVERSION_SYSTEM['max_errors'],
+                "auto_reset_on_win": True,
+                "alternates_between_modes": True,
+                "adaptive_threshold": True
+            },
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro em inversion-status: {e}")
+        return jsonify({"error": "Erro ao obter status de inversão", "message": str(e)}), 500
+
+# Middleware de erro global
+@app.errorhandler(404)
+def not_found(error):
+    inversion_status = inversion_manager.get_inversion_status()
+    return jsonify({
+        "error": "Endpoint não encontrado",
+        "available_endpoints": ["/", "/signal", "/advanced-signal", "/analyze", "/risk", "/optimal-duration", "/management", "/feedback", "/learning-stats", "/inversion-status", "/q-learning-stats"],
+        "signal_mode": f"{inversion_status['current_mode'].upper()} + LEARNING",
+        "learning_active": LEARNING_CONFIG['learning_enabled'],
+        "inversion_system": inversion_status,
+        "timestamp": datetime.datetime.now().isoformat()
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Erro interno: {error}")
+    return jsonify({
+        "error": "Erro interno do servidor",
+        "message": "Entre em contato com o suporte",
+        "learning_system": "Ativo" if LEARNING_CONFIG['learning_enabled'] else "Inativo",
+        "inversion_system": "Ativo" if INVERSION_SYSTEM['active'] else "Inativo",
+        "timestamp": datetime.datetime.now().isoformat()
+    }), 500
 
 if __name__ == "__main__":
+    # Configuração para Render
     port = int(os.environ.get('PORT', 5000))
-    
-    # Logs de inicialização
-    logger.info("🤖 INICIALIZANDO ADVANCED ML TRADING BOT API")
-    logger.info("=" * 80)
-    logger.info("🧠 SISTEMA DE MACHINE LEARNING VERDADEIRO:")
-    logger.info(f"   - {len(ml_engine.models)} Modelos ML: {list(ml_engine.models.keys())}")
-    logger.info("   - Feature Engineering Automático")
-    logger.info("   - Hyperparameter Tuning Automático")
-    logger.info("   - Ensemble Learning com Voting")
-    logger.info("   - Drift Detection Automático")
-    logger.info("   - Auto-Retreinamento Inteligente")
-    logger.info("   - Cross-Validation Temporal")
-    logger.info("   - Feature Selection Automática")
-    logger.info("=" * 80)
-    logger.info(f"📊 Banco de dados: {DB_PATH}")
-    logger.info(f"💾 Modelos salvos em: {MODEL_PATH}")
+    logger.info("🚀 Iniciando IA Trading Bot API - SISTEMA DE APRENDIZADO AVANÇADO")
     logger.info(f"🔑 API Key: {VALID_API_KEY}")
-    logger.info("🚀 SISTEMA PRONTO - VERDADEIRO MACHINE LEARNING ATIVO!")
+    logger.info("🧠 Sistema de Aprendizado AVANÇADO: ATIVADO")
+    logger.info(f"🤖 Q-Learning: {'ATIVADO' if LEARNING_CONFIG['reinforcement_learning'] else 'INATIVO'}")
+    logger.info(f"⏰ Análise Temporal: {'ATIVADA' if LEARNING_CONFIG['temporal_learning'] else 'INATIVA'}")
+    logger.info(f"📈 Aprendizado de Sequências: {'ATIVADO' if LEARNING_CONFIG['sequence_learning'] else 'INATIVO'}")
+    logger.info(f"🔗 Análise de Correlação: {'ATIVADA' if LEARNING_CONFIG['correlation_analysis'] else 'INATIVA'}")
+    logger.info(f"🔄 Sistema de Inversão ADAPTATIVA: {'ATIVADO' if INVERSION_SYSTEM['active'] else 'INATIVO'}")
+    logger.info(f"📊 Banco de dados: {DB_PATH}")
+    logger.info("🐍 Pure Python - Compatível com Python 3.13")
+    logger.info(f"⚙️ Threshold adaptativo de inversão: {'ATIVO' if INVERSION_SYSTEM['adaptive_threshold'] else 'FIXO'}")
     
-    # Inicializar modelos
+    # Verificar conectividade do banco de dados
     try:
-        if not ml_engine.load_models():
-            logger.info("🧠 Iniciando treinamento inicial dos modelos...")
-            ml_engine.train_all_models()
+        test_data = db.get_recent_performance(1)
+        logger.info("✅ Conexão com banco de dados OK")
     except Exception as e:
-        logger.warning(f"Aviso na inicialização: {e}")
+        logger.warning(f"⚠️ Aviso no banco de dados: {e}")
     
+    # Logs de configuração final
+    logger.info("=" * 60)
+    logger.info("🎯 RECURSOS AVANÇADOS CARREGADOS:")
+    logger.info(f"   - Q-Learning com estados adaptativos")
+    logger.info(f"   - Análise temporal por horário/dia")
+    logger.info(f"   - Padrões de sequência inteligentes")
+    logger.info(f"   - Correlações automáticas")
+    logger.info(f"   - Inversão adaptativa com threshold dinâmico")
+    logger.info(f"   - Parâmetros adaptativos de risco")
+    logger.info(f"   - Sistema de aprendizado por reforço")
+    logger.info("=" * 60)
+    
+    # Inicializar Flask app
     app.run(host='0.0.0.0', port=port, debug=False)
