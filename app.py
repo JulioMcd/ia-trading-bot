@@ -1,347 +1,264 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import pandas as pd
-import numpy as np
 import yfinance as yf
+import numpy as np
 from datetime import datetime, timedelta
 import requests
 import json
 import os
-from typing import Dict, List, Tuple, Optional
 
 app = Flask(__name__)
 CORS(app)
 
 # ===============================================
-# CLASSE DE ANÁLISE TÉCNICA REAL (SEM TA-LIB)
+# IA REAL ULTRA SIMPLES (SEM PANDAS)
 # ===============================================
 
-class RealTechnicalAnalysis:
+class SimpleTechnicalAnalysis:
     def __init__(self):
         self.symbol_mapping = {
             'EURUSD-OTC': 'EURUSD=X',
-            'GBPUSD-OTC': 'GBPUSD=X',
+            'GBPUSD-OTC': 'GBPUSD=X',  
             'USDJPY-OTC': 'USDJPY=X',
             'AUDUSD-OTC': 'AUDUSD=X',
             'USDCAD-OTC': 'USDCAD=X',
             'USDCHF-OTC': 'USDCHF=X',
             'EURJPY-OTC': 'EURJPY=X',
             'EURGBP-OTC': 'EURGBP=X',
-            'AUDCAD-OTC': 'AUDCAD=X',
             'BTCUSD': 'BTC-USD',
             'ETHUSD': 'ETH-USD'
         }
     
-    def get_real_market_data(self, symbol: str) -> Optional[pd.DataFrame]:
-        """Obtém dados reais do mercado usando Yahoo Finance"""
+    def get_real_data(self, symbol):
+        """Obtém dados reais usando yfinance"""
         try:
             yahoo_symbol = self.symbol_mapping.get(symbol, symbol)
-            print(f"📊 Buscando dados reais para {yahoo_symbol}...")
+            print(f"📊 Buscando dados REAIS para {yahoo_symbol}...")
             
-            # Baixar dados dos últimos 5 dias com intervalos de 5 minutos
+            # Criar ticker
             ticker = yf.Ticker(yahoo_symbol)
-            data = ticker.history(period="5d", interval="5m")
             
-            if data.empty:
-                print(f"❌ Dados não encontrados para {symbol}")
-                # Tentar período menor
-                data = ticker.history(period="1d", interval="1m")
+            # Obter dados das últimas 48 horas com intervalos de 5 min
+            hist = ticker.history(period="2d", interval="5m")
             
-            if len(data) < 20:
-                print(f"⚠️ Poucos dados ({len(data)} velas) para {symbol}")
+            if hist.empty:
+                print(f"❌ Sem dados para {symbol}")
                 return None
-                
-            print(f"✅ Obtidos {len(data)} dados reais para {symbol}")
-            return data
+            
+            # Converter para listas simples
+            prices = hist['Close'].tolist()
+            highs = hist['High'].tolist()  
+            lows = hist['Low'].tolist()
+            volumes = hist['Volume'].tolist() if 'Volume' in hist.columns else [0] * len(prices)
+            
+            if len(prices) < 20:
+                print(f"⚠️ Poucos dados ({len(prices)}) para {symbol}")
+                return None
+            
+            print(f"✅ {len(prices)} velas REAIS obtidas para {symbol}")
+            print(f"📈 Preço atual: {prices[-1]:.5f}")
+            print(f"📊 Variação: {((prices[-1] - prices[-2]) / prices[-2] * 100):.2f}%")
+            
+            return {
+                'prices': prices,
+                'highs': highs,
+                'lows': lows,
+                'volumes': volumes,
+                'current_price': prices[-1],
+                'symbol': symbol
+            }
             
         except Exception as e:
             print(f"❌ Erro ao obter dados para {symbol}: {e}")
             return None
     
     def calculate_rsi(self, prices, period=14):
-        """Calcula RSI manualmente"""
+        """Calcula RSI real"""
         try:
-            deltas = np.diff(prices)
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
+            if len(prices) < period + 1:
+                return 50
             
-            avg_gain = np.mean(gains[:period])
-            avg_loss = np.mean(losses[:period])
+            deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+            gains = [d if d > 0 else 0 for d in deltas]
+            losses = [-d if d < 0 else 0 for d in deltas]
+            
+            avg_gain = sum(gains[-period:]) / period
+            avg_loss = sum(losses[-period:]) / period
             
             if avg_loss == 0:
                 return 100
             
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
-            
             return max(0, min(100, rsi))
+            
         except:
             return 50
     
     def calculate_sma(self, prices, period):
-        """Calcula Média Móvel Simples"""
+        """Média móvel simples"""
         try:
             if len(prices) < period:
                 return prices[-1]
-            return np.mean(prices[-period:])
+            return sum(prices[-period:]) / period
         except:
-            return prices[-1] if len(prices) > 0 else 0
+            return prices[-1] if prices else 0
     
-    def calculate_ema(self, prices, period):
-        """Calcula Média Móvel Exponencial"""
+    def calculate_volatility(self, prices, highs, lows):
+        """Calcula volatilidade real"""
         try:
-            if len(prices) < period:
-                return prices[-1]
+            if len(prices) < 2:
+                return 1.0
             
-            alpha = 2 / (period + 1)
-            ema = prices[0]
+            # True Range simplificado
+            current_price = prices[-1]
+            prev_price = prices[-2]
+            current_high = highs[-1]
+            current_low = lows[-1]
             
-            for price in prices[1:]:
-                ema = alpha * price + (1 - alpha) * ema
+            tr = max(
+                current_high - current_low,
+                abs(current_high - prev_price),
+                abs(current_low - prev_price)
+            )
             
-            return ema
+            volatility_percent = (tr / current_price) * 100
+            return max(0.1, volatility_percent)
+            
         except:
-            return prices[-1] if len(prices) > 0 else 0
+            return 1.0
     
-    def calculate_bollinger_bands(self, prices, period=20, std_dev=2):
-        """Calcula Bandas de Bollinger"""
+    def analyze_trend(self, prices):
+        """Análise de tendência simples mas real"""
         try:
-            if len(prices) < period:
-                middle = np.mean(prices)
-                std = np.std(prices)
+            if len(prices) < 20:
+                return {'trend': 'sideways', 'strength': 0.5}
+            
+            # Médias móveis
+            sma_5 = sum(prices[-5:]) / 5
+            sma_10 = sum(prices[-10:]) / 10
+            sma_20 = sum(prices[-20:]) / 20
+            current = prices[-1]
+            
+            # Análise de tendência
+            trend_score = 0
+            
+            if current > sma_5 > sma_10 > sma_20:
+                trend_score = 2  # Forte alta
+            elif current > sma_5 > sma_10:
+                trend_score = 1  # Alta moderada
+            elif current < sma_5 < sma_10 < sma_20:
+                trend_score = -2  # Forte baixa
+            elif current < sma_5 < sma_10:
+                trend_score = -1  # Baixa moderada
             else:
-                middle = np.mean(prices[-period:])
-                std = np.std(prices[-period:])
+                trend_score = 0  # Lateral
             
-            upper = middle + (std * std_dev)
-            lower = middle - (std * std_dev)
-            
-            return upper, middle, lower
-        except:
-            current = prices[-1] if len(prices) > 0 else 1
-            return current * 1.01, current, current * 0.99
-    
-    def calculate_macd(self, prices, fast=12, slow=26, signal=9):
-        """Calcula MACD"""
-        try:
-            ema_fast = self.calculate_ema(prices, fast)
-            ema_slow = self.calculate_ema(prices, slow)
-            
-            macd_line = ema_fast - ema_slow
-            
-            # Simular signal line (seria EMA do MACD)
-            signal_line = macd_line * 0.8  # Simplificado
-            histogram = macd_line - signal_line
-            
-            return macd_line, signal_line, histogram
-        except:
-            return 0, 0, 0
-    
-    def calculate_technical_indicators(self, data: pd.DataFrame) -> Dict:
-        """Calcula indicadores técnicos reais"""
-        try:
-            close = data['Close'].values
-            high = data['High'].values
-            low = data['Low'].values
-            
-            current_price = close[-1]
-            
-            # RSI
-            rsi = self.calculate_rsi(close)
-            
-            # Médias Móveis
-            sma_10 = self.calculate_sma(close, 10)
-            sma_20 = self.calculate_sma(close, 20)
-            ema_14 = self.calculate_ema(close, 14)
-            
-            # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = self.calculate_bollinger_bands(close)
-            
-            # MACD
-            macd_line, macd_signal, macd_histogram = self.calculate_macd(close)
-            
-            # Volatilidade (True Range simplificado)
-            if len(high) > 1:
-                tr = max(
-                    high[-1] - low[-1],
-                    abs(high[-1] - close[-2]),
-                    abs(low[-1] - close[-2])
-                )
-                atr = tr  # Simplificado
+            if trend_score >= 1:
+                trend = 'bullish'
+            elif trend_score <= -1:
+                trend = 'bearish'
             else:
-                atr = high[-1] - low[-1]
+                trend = 'sideways'
             
-            # Stochastic simplificado
-            if len(high) >= 14:
-                lowest_low = min(low[-14:])
-                highest_high = max(high[-14:])
-                if highest_high != lowest_low:
-                    k_percent = 100 * (current_price - lowest_low) / (highest_high - lowest_low)
-                else:
-                    k_percent = 50
-            else:
-                k_percent = 50
+            strength = abs(trend_score) / 2
             
             return {
-                'current_price': current_price,
-                'price_change': close[-1] - close[-2] if len(close) > 1 else 0,
-                'price_change_percent': ((close[-1] - close[-2]) / close[-2] * 100) if len(close) > 1 else 0,
-                'rsi': rsi,
+                'trend': trend,
+                'strength': strength,
+                'sma_5': sma_5,
                 'sma_10': sma_10,
-                'sma_20': sma_20,
-                'ema_14': ema_14,
-                'bollinger': {
-                    'upper': bb_upper,
-                    'middle': bb_middle,
-                    'lower': bb_lower
-                },
-                'macd': {
-                    'line': macd_line,
-                    'signal': macd_signal,
-                    'histogram': macd_histogram
-                },
-                'atr': atr,
-                'stochastic_k': k_percent,
-                'volatility_percent': (atr / current_price) * 100
+                'sma_20': sma_20
             }
             
-        except Exception as e:
-            print(f"❌ Erro no cálculo de indicadores: {e}")
-            return None
+        except:
+            return {'trend': 'sideways', 'strength': 0.5}
     
-    def analyze_trend(self, indicators: Dict) -> Dict:
-        """Analisa tendência baseada em indicadores reais"""
-        trend_signals = []
-        trend_strength = 0
-        
-        current_price = indicators['current_price']
-        
-        # Análise de Médias Móveis
-        if current_price > indicators['sma_10'] > indicators['sma_20']:
-            trend_signals.append("Tendência de alta (SMAs)")
-            trend_strength += 1
-        elif current_price < indicators['sma_10'] < indicators['sma_20']:
-            trend_signals.append("Tendência de baixa (SMAs)")
-            trend_strength -= 1
-        
-        # Análise EMA
-        if current_price > indicators['ema_14']:
-            trend_signals.append("Preço acima da EMA")
-            trend_strength += 0.5
-        else:
-            trend_signals.append("Preço abaixo da EMA")
-            trend_strength -= 0.5
-        
-        # Análise MACD
-        macd = indicators['macd']
-        if macd['line'] > macd['signal']:
-            trend_signals.append("MACD bullish")
-            trend_strength += 1
-        else:
-            trend_signals.append("MACD bearish")
-            trend_strength -= 1
-        
-        # Determinar tendência final
-        if trend_strength >= 1.5:
-            trend = "bullish"
-        elif trend_strength <= -1.5:
-            trend = "bearish"
-        else:
-            trend = "sideways"
-        
-        return {
-            'trend': trend,
-            'strength': abs(trend_strength),
-            'signals': trend_signals,
-            'confidence': min(95, abs(trend_strength) * 25 + 60)
-        }
-    
-    def generate_trading_signal(self, symbol: str) -> Dict:
-        """Gera sinal de trading baseado em análise técnica real"""
+    def generate_signal(self, symbol):
+        """Gera sinal baseado em análise técnica real"""
         try:
-            print(f"🤖 Iniciando análise REAL para {symbol}...")
+            print(f"\n🤖 Iniciando análise REAL para {symbol}")
             
             # Obter dados reais
-            data = self.get_real_market_data(symbol)
-            if data is None:
-                return self._generate_error_response("Dados de mercado não disponíveis")
+            data = self.get_real_data(symbol)
+            if not data:
+                return self._error_response("Dados não disponíveis")
             
-            # Calcular indicadores
-            indicators = self.calculate_technical_indicators(data)
-            if indicators is None:
-                return self._generate_error_response("Erro no cálculo de indicadores")
+            prices = data['prices']
+            highs = data['highs']
+            lows = data['lows']
+            current_price = data['current_price']
             
-            print(f"📊 Preço atual: {indicators['current_price']:.5f}")
-            print(f"📈 RSI: {indicators['rsi']:.1f}")
-            print(f"📊 Mudança: {indicators['price_change_percent']:.2f}%")
+            # Calcular indicadores REAIS
+            rsi = self.calculate_rsi(prices)
+            sma_10 = self.calculate_sma(prices, 10)
+            sma_20 = self.calculate_sma(prices, 20)
+            volatility = self.calculate_volatility(prices, highs, lows)
+            trend_analysis = self.analyze_trend(prices)
             
-            # Analisar tendência
-            trend_analysis = self.analyze_trend(indicators)
+            print(f"📊 RSI real: {rsi:.1f}")
+            print(f"📈 SMA10: {sma_10:.5f} | SMA20: {sma_20:.5f}")
+            print(f"📉 Volatilidade: {volatility:.2f}%")
+            print(f"📊 Tendência: {trend_analysis['trend']}")
             
-            # Gerar sinais baseados em múltiplos indicadores
+            # Gerar sinal baseado em indicadores reais
             signal_score = 0
-            signal_reasons = []
+            reasons = []
             
             # RSI Analysis
-            rsi = indicators['rsi']
             if rsi < 30:
                 signal_score += 2
-                signal_reasons.append(f"RSI oversold ({rsi:.1f})")
+                reasons.append(f"RSI oversold ({rsi:.1f})")
             elif rsi > 70:
                 signal_score -= 2
-                signal_reasons.append(f"RSI overbought ({rsi:.1f})")
+                reasons.append(f"RSI overbought ({rsi:.1f})")
             elif 45 <= rsi <= 55:
-                signal_reasons.append(f"RSI neutro ({rsi:.1f})")
+                reasons.append(f"RSI neutro ({rsi:.1f})")
             
-            # Bollinger Bands Analysis
-            bb = indicators['bollinger']
-            current_price = indicators['current_price']
-            if current_price <= bb['lower']:
+            # Price vs SMA Analysis
+            if current_price > sma_10 > sma_20:
                 signal_score += 1.5
-                signal_reasons.append("Preço na banda inferior")
-            elif current_price >= bb['upper']:
+                reasons.append("Preço acima das médias")
+            elif current_price < sma_10 < sma_20:
                 signal_score -= 1.5
-                signal_reasons.append("Preço na banda superior")
+                reasons.append("Preço abaixo das médias")
             
-            # Stochastic Analysis
-            stoch_k = indicators['stochastic_k']
-            if stoch_k < 20:
-                signal_score += 1
-                signal_reasons.append(f"Stochastic oversold ({stoch_k:.1f})")
-            elif stoch_k > 80:
-                signal_score -= 1
-                signal_reasons.append(f"Stochastic overbought ({stoch_k:.1f})")
-            
-            # Price Change Analysis
-            price_change = indicators['price_change_percent']
-            if price_change < -0.5:
-                signal_score += 0.5
-                signal_reasons.append(f"Queda recente ({price_change:.2f}%)")
-            elif price_change > 0.5:
-                signal_score -= 0.5
-                signal_reasons.append(f"Alta recente ({price_change:.2f}%)")
-            
-            # Trend Confirmation
+            # Trend Analysis
             if trend_analysis['trend'] == 'bullish':
-                signal_score += trend_analysis['strength'] * 0.5
-                signal_reasons.append("Tendência bullish confirmada")
+                signal_score += trend_analysis['strength']
+                reasons.append("Tendência de alta")
             elif trend_analysis['trend'] == 'bearish':
-                signal_score -= trend_analysis['strength'] * 0.5
-                signal_reasons.append("Tendência bearish confirmada")
+                signal_score -= trend_analysis['strength']
+                reasons.append("Tendência de baixa")
+            
+            # Volatility Analysis
+            if volatility > 2.0:
+                reasons.append(f"Alta volatilidade ({volatility:.1f}%)")
+            elif volatility < 0.5:
+                reasons.append(f"Baixa volatilidade ({volatility:.1f}%)")
+            
+            # Price momentum (últimas 3 velas)
+            if len(prices) >= 3:
+                recent_change = ((prices[-1] - prices[-3]) / prices[-3]) * 100
+                if recent_change > 0.1:
+                    signal_score += 0.5
+                    reasons.append(f"Momentum positivo ({recent_change:.2f}%)")
+                elif recent_change < -0.1:
+                    signal_score -= 0.5
+                    reasons.append(f"Momentum negativo ({recent_change:.2f}%)")
             
             # Determinar direção e confiança
             if signal_score >= 1:
                 direction = "call"
-                confidence = min(95, 70 + abs(signal_score) * 8)
+                confidence = min(95, 70 + abs(signal_score) * 10)
             elif signal_score <= -1:
                 direction = "put"
-                confidence = min(95, 70 + abs(signal_score) * 8)
+                confidence = min(95, 70 + abs(signal_score) * 10)
             else:
                 direction = "call" if signal_score > 0 else "put"
-                confidence = max(60, 70 - abs(1 - abs(signal_score)) * 10)
+                confidence = max(60, 70 - abs(1 - abs(signal_score)) * 15)
             
-            # Determinar timeframe baseado na volatilidade
-            volatility = indicators['volatility_percent']
+            # Timeframe baseado na volatilidade real
             if volatility > 2.0:
                 timeframe = {"type": "minutes", "duration": 1}
             elif volatility > 1.0:
@@ -349,9 +266,10 @@ class RealTechnicalAnalysis:
             else:
                 timeframe = {"type": "minutes", "duration": 3}
             
-            reasoning = " | ".join(signal_reasons[:3]) if signal_reasons else "Análise técnica multi-indicador"
+            reasoning = " | ".join(reasons[:3]) if reasons else "Análise técnica baseada em dados reais"
             
-            print(f"✅ Sinal gerado: {direction.upper()} com {confidence:.1f}% confiança")
+            print(f"✅ Sinal: {direction.upper()}")
+            print(f"🎯 Confiança: {confidence:.1f}%")
             print(f"📝 Razões: {reasoning}")
             
             return {
@@ -363,47 +281,35 @@ class RealTechnicalAnalysis:
                 'reasoning': reasoning,
                 'market_analysis': {
                     'current_price': round(current_price, 5),
-                    'price_change': round(indicators['price_change'], 5),
-                    'price_change_percent': round(indicators['price_change_percent'], 2),
+                    'price_change_percent': round(((prices[-1] - prices[-2]) / prices[-2] * 100), 2) if len(prices) > 1 else 0,
                     'volatility': round(volatility, 2),
                     'trend': trend_analysis['trend'],
-                    'trend_strength': round(trend_analysis['strength'], 2)
+                    'trend_strength': round(trend_analysis['strength'], 2),
+                    'candles_analyzed': len(prices)
                 },
                 'technical_indicators': {
                     'rsi': round(rsi, 1),
-                    'macd_signal': 'bullish' if indicators['macd']['line'] > indicators['macd']['signal'] else 'bearish',
-                    'bollinger_position': self._get_bollinger_position(current_price, bb),
-                    'stochastic_signal': 'oversold' if stoch_k < 20 else 'overbought' if stoch_k > 80 else 'neutral',
-                    'price_vs_sma20': 'above' if current_price > indicators['sma_20'] else 'below'
+                    'sma_10': round(sma_10, 5),
+                    'sma_20': round(sma_20, 5),
+                    'price_vs_sma10': 'above' if current_price > sma_10 else 'below',
+                    'price_vs_sma20': 'above' if current_price > sma_20 else 'below'
                 },
                 'optimal_timeframe': timeframe,
-                'timestamp': datetime.now().isoformat(),
-                'data_source': 'Yahoo Finance Real Data'
+                'data_source': 'Yahoo Finance Real-Time',
+                'timestamp': datetime.now().isoformat()
             }
             
         except Exception as e:
-            print(f"❌ Erro na geração de sinal: {e}")
-            return self._generate_error_response(f"Erro interno: {str(e)}")
+            print(f"❌ Erro geral: {e}")
+            return self._error_response(f"Erro: {str(e)}")
     
-    def _get_bollinger_position(self, price: float, bb: Dict) -> str:
-        """Determina posição nas Bandas de Bollinger"""
-        if price >= bb['upper']:
-            return "upper_band"
-        elif price <= bb['lower']:
-            return "lower_band"
-        elif price > bb['middle']:
-            return "above_middle"
-        else:
-            return "below_middle"
-    
-    def _generate_error_response(self, error_msg: str) -> Dict:
-        """Gera resposta de erro padronizada"""
+    def _error_response(self, message):
         return {
             'status': 'error',
-            'message': error_msg,
+            'message': message,
             'direction': 'call',
             'confidence': 50,
-            'reasoning': 'Dados insuficientes - usando fallback',
+            'reasoning': 'Análise indisponível - usando fallback',
             'timestamp': datetime.now().isoformat()
         }
 
@@ -411,7 +317,7 @@ class RealTechnicalAnalysis:
 # INSTÂNCIA GLOBAL
 # ===============================================
 
-analyzer = RealTechnicalAnalysis()
+analyzer = SimpleTechnicalAnalysis()
 
 # ===============================================
 # ROTAS DA API
@@ -421,25 +327,26 @@ analyzer = RealTechnicalAnalysis()
 def home():
     return jsonify({
         'status': 'success',
-        'message': '🤖 IA DE TRADING REAL - Análise Técnica Verdadeira',
-        'version': '3.0.0 - REAL DATA',
+        'message': '🤖 IA TRADING REAL - Ultra Simples',
+        'version': '4.0.0 - COMPATIBLE',
         'features': [
-            '✅ Yahoo Finance - Dados reais de mercado',
-            '✅ RSI, MACD, Bollinger Bands calculados',
-            '✅ Análise de tendência multi-indicador',
-            '✅ Stochastic e volatilidade real',
-            '✅ Sinais baseados em dados verdadeiros',
-            '✅ Sem dependências complexas (TA-Lib free)'
+            '✅ Yahoo Finance - Dados reais',
+            '✅ RSI calculado com dados reais',
+            '✅ Médias móveis reais (SMA 10, 20)',
+            '✅ Análise de tendência verdadeira',
+            '✅ Volatilidade calculada (True Range)',
+            '✅ 100% compatível com Render',
+            '✅ Sem dependências problemáticas'
         ],
         'supported_symbols': list(analyzer.symbol_mapping.keys()),
-        'data_source': 'Yahoo Finance Real-Time Data',
+        'data_source': 'Yahoo Finance Real Data',
         'timestamp': datetime.now().isoformat()
     })
 
 @app.route('/signal', methods=['POST', 'GET'])
 @app.route('/trading-signal', methods=['POST', 'GET'])
-def get_trading_signal():
-    """Endpoint principal para sinais de trading REAIS"""
+def get_signal():
+    """Endpoint principal - IA REAL"""
     
     if request.method == 'GET':
         symbol = 'EURUSD-OTC'
@@ -447,7 +354,7 @@ def get_trading_signal():
         data = request.get_json() or {}
         symbol = data.get('symbol', 'EURUSD-OTC')
     
-    print(f"\n🔄 Nova requisição para {symbol}")
+    print(f"\n🔄 Nova requisição REAL para {symbol}")
     
     # Validar símbolo
     if symbol not in analyzer.symbol_mapping:
@@ -457,14 +364,13 @@ def get_trading_signal():
             'supported_symbols': list(analyzer.symbol_mapping.keys())
         }), 400
     
-    # Gerar sinal real
-    signal_data = analyzer.generate_trading_signal(symbol)
-    
-    return jsonify(signal_data)
+    # Gerar sinal REAL
+    result = analyzer.generate_signal(symbol)
+    return jsonify(result)
 
 @app.route('/analyze', methods=['POST', 'GET'])
-def analyze_market():
-    """Análise detalhada do mercado"""
+def analyze():
+    """Análise detalhada"""
     
     if request.method == 'GET':
         symbol = 'EURUSD-OTC'
@@ -473,49 +379,46 @@ def analyze_market():
         symbol = data.get('symbol', 'EURUSD-OTC')
     
     try:
-        market_data = analyzer.get_real_market_data(symbol)
-        if market_data is None:
-            return jsonify({'status': 'error', 'message': 'Dados não disponíveis'}), 500
+        data = analyzer.get_real_data(symbol)
+        if not data:
+            return jsonify({'status': 'error', 'message': 'Dados indisponíveis'}), 500
         
-        indicators = analyzer.calculate_technical_indicators(market_data)
-        if indicators is None:
-            return jsonify({'status': 'error', 'message': 'Erro no cálculo'}), 500
+        prices = data['prices']
+        current_price = data['current_price']
         
-        trend_analysis = analyzer.analyze_trend(indicators)
+        rsi = analyzer.calculate_rsi(prices)
+        sma_10 = analyzer.calculate_sma(prices, 10)
+        sma_20 = analyzer.calculate_sma(prices, 20)
+        volatility = analyzer.calculate_volatility(data['prices'], data['highs'], data['lows'])
+        trend = analyzer.analyze_trend(prices)
         
         return jsonify({
             'status': 'success',
             'symbol': symbol,
             'market_data': {
-                'current_price': round(indicators['current_price'], 5),
-                'price_change_percent': round(indicators['price_change_percent'], 2),
-                'volatility': round(indicators['volatility_percent'], 2),
-                'candles_analyzed': len(market_data)
+                'current_price': round(current_price, 5),
+                'candles_analyzed': len(prices),
+                'volatility': round(volatility, 2)
             },
-            'technical_indicators': {
-                'rsi': round(indicators['rsi'], 1),
-                'sma_10': round(indicators['sma_10'], 5),
-                'sma_20': round(indicators['sma_20'], 5),
-                'bollinger_upper': round(indicators['bollinger']['upper'], 5),
-                'bollinger_lower': round(indicators['bollinger']['lower'], 5),
-                'stochastic_k': round(indicators['stochastic_k'], 1)
+            'indicators': {
+                'rsi': round(rsi, 1),
+                'sma_10': round(sma_10, 5),
+                'sma_20': round(sma_20, 5)
             },
-            'trend_analysis': trend_analysis,
+            'trend_analysis': trend,
             'data_source': 'Yahoo Finance',
             'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Erro na análise: {str(e)}'
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/health', methods=['GET'])
+@app.route('/health')
 def health():
     return jsonify({
         'status': 'healthy',
-        'message': '🟢 IA REAL Online',
+        'message': '🟢 IA REAL Ultra Simples Online',
+        'python_version': f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
         'data_source': 'Yahoo Finance',
         'timestamp': datetime.now().isoformat()
     })
@@ -526,13 +429,12 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
     
-    print("🚀 Iniciando IA REAL de Trading...")
-    print("📊 Fonte de dados: Yahoo Finance")
-    print("⚙️ Indicadores: RSI, MACD, Bollinger, SMA, EMA")
-    print("🎯 Análise técnica verdadeira ativa!")
+    print("🚀 IA REAL Ultra Simples Iniciando...")
+    print("📊 Fonte: Yahoo Finance")
+    print("⚙️ Indicadores: RSI, SMA, Volatilidade, Tendência")
+    print("✅ 100% compatível com Python 3.13")
+    print("🎯 Análise técnica real sem dependências problemáticas!")
     print(f"🌐 Porta: {port}")
-    print("✅ IA REAL pronta!")
     
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port, debug=False)
