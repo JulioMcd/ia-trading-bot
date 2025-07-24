@@ -1,10 +1,10 @@
-# Core Flask dependencies
 Flask==2.3.3
 Flask-CORS==4.0.0
-gunicorn==21.2.0
-
-# HTTP requests for AI API
+pandas==2.1.1
+numpy==1.24.3
+yfinance==0.2.18
+TA-Lib==0.4.25
 requests==2.31.0
-
-# Additional utilities
-python-dotenv==1.0.0
+gunicorn==21.2.0
+python-dateutil==2.8.2
+pytz==2023.3
