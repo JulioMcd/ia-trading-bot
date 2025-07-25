@@ -1,260 +1,525 @@
-# app.py - Trading Bot IA API - Compatível com Render
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
-import random
-import time
-import os
+import numpy as np
 from datetime import datetime, timedelta
-import requests
+import json
+import os
+import time
+import random
+import math
 
 app = Flask(__name__)
 CORS(app)
 
 # ===============================================
-# CONFIGURAÇÕES
+# IA RETRAÇÃO + MACHINE LEARNING
 # ===============================================
 
-CONFIG = {
-    'AI_CONFIDENCE_MIN': 70,
-    'AI_CONFIDENCE_MAX': 95,
-    'ANALYSIS_SYMBOLS': [
-        'EURUSD-OTC', 'GBPUSD-OTC', 'USDJPY-OTC', 'AUDUSD-OTC',
-        'USDCAD-OTC', 'USDCHF-OTC', 'R_10', 'R_25', 'R_50', 'R_75', 'R_100'
-    ],
-    'VOLATILITY_INDICES': ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'],
-    'DURATION_LIMITS': {
-        'ticks': {'min': 1, 'max': 10},
-        'minutes': {'min': 1, 'max': 5}
-    }
-}
-
-# ===============================================
-# FUNÇÕES DE IA AVANÇADAS
-# ===============================================
-
-def analyze_market_conditions(symbol, current_price=None, volatility=None):
-    """Análise avançada das condições de mercado"""
-    
-    # Simular análise baseada no símbolo
-    is_volatility_index = symbol in CONFIG['VOLATILITY_INDICES']
-    
-    if is_volatility_index:
-        # Índices de volatilidade têm comportamento específico
-        base_volatility = random.uniform(40, 80)
-        trend_strength = random.uniform(0.3, 0.8)
-        market_condition = 'volatile'
-    else:
-        # Pares de moedas têm volatilidade menor
-        base_volatility = random.uniform(20, 60)
-        trend_strength = random.uniform(0.2, 0.7)
-        market_condition = random.choice(['trending', 'ranging', 'volatile'])
-    
-    # Ajustar baseado em dados fornecidos
-    if volatility:
-        base_volatility = (base_volatility + volatility) / 2
-    
-    # Determinar força da tendência
-    if trend_strength > 0.6:
-        trend = 'strong'
-    elif trend_strength > 0.4:
-        trend = 'moderate'
-    else:
-        trend = 'weak'
-    
-    # Calcular confiança baseada na análise
-    confidence = 70 + (trend_strength * 20) + random.uniform(-5, 10)
-    confidence = max(70, min(95, confidence))
-    
-    return {
-        'volatility': base_volatility,
-        'trend_strength': trend_strength,
-        'market_condition': market_condition,
-        'trend': trend,
-        'confidence': confidence
-    }
-
-def generate_trading_signal(symbol, market_data=None):
-    """Gera sinal de trading inteligente"""
-    
-    analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price') if market_data else None,
-                                       market_data.get('volatility') if market_data else None)
-    
-    # Determinar direção baseada na análise
-    if analysis['trend'] == 'strong':
-        if analysis['trend_strength'] > 0.6:
-            direction = 'call' if random.random() > 0.3 else 'put'
-        else:
-            direction = 'put' if random.random() > 0.3 else 'call'
-    else:
-        direction = random.choice(['call', 'put'])
-    
-    # Ajustar confiança baseada em condições
-    confidence = analysis['confidence']
-    
-    # Win rate histórico (simulado)
-    win_rate = market_data.get('win_rate', 0) if market_data else 0
-    if win_rate > 70:
-        confidence += 5
-    elif win_rate < 40:
-        confidence -= 5
-    
-    confidence = max(70, min(95, confidence))
-    
-    # Reasoning inteligente
-    reasons = []
-    if analysis['volatility'] > 60:
-        reasons.append(f"Alta volatilidade ({analysis['volatility']:.1f}%)")
-    if analysis['trend'] == 'strong':
-        reasons.append(f"Tendência forte detectada")
-    if symbol in CONFIG['VOLATILITY_INDICES']:
-        reasons.append("Padrão de índice sintético")
-    
-    reasoning = " | ".join(reasons) if reasons else "Análise técnica avançada"
-    
-    return {
-        'direction': direction,
-        'confidence': confidence,
-        'reasoning': reasoning,
-        'volatility': analysis['volatility'],
-        'trend_strength': analysis['trend_strength'],
-        'market_condition': analysis['market_condition'],
-        'optimal_timeframe': determine_optimal_timeframe(analysis, symbol)
-    }
-
-def determine_optimal_timeframe(analysis, symbol):
-    """Determina timeframe ótimo baseado na análise"""
-    
-    volatility = analysis['volatility']
-    trend_strength = analysis['trend_strength']
-    is_volatility_index = symbol in CONFIG['VOLATILITY_INDICES']
-    
-    if is_volatility_index:
-        # Índices de volatilidade preferem ticks
-        if volatility > 70:
-            return {'type': 'ticks', 'duration': random.randint(1, 3)}
-        elif volatility > 50:
-            return {'type': 'ticks', 'duration': random.randint(3, 6)}
-        else:
-            return {'type': 'ticks', 'duration': random.randint(5, 10)}
-    else:
-        # Pares de moeda preferem minutos
-        if trend_strength > 0.6:
-            return {'type': 'minutes', 'duration': random.randint(1, 2)}
-        elif trend_strength > 0.4:
-            return {'type': 'minutes', 'duration': random.randint(2, 4)}
-        else:
-            return {'type': 'minutes', 'duration': random.randint(3, 5)}
-
-def assess_risk_level(trading_data):
-    """Avalia nível de risco da operação"""
-    
-    balance = trading_data.get('current_balance', 1000)
-    today_pnl = trading_data.get('today_pnl', 0)
-    martingale_level = trading_data.get('martingale_level', 0)
-    win_rate = trading_data.get('win_rate', 50)
-    current_stake = trading_data.get('current_stake', 1)
-    
-    risk_score = 0
-    risk_factors = []
-    
-    # Avaliar P&L do dia
-    daily_loss_percent = (abs(today_pnl) / balance * 100) if today_pnl < 0 else 0
-    if daily_loss_percent > 20:
-        risk_score += 30
-        risk_factors.append(f"Perda diária alta ({daily_loss_percent:.1f}%)")
-    elif daily_loss_percent > 10:
-        risk_score += 15
-        risk_factors.append(f"Perda diária moderada ({daily_loss_percent:.1f}%)")
-    
-    # Avaliar nível de Martingale
-    if martingale_level > 5:
-        risk_score += 25
-        risk_factors.append(f"Martingale nível alto ({martingale_level})")
-    elif martingale_level > 3:
-        risk_score += 15
-        risk_factors.append(f"Martingale ativo ({martingale_level})")
-    
-    # Avaliar win rate
-    if win_rate < 30:
-        risk_score += 20
-        risk_factors.append(f"Taxa de acerto baixa ({win_rate:.1f}%)")
-    elif win_rate < 45:
-        risk_score += 10
-        risk_factors.append(f"Performance abaixo da média")
-    
-    # Avaliar stake em relação ao saldo
-    stake_percent = (current_stake / balance * 100)
-    if stake_percent > 10:
-        risk_score += 20
-        risk_factors.append(f"Stake alto ({stake_percent:.1f}% do saldo)")
-    elif stake_percent > 5:
-        risk_score += 10
-        risk_factors.append(f"Stake moderado ({stake_percent:.1f}% do saldo)")
-    
-    # Determinar nível de risco
-    if risk_score >= 50:
-        level = 'high'
-        recommendation = 'Pare ou reduza significativamente o stake'
-    elif risk_score >= 25:
-        level = 'medium'
-        recommendation = 'Considere reduzir o stake ou fazer uma pausa'
-    else:
-        level = 'low'
-        recommendation = 'Operação dentro dos parâmetros normais'
-    
-    return {
-        'level': level,
-        'score': risk_score,
-        'factors': risk_factors,
-        'recommendation': recommendation,
-        'suggested_action': 'pause' if risk_score >= 50 else 'reduce' if risk_score >= 35 else 'continue'
-    }
-
-def generate_management_decision(trading_data):
-    """Gera decisão de gerenciamento inteligente"""
-    
-    risk_assessment = assess_risk_level(trading_data)
-    
-    current_stake = trading_data.get('current_stake', 1)
-    balance = trading_data.get('current_balance', 1000)
-    martingale_level = trading_data.get('martingale_level', 0)
-    win_rate = trading_data.get('win_rate', 50)
-    
-    # Decisão baseada no risco
-    if risk_assessment['suggested_action'] == 'pause':
-        return {
-            'action': 'pause',
-            'pause_duration': random.randint(30000, 120000),  # 30s a 2min
-            'reason': 'Alto risco detectado',
-            'risk_level': risk_assessment['level'],
-            'message': f"IA recomenda pausa: {risk_assessment['recommendation']}"
+class RetractionMLAnalysis:
+    def __init__(self):
+        # Configurações OTC da IQ Option
+        self.otc_config = {
+            'EURUSD-OTC': {'base_price': 1.08, 'volatility': 0.008, 'support_resistance': [1.06, 1.10]},
+            'GBPUSD-OTC': {'base_price': 1.25, 'volatility': 0.012, 'support_resistance': [1.22, 1.28]},
+            'USDJPY-OTC': {'base_price': 110.0, 'volatility': 0.015, 'support_resistance': [108.0, 112.0]},
+            'AUDUSD-OTC': {'base_price': 0.67, 'volatility': 0.010, 'support_resistance': [0.65, 0.69]},
+            'USDCAD-OTC': {'base_price': 1.35, 'volatility': 0.009, 'support_resistance': [1.32, 1.38]},
+            'USDCHF-OTC': {'base_price': 0.92, 'volatility': 0.008, 'support_resistance': [0.90, 0.94]},
+            'EURJPY-OTC': {'base_price': 118.0, 'volatility': 0.011, 'support_resistance': [116.0, 120.0]},
+            'EURGBP-OTC': {'base_price': 0.86, 'volatility': 0.007, 'support_resistance': [0.84, 0.88]},
+            'AUDCAD-OTC': {'base_price': 0.91, 'volatility': 0.009, 'support_resistance': [0.89, 0.93]}
+        }
+        
+        # 🧠 SISTEMA DE MACHINE LEARNING
+        self.ml_memory = {
+            # Histórico de performance por símbolo
+            'symbol_performance': {},
+            
+            # Pesos dos indicadores (ajustados por ML)
+            'indicator_weights': {
+                'retraction_signal': 1.0,      # Peso do sinal de retração
+                'rsi_oversold': 0.8,           # Peso do RSI oversold
+                'rsi_overbought': 0.8,         # Peso do RSI overbought
+                'support_resistance': 0.6,     # Peso support/resistance
+                'momentum': 0.4,               # Peso do momentum
+                'volatility_filter': 0.3,      # Peso do filtro de volatilidade
+                'session_factor': 0.2          # Peso da sessão de trading
+            },
+            
+            # Parâmetros adaptativos
+            'adaptive_params': {
+                'confidence_adjustment': 0.0,   # Ajuste de confiança baseado em performance
+                'retraction_threshold': 0.0001, # Limiar mínimo para considerar retração
+                'min_confidence': 70,           # Confiança mínima
+                'max_confidence': 95,           # Confiança máxima
+                'learning_rate': 0.1            # Taxa de aprendizado
+            },
+            
+            # Estatísticas globais
+            'global_stats': {
+                'total_signals': 0,
+                'total_wins': 0,
+                'total_losses': 0,
+                'win_rate': 0.0,
+                'last_updated': datetime.now().isoformat()
+            }
         }
     
-    # Ajuste de stake
-    recommended_stake = current_stake
+    def generate_otc_data(self, symbol, num_candles=50):
+        """Gera dados OTC com padrões de retração"""
+        try:
+            config = self.otc_config.get(symbol, self.otc_config['EURUSD-OTC'])
+            
+            base_price = config['base_price']
+            volatility = config['volatility']
+            
+            prices = []
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            
+            current_price = base_price + random.uniform(-0.01, 0.01)
+            
+            # Gerar velas com padrões de retração
+            for i in range(num_candles):
+                # Determinar se será vela verde ou vermelha
+                # Inserir padrões de retração propositalmente
+                if i > 0:
+                    prev_direction = "green" if closes[-1] > opens[-1] else "red"
+                    
+                    # 60% chance de retração (padrão que queremos detectar)
+                    if random.random() < 0.6:
+                        # Retração: direção oposta à vela anterior
+                        if prev_direction == "green":
+                            direction = "red"
+                        else:
+                            direction = "green"
+                    else:
+                        # Continuação
+                        direction = prev_direction
+                else:
+                    direction = random.choice(["green", "red"])
+                
+                # Gerar OHLC baseado na direção
+                open_price = current_price
+                
+                if direction == "green":
+                    # Vela verde (alta)
+                    change = random.uniform(0.0001, volatility * 2)
+                    close_price = open_price * (1 + change)
+                    high_price = close_price * (1 + random.uniform(0, volatility * 0.5))
+                    low_price = open_price * (1 - random.uniform(0, volatility * 0.3))
+                else:
+                    # Vela vermelha (baixa)
+                    change = random.uniform(0.0001, volatility * 2)
+                    close_price = open_price * (1 - change)
+                    high_price = open_price * (1 + random.uniform(0, volatility * 0.3))
+                    low_price = close_price * (1 - random.uniform(0, volatility * 0.5))
+                
+                opens.append(open_price)
+                highs.append(high_price)
+                lows.append(low_price)
+                closes.append(close_price)
+                prices.append(close_price)  # Para compatibilidade
+                
+                current_price = close_price
+            
+            print(f"✅ Dados OTC gerados para {symbol}: {len(closes)} velas")
+            print(f"📈 Última vela: Abertura {opens[-1]:.5f} → Fechamento {closes[-1]:.5f}")
+            
+            return {
+                'opens': opens,
+                'highs': highs,
+                'lows': lows,
+                'closes': closes,
+                'prices': prices,  # Para compatibilidade
+                'current_price': closes[-1],
+                'symbol': symbol,
+                'data_source': 'OTC com Padrões de Retração'
+            }
+            
+        except Exception as e:
+            print(f"❌ Erro ao gerar dados: {e}")
+            return None
     
-    if martingale_level == 0:  # Só ajustar stake se não estiver em Martingale
-        if win_rate > 70:
-            # Performance boa - pode aumentar ligeiramente
-            recommended_stake = min(current_stake * 1.1, balance * 0.05)
-        elif win_rate < 40:
-            # Performance ruim - reduzir stake
-            recommended_stake = max(current_stake * 0.8, 1)
+    def retraction_strategy(self, opens, closes):
+        """
+        🎯 ESTRATÉGIA DE RETRAÇÃO DE VELA
         
-        # Ajuste baseado no saldo
-        if recommended_stake > balance * 0.1:
-            recommended_stake = balance * 0.05
+        Lógica: Se a vela anterior foi vermelha (baixa), próxima operação é CALL (alta)
+                Se a vela anterior foi verde (alta), próxima operação é PUT (baixa)
+        """
+        try:
+            if len(opens) < 2 or len(closes) < 2:
+                return None, "Dados insuficientes para retração"
+            
+            # Analisar vela anterior
+            prev_open = opens[-2]
+            prev_close = closes[-2]
+            
+            # Calcular tamanho da vela
+            candle_size = abs(prev_close - prev_open)
+            price_pct_change = (candle_size / prev_open) * 100
+            
+            # Determinar direção da vela anterior
+            if prev_close > prev_open:
+                prev_direction = "green"  # Vela verde (alta)
+                retraction_signal = "put"  # Apostamos na retração (baixa)
+                signal_reason = f"Vela verde anterior (+{price_pct_change:.3f}%) → Retração PUT"
+            elif prev_close < prev_open:
+                prev_direction = "red"    # Vela vermelha (baixa)
+                retraction_signal = "call" # Apostamos na retração (alta)
+                signal_reason = f"Vela vermelha anterior (-{price_pct_change:.3f}%) → Retração CALL"
+            else:
+                prev_direction = "doji"   # Doji (empate)
+                retraction_signal = "call" if random.random() > 0.5 else "put"
+                signal_reason = "Doji anterior → Sinal neutro"
+            
+            return {
+                'signal': retraction_signal,
+                'prev_direction': prev_direction,
+                'candle_size_pct': price_pct_change,
+                'reason': signal_reason,
+                'confidence_base': min(80, 60 + (price_pct_change * 1000))  # Maior confiança em velas maiores
+            }, signal_reason
+            
+        except Exception as e:
+            print(f"❌ Erro na estratégia de retração: {e}")
+            return None, "Erro na análise"
     
-    return {
-        'action': 'continue',
-        'recommended_stake': round(recommended_stake, 2),
-        'risk_level': risk_assessment['level'],
-        'confidence': 85 + random.uniform(-10, 10),
-        'message': f"Stake recomendado: ${recommended_stake:.2f} | Risco: {risk_assessment['level']}",
-        'risk_factors': risk_assessment['factors']
-    }
+    def calculate_rsi(self, prices, period=14):
+        """RSI"""
+        try:
+            if len(prices) < period + 1:
+                return 50
+            
+            deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+            gains = [d if d > 0 else 0 for d in deltas]
+            losses = [-d if d < 0 else 0 for d in deltas]
+            
+            avg_gain = sum(gains[-period:]) / period
+            avg_loss = sum(losses[-period:]) / period
+            
+            if avg_loss == 0:
+                return 100
+            
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+            return max(0, min(100, rsi))
+            
+        except:
+            return 50
+    
+    def ml_adjust_signal(self, symbol, base_signal, indicators):
+        """
+        🧠 MACHINE LEARNING - Ajusta sinal baseado no aprendizado
+        """
+        try:
+            # Obter performance histórica do símbolo
+            symbol_perf = self.ml_memory['symbol_performance'].get(symbol, {
+                'total_signals': 0,
+                'wins': 0,
+                'losses': 0,
+                'win_rate': 0.5,
+                'last_signals': []
+            })
+            
+            # Obter pesos adaptativos
+            weights = self.ml_memory['indicator_weights']
+            params = self.ml_memory['adaptive_params']
+            
+            # Calcular score ajustado por ML
+            ml_score = 0
+            ml_reasons = []
+            
+            # 1. Sinal base de retração (peso principal)
+            retraction_confidence = base_signal.get('confidence_base', 70)
+            ml_score += retraction_confidence * weights['retraction_signal']
+            ml_reasons.append(f"Retração base: {retraction_confidence:.1f}")
+            
+            # 2. RSI com peso adaptativo
+            rsi = indicators.get('rsi', 50)
+            if rsi < 30:
+                rsi_boost = (30 - rsi) * weights['rsi_oversold']
+                ml_score += rsi_boost
+                ml_reasons.append(f"RSI oversold boost: +{rsi_boost:.1f}")
+            elif rsi > 70:
+                rsi_penalty = (rsi - 70) * weights['rsi_overbought']
+                ml_score -= rsi_penalty
+                ml_reasons.append(f"RSI overbought penalty: -{rsi_penalty:.1f}")
+            
+            # 3. Support/Resistance
+            if indicators.get('near_support', False):
+                sr_boost = 10 * weights['support_resistance']
+                ml_score += sr_boost
+                ml_reasons.append(f"Near support: +{sr_boost:.1f}")
+            elif indicators.get('near_resistance', False):
+                sr_penalty = 10 * weights['support_resistance']
+                ml_score -= sr_penalty
+                ml_reasons.append(f"Near resistance: -{sr_penalty:.1f}")
+            
+            # 4. Ajuste baseado na performance histórica
+            if symbol_perf['total_signals'] > 5:  # Só ajustar após histórico mínimo
+                perf_adjustment = (symbol_perf['win_rate'] - 0.5) * 20  # -10 a +10
+                ml_score += perf_adjustment * params['learning_rate']
+                ml_reasons.append(f"Performance histórica: {perf_adjustment:+.1f}")
+            
+            # 5. Ajuste global de confiança
+            ml_score += params['confidence_adjustment']
+            
+            # Normalizar para confiança (50-95%)
+            final_confidence = max(params['min_confidence'], 
+                                 min(params['max_confidence'], ml_score))
+            
+            # Decidir se usar o sinal ou inverter baseado no ML
+            original_signal = base_signal['signal']
+            
+            # Se performance muito ruim, considerar inverter estratégia
+            if symbol_perf['total_signals'] > 10 and symbol_perf['win_rate'] < 0.3:
+                if random.random() < 0.3:  # 30% chance de inverter
+                    ml_signal = "put" if original_signal == "call" else "call"
+                    ml_reasons.append("❗ ML inverteu sinal (baixa performance)")
+                else:
+                    ml_signal = original_signal
+            else:
+                ml_signal = original_signal
+            
+            return {
+                'signal': ml_signal,
+                'confidence': round(final_confidence, 1),
+                'ml_reasons': ml_reasons,
+                'ml_score': round(ml_score, 2),
+                'symbol_performance': symbol_perf,
+                'weights_used': {k: round(v, 2) for k, v in weights.items()}
+            }
+            
+        except Exception as e:
+            print(f"❌ Erro no ajuste ML: {e}")
+            return {
+                'signal': base_signal['signal'],
+                'confidence': base_signal.get('confidence_base', 70),
+                'ml_reasons': ['Erro no ML - usando base'],
+                'ml_score': 0
+            }
+    
+    def update_ml_feedback(self, symbol, predicted_signal, actual_result):
+        """
+        📚 APRENDIZADO - Atualiza ML baseado no resultado real
+        
+        actual_result: 'win', 'loss', ou 'tie'
+        """
+        try:
+            print(f"📚 ML Learning: {symbol} - Sinal {predicted_signal} = {actual_result}")
+            
+            # Atualizar performance do símbolo
+            if symbol not in self.ml_memory['symbol_performance']:
+                self.ml_memory['symbol_performance'][symbol] = {
+                    'total_signals': 0, 'wins': 0, 'losses': 0, 'win_rate': 0.5, 'last_signals': []
+                }
+            
+            perf = self.ml_memory['symbol_performance'][symbol]
+            perf['total_signals'] += 1
+            
+            if actual_result == 'win':
+                perf['wins'] += 1
+                # Reforçar pesos que funcionaram
+                self._reinforce_weights(True)
+            elif actual_result == 'loss':
+                perf['losses'] += 1
+                # Penalizar pesos que falharam
+                self._reinforce_weights(False)
+            
+            # Recalcular win rate
+            perf['win_rate'] = perf['wins'] / perf['total_signals'] if perf['total_signals'] > 0 else 0.5
+            
+            # Manter histórico dos últimos 20 sinais
+            perf['last_signals'].append({
+                'signal': predicted_signal,
+                'result': actual_result,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            if len(perf['last_signals']) > 20:
+                perf['last_signals'] = perf['last_signals'][-20:]
+            
+            # Atualizar estatísticas globais
+            global_stats = self.ml_memory['global_stats']
+            global_stats['total_signals'] += 1
+            
+            if actual_result == 'win':
+                global_stats['total_wins'] += 1
+            elif actual_result == 'loss':
+                global_stats['total_losses'] += 1
+            
+            global_stats['win_rate'] = global_stats['total_wins'] / global_stats['total_signals'] if global_stats['total_signals'] > 0 else 0.5
+            global_stats['last_updated'] = datetime.now().isoformat()
+            
+            # Ajustar parâmetros adaptativos baseado na performance global
+            self._adapt_parameters()
+            
+            print(f"📊 {symbol}: {perf['wins']}W/{perf['losses']}L = {perf['win_rate']*100:.1f}%")
+            print(f"🌍 Global: {global_stats['total_wins']}W/{global_stats['total_losses']}L = {global_stats['win_rate']*100:.1f}%")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Erro no feedback ML: {e}")
+            return False
+    
+    def _reinforce_weights(self, success):
+        """Ajusta pesos baseado no sucesso/falha"""
+        try:
+            weights = self.ml_memory['indicator_weights']
+            learning_rate = self.ml_memory['adaptive_params']['learning_rate']
+            
+            if success:
+                # Reforçar todos os pesos ligeiramente
+                for key in weights:
+                    weights[key] = min(2.0, weights[key] + learning_rate * 0.1)
+            else:
+                # Reduzir pesos ligeiramente
+                for key in weights:
+                    weights[key] = max(0.1, weights[key] - learning_rate * 0.1)
+            
+        except Exception as e:
+            print(f"❌ Erro ao ajustar pesos: {e}")
+    
+    def _adapt_parameters(self):
+        """Adapta parâmetros baseado na performance global"""
+        try:
+            global_stats = self.ml_memory['global_stats']
+            params = self.ml_memory['adaptive_params']
+            
+            win_rate = global_stats['win_rate']
+            
+            # Ajustar confiança baseado na performance
+            if win_rate > 0.7:
+                params['confidence_adjustment'] = min(10, params['confidence_adjustment'] + 0.5)
+            elif win_rate < 0.4:
+                params['confidence_adjustment'] = max(-10, params['confidence_adjustment'] - 0.5)
+            
+            # Ajustar learning rate
+            if global_stats['total_signals'] > 50:
+                params['learning_rate'] = max(0.05, params['learning_rate'] * 0.99)  # Reduzir gradualmente
+            
+        except Exception as e:
+            print(f"❌ Erro ao adaptar parâmetros: {e}")
+    
+    def generate_retraction_signal(self, symbol):
+        """
+        🎯 GERA SINAL DE RETRAÇÃO COM MACHINE LEARNING
+        """
+        try:
+            print(f"\n🤖 Análise de RETRAÇÃO + ML para {symbol}")
+            
+            # Gerar dados OTC
+            data = self.generate_otc_data(symbol)
+            if not data:
+                return self._error_response("Falha ao gerar dados OTC")
+            
+            opens = data['opens']
+            closes = data['closes']
+            highs = data['highs']
+            lows = data['lows']
+            current_price = data['current_price']
+            
+            # 🎯 ESTRATÉGIA DE RETRAÇÃO
+            retraction_result, retraction_reason = self.retraction_strategy(opens, closes)
+            if not retraction_result:
+                return self._error_response("Falha na estratégia de retração")
+            
+            print(f"📊 {retraction_reason}")
+            
+            # Calcular indicadores complementares
+            rsi = self.calculate_rsi(closes)
+            
+            # Verificar support/resistance
+            config = self.otc_config.get(symbol, self.otc_config['EURUSD-OTC'])
+            support, resistance = config['support_resistance']
+            
+            near_support = current_price <= support * 1.005
+            near_resistance = current_price >= resistance * 0.995
+            
+            indicators = {
+                'rsi': rsi,
+                'near_support': near_support,
+                'near_resistance': near_resistance,
+                'current_price': current_price
+            }
+            
+            # 🧠 AJUSTE POR MACHINE LEARNING
+            ml_result = self.ml_adjust_signal(symbol, retraction_result, indicators)
+            
+            final_signal = ml_result['signal']
+            final_confidence = ml_result['confidence']
+            
+            print(f"🎯 Sinal final: {final_signal.upper()}")
+            print(f"📊 Confiança ML: {final_confidence}%")
+            print(f"🧠 Razões ML: {' | '.join(ml_result['ml_reasons'][:3])}")
+            
+            # Timeframe baseado na confiança
+            if final_confidence >= 85:
+                timeframe = {"type": "minutes", "duration": 1}
+            elif final_confidence >= 75:
+                timeframe = {"type": "minutes", "duration": 2}
+            else:
+                timeframe = {"type": "minutes", "duration": 3}
+            
+            reasoning = f"{retraction_reason} | ML Score: {ml_result['ml_score']}"
+            
+            return {
+                'status': 'success',
+                'symbol': symbol,
+                'direction': final_signal,
+                'confidence': final_confidence,
+                'signal_score': ml_result['ml_score'],
+                'reasoning': reasoning,
+                'strategy': 'Retração de Vela + Machine Learning',
+                'retraction_analysis': {
+                    'prev_candle_direction': retraction_result['prev_direction'],
+                    'candle_size_percent': round(retraction_result['candle_size_pct'], 4),
+                    'retraction_signal': retraction_result['signal'],
+                    'base_confidence': retraction_result['confidence_base']
+                },
+                'ml_analysis': {
+                    'ml_reasons': ml_result['ml_reasons'],
+                    'weights_used': ml_result['weights_used'],
+                    'symbol_performance': ml_result['symbol_performance'],
+                    'learning_active': True
+                },
+                'market_analysis': {
+                    'current_price': round(current_price, 5),
+                    'rsi': round(rsi, 1),
+                    'near_support': near_support,
+                    'near_resistance': near_resistance,
+                    'support_level': support,
+                    'resistance_level': resistance
+                },
+                'optimal_timeframe': timeframe,
+                'data_source': data['data_source'],
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"❌ Erro na análise: {e}")
+            return self._error_response(f"Erro: {str(e)}")
+    
+    def _error_response(self, message):
+        return {
+            'status': 'error',
+            'message': message,
+            'direction': 'call',
+            'confidence': 50,
+            'reasoning': 'Análise indisponível',
+            'timestamp': datetime.now().isoformat()
+        }
+
+# ===============================================
+# INSTÂNCIA GLOBAL
+# ===============================================
+
+analyzer = RetractionMLAnalysis()
 
 # ===============================================
 # ROTAS DA API
@@ -262,219 +527,158 @@ def generate_management_decision(trading_data):
 
 @app.route('/')
 def home():
+    global_stats = analyzer.ml_memory['global_stats']
     return jsonify({
         'status': 'success',
-        'message': 'Trading Bot IA API - Funcionando!',
-        'version': '2.0.0',
+        'message': '🧠 IA RETRAÇÃO + MACHINE LEARNING',
+        'version': '7.0.0 - RETRACTION + ML',
+        'strategy': 'Retração de Vela + Aprendizado de Máquina',
         'features': [
-            'Análise avançada de mercado',
-            'Sinais de trading inteligentes',
-            'Duração otimizada por IA',
-            'Gerenciamento de risco automático',
-            'Suporte a índices de volatilidade',
-            'Avaliação de Martingale'
+            '🎯 Estratégia de Retração de Vela',
+            '🧠 Machine Learning que aprende com erros',
+            '📊 Ajuste automático de pesos dos indicadores',
+            '📈 Performance histórica por símbolo',
+            '⚙️ Parâmetros adaptativos',
+            '🔄 Feedback loop de aprendizado',
+            '📚 Memória de últimas 20 operações por par'
         ],
-        'endpoints': [
-            '/analyze', '/signal', '/duration', '/management',
-            '/risk-assessment', '/optimal-duration', '/trading-signal'
-        ],
+        'ml_stats': {
+            'total_signals': global_stats['total_signals'],
+            'global_win_rate': f"{global_stats['win_rate']*100:.1f}%",
+            'learning_active': True,
+            'last_updated': global_stats['last_updated']
+        },
+        'supported_symbols': list(analyzer.otc_config.keys()),
         'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/analyze', methods=['POST', 'GET'])
-def analyze_market():
-    """Análise avançada de mercado"""
-    
-    if request.method == 'GET':
-        # Análise genérica se não houver dados
-        symbol = 'EURUSD-OTC'
-        market_data = {}
-    else:
-        data = request.get_json() or {}
-        symbol = data.get('symbol', 'EURUSD-OTC')
-        market_data = data
-    
-    analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price'),
-                                       market_data.get('volatility'))
-    
-    return jsonify({
-        'status': 'success',
-        'symbol': symbol,
-        'analysis': analysis,
-        'message': f"Análise de {symbol}: {analysis['market_condition']} | Volatilidade {analysis['volatility']:.1f}%",
-        'timestamp': datetime.now().isoformat(),
-        'confidence': analysis['confidence'],
-        'trend': analysis['trend'],
-        'volatility': analysis['volatility']
     })
 
 @app.route('/signal', methods=['POST', 'GET'])
 @app.route('/trading-signal', methods=['POST', 'GET'])
-def get_trading_signal():
-    """Gera sinal de trading inteligente"""
+def get_signal():
+    """Endpoint principal - RETRAÇÃO + ML"""
     
     if request.method == 'GET':
         symbol = 'EURUSD-OTC'
-        market_data = {}
     else:
         data = request.get_json() or {}
         symbol = data.get('symbol', 'EURUSD-OTC')
-        market_data = data
     
-    signal = generate_trading_signal(symbol, market_data)
+    print(f"\n🔄 Análise RETRAÇÃO + ML para {symbol}")
     
-    return jsonify({
-        'status': 'success',
-        'symbol': symbol,
-        'direction': signal['direction'],
-        'confidence': signal['confidence'],
-        'reasoning': signal['reasoning'],
-        'volatility': signal['volatility'],
-        'trend_strength': signal['trend_strength'],
-        'market_condition': signal['market_condition'],
-        'optimal_timeframe': signal['optimal_timeframe'],
-        'message': f"Sinal {signal['direction'].upper()}: {signal['reasoning']}",
-        'timestamp': datetime.now().isoformat()
-    })
+    # Gerar sinal com ML
+    result = analyzer.generate_retraction_signal(symbol)
+    return jsonify(result)
 
-@app.route('/duration', methods=['POST', 'GET'])
-@app.route('/optimal-duration', methods=['POST', 'GET'])
-@app.route('/timeframe', methods=['POST', 'GET'])
-def get_optimal_duration():
-    """Determina duração ótima para o trade"""
+@app.route('/feedback', methods=['POST'])
+def ml_feedback():
+    """
+    📚 Endpoint para FEEDBACK do Machine Learning
     
-    if request.method == 'GET':
-        symbol = 'EURUSD-OTC'
-        market_data = {}
-    else:
+    Envie o resultado da operação para a IA aprender:
+    {
+        "symbol": "EURUSD-OTC",
+        "predicted_signal": "call",
+        "actual_result": "win"  // "win", "loss", ou "tie"
+    }
+    """
+    try:
         data = request.get_json() or {}
-        symbol = data.get('symbol', 'EURUSD-OTC')
-        market_data = data
-    
-    analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price'),
-                                       market_data.get('volatility'))
-    
-    timeframe = determine_optimal_timeframe(analysis, symbol)
-    
-    # Garantir que está dentro dos limites
-    duration_type = timeframe['type']
-    duration_value = timeframe['duration']
-    
-    if duration_type == 'ticks':
-        limits = CONFIG['DURATION_LIMITS']['ticks']
-        duration_value = max(limits['min'], min(limits['max'], duration_value))
-    else:
-        limits = CONFIG['DURATION_LIMITS']['minutes']
-        duration_value = max(limits['min'], min(limits['max'], duration_value))
-    
-    return jsonify({
-        'status': 'success',
-        'symbol': symbol,
-        'type': 't' if duration_type == 'ticks' else 'm',
-        'duration_type': duration_type,
-        'duration': duration_value,
-        'value': duration_value,
-        'confidence': analysis['confidence'],
-        'reasoning': f"Otimizado para {symbol}: {duration_value} {duration_type} baseado em volatilidade {analysis['volatility']:.1f}%",
-        'volatility': analysis['volatility'],
-        'market_condition': analysis['market_condition'],
-        'timestamp': datetime.now().isoformat()
-    })
+        symbol = data.get('symbol')
+        predicted_signal = data.get('predicted_signal')
+        actual_result = data.get('actual_result')
+        
+        if not all([symbol, predicted_signal, actual_result]):
+            return jsonify({
+                'status': 'error',
+                'message': 'Parâmetros obrigatórios: symbol, predicted_signal, actual_result'
+            }), 400
+        
+        if actual_result not in ['win', 'loss', 'tie']:
+            return jsonify({
+                'status': 'error',
+                'message': 'actual_result deve ser: win, loss, ou tie'
+            }), 400
+        
+        # Atualizar ML
+        success = analyzer.update_ml_feedback(symbol, predicted_signal, actual_result)
+        
+        if success:
+            # Retornar estatísticas atualizadas
+            symbol_perf = analyzer.ml_memory['symbol_performance'].get(symbol, {})
+            global_stats = analyzer.ml_memory['global_stats']
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'ML atualizado: {symbol} - {predicted_signal} = {actual_result}',
+                'learning_updated': True,
+                'symbol_performance': {
+                    'symbol': symbol,
+                    'win_rate': f"{symbol_perf.get('win_rate', 0)*100:.1f}%",
+                    'total_signals': symbol_perf.get('total_signals', 0),
+                    'wins': symbol_perf.get('wins', 0),
+                    'losses': symbol_perf.get('losses', 0)
+                },
+                'global_performance': {
+                    'global_win_rate': f"{global_stats['win_rate']*100:.1f}%",
+                    'total_signals': global_stats['total_signals'],
+                    'total_wins': global_stats['total_wins'],
+                    'total_losses': global_stats['total_losses']
+                },
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Falha ao atualizar ML'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Erro no feedback: {str(e)}'
+        }), 500
 
-@app.route('/management', methods=['POST', 'GET'])
-@app.route('/risk-management', methods=['POST', 'GET'])
-@app.route('/auto-manage', methods=['POST', 'GET'])
-def risk_management():
-    """Gerenciamento inteligente de risco"""
-    
-    if request.method == 'GET':
-        trading_data = {
-            'current_balance': 1000,
-            'today_pnl': 0,
-            'martingale_level': 0,
-            'win_rate': 50,
-            'current_stake': 1
-        }
-    else:
-        trading_data = request.get_json() or {}
-    
-    decision = generate_management_decision(trading_data)
-    
-    return jsonify({
-        'status': 'success',
-        'action': decision['action'],
-        'recommended_stake': decision.get('recommended_stake'),
-        'pause_duration': decision.get('pause_duration'),
-        'risk_level': decision['risk_level'],
-        'message': decision['message'],
-        'confidence': decision.get('confidence', 85),
-        'should_pause': decision['action'] == 'pause',
-        'risk_factors': decision.get('risk_factors', []),
-        'timestamp': datetime.now().isoformat()
-    })
+@app.route('/ml-stats')
+def ml_stats():
+    """Estatísticas detalhadas do Machine Learning"""
+    try:
+        ml_memory = analyzer.ml_memory
+        
+        return jsonify({
+            'status': 'success',
+            'ml_statistics': {
+                'global_stats': ml_memory['global_stats'],
+                'symbol_performance': ml_memory['symbol_performance'],
+                'indicator_weights': ml_memory['indicator_weights'],
+                'adaptive_params': ml_memory['adaptive_params']
+            },
+            'learning_summary': {
+                'total_symbols_learned': len(ml_memory['symbol_performance']),
+                'best_performing_symbol': max(ml_memory['symbol_performance'].items(), 
+                                            key=lambda x: x[1].get('win_rate', 0))[0] if ml_memory['symbol_performance'] else None,
+                'learning_active': True
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Erro ao obter estatísticas: {str(e)}'
+        }), 500
 
-@app.route('/risk-assessment', methods=['POST', 'GET'])
-def risk_assessment():
-    """Avaliação detalhada de risco"""
-    
-    if request.method == 'GET':
-        trading_data = {
-            'current_balance': 1000,
-            'today_pnl': 0,
-            'martingale_level': 0,
-            'win_rate': 50,
-            'current_stake': 1
-        }
-    else:
-        trading_data = request.get_json() or {}
-    
-    risk = assess_risk_level(trading_data)
-    
-    return jsonify({
-        'status': 'success',
-        'level': risk['level'],
-        'score': risk['score'],
-        'factors': risk['factors'],
-        'recommendation': risk['recommendation'],
-        'suggested_action': risk['suggested_action'],
-        'message': f"Risco {risk['level'].upper()}: {risk['recommendation']}",
-        'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check para monitoramento"""
+@app.route('/health')
+def health():
+    global_stats = analyzer.ml_memory['global_stats']
     return jsonify({
         'status': 'healthy',
-        'message': 'Trading Bot IA API operacional',
-        'uptime': 'online',
+        'message': '🟢 IA RETRAÇÃO + ML Online',
+        'strategy': 'Retração de Vela + Machine Learning',
+        'ml_active': True,
+        'global_win_rate': f"{global_stats['win_rate']*100:.1f}%",
+        'total_signals_processed': global_stats['total_signals'],
         'timestamp': datetime.now().isoformat()
     })
-
-# ===============================================
-# TRATAMENTO DE ERROS
-# ===============================================
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Endpoint não encontrado',
-        'available_endpoints': [
-            '/', '/analyze', '/signal', '/duration', '/management',
-            '/risk-assessment', '/health'
-        ]
-    }), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Erro interno do servidor',
-        'timestamp': datetime.now().isoformat()
-    }), 500
 
 # ===============================================
 # INICIALIZAÇÃO
@@ -482,12 +686,14 @@ def internal_error(error):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
     
-    print("🚀 Iniciando Trading Bot IA API...")
+    print("🚀 IA RETRAÇÃO + MACHINE LEARNING Iniciando...")
+    print("🎯 Estratégia: Retração de Vela")
+    print("🧠 Machine Learning: Aprende com acertos e erros")
+    print("📊 Ajuste automático de pesos e parâmetros")
+    print("🔄 Sistema de feedback ativo")
+    print("📚 Memória de performance por símbolo")
+    print("✅ Aprendizado contínuo ativado!")
     print(f"🌐 Porta: {port}")
-    print(f"🔧 Debug: {debug}")
-    print("🤖 Recursos: Análise IA + Sinais + Duração + Gerenciamento")
-    print("✅ API pronta para uso!")
     
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port, debug=False)
