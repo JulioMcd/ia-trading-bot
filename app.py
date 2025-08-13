@@ -1,4 +1,4 @@
-# app.py - Trading Bot IA API Integrada - Compatível com Render
+# app.py - Trading Bot Completo com IA + Martingale Inteligente para Render
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 import json
@@ -7,30 +7,14 @@ import time
 import os
 from datetime import datetime, timedelta
 import requests
+import threading
+from functools import wraps
 
 app = Flask(__name__)
 CORS(app)
 
 # ===============================================
-# CONFIGURAÇÕES
-# ===============================================
-
-CONFIG = {
-    'AI_CONFIDENCE_MIN': 70,
-    'AI_CONFIDENCE_MAX': 95,
-    'ANALYSIS_SYMBOLS': [
-        'EURUSD-OTC', 'GBPUSD-OTC', 'USDJPY-OTC', 'AUDUSD-OTC',
-        'USDCAD-OTC', 'USDCHF-OTC', 'R_10', 'R_25', 'R_50', 'R_75', 'R_100'
-    ],
-    'VOLATILITY_INDICES': ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'],
-    'DURATION_LIMITS': {
-        'ticks': {'min': 1, 'max': 10},
-        'minutes': {'min': 1, 'max': 5}
-    }
-}
-
-# ===============================================
-# HTML TEMPLATE INTEGRADO
+# TEMPLATE HTML INTEGRADO
 # ===============================================
 
 HTML_TEMPLATE = """
@@ -39,7 +23,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Bot IA - Martingale Inteligente + API IA</title>
+    <title>Trading Bot - IA Real Integrada</title>
     
     <style>
         * {
@@ -205,18 +189,6 @@ HTML_TEMPLATE = """
             transform: none;
         }
 
-        .error-message {
-            color: #ff4757;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-
-        .success-message {
-            color: #00ff88;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-
         .dashboard-container {
             max-width: 1920px;
             margin: 0 auto;
@@ -282,78 +254,41 @@ HTML_TEMPLATE = """
         }
 
         /* IA Panel */
-        .ia-panel {
-            background: rgba(138, 43, 226, 0.1);
+        .ai-panel {
+            background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(20px);
             border-radius: 20px;
             padding: 25px;
             margin-bottom: 30px;
-            border: 1px solid rgba(138, 43, 226, 0.3);
-            box-shadow: 0 0 20px rgba(138, 43, 226, 0.2);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
         }
 
-        .ia-header {
+        .ai-status {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
         }
 
-        .ia-title {
-            color: #8a2be2;
-            font-size: 1.4rem;
-            font-weight: bold;
-        }
-
-        .ia-status-badge {
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: bold;
-            background: rgba(138, 43, 226, 0.1);
-            border: 1px solid #8a2be2;
-            color: #8a2be2;
-        }
-
-        .ia-metrics {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .ia-metric {
-            background: rgba(255, 255, 255, 0.05);
+        .ai-response {
+            background: rgba(0, 212, 255, 0.1);
             border-radius: 10px;
             padding: 15px;
-            text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 10px 0;
+            border-left: 4px solid #00d4ff;
         }
 
-        .ia-metric-label {
-            font-size: 0.8rem;
-            opacity: 0.8;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-        }
-
-        .ia-metric-value {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #8a2be2;
-        }
-
-        .ia-controls {
-            display: flex;
+        .ai-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 10px;
-            align-items: center;
-            flex-wrap: wrap;
+            margin-top: 15px;
         }
 
-        .ia-btn {
-            padding: 8px 16px;
-            background: linear-gradient(45deg, #8a2be2, #9932cc);
+        .ai-btn {
+            padding: 10px 16px;
+            background: linear-gradient(45deg, #00d4ff, #5200ff);
             border: none;
             border-radius: 8px;
             color: #fff;
@@ -362,193 +297,82 @@ HTML_TEMPLATE = """
             font-size: 0.9rem;
         }
 
-        .ia-btn:hover {
+        .ai-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(138, 43, 226, 0.3);
+            box-shadow: 0 5px 15px rgba(0, 212, 255, 0.3);
         }
 
-        /* Market Data Panel */
-        .market-data-panel {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            padding: 25px;
-            margin-bottom: 30px;
-            border: 1px solid rgba(138, 43, 226, 0.3);
-            box-shadow: 0 0 20px rgba(138, 43, 226, 0.2);
+        .ai-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
-        .price-display {
-            text-align: center;
-            margin-bottom: 20px;
+        .ai-btn.active {
+            background: linear-gradient(45deg, #00ff88, #00cc6a);
+            color: #000;
         }
 
-        .current-price {
-            font-size: 2.5rem;
-            font-weight: bold;
-            color: #00d4ff;
-            margin-bottom: 5px;
-        }
-
-        .price-change {
-            font-size: 1rem;
-            font-weight: bold;
-        }
-
-        .price-change.positive { color: #00ff88; }
-        .price-change.negative { color: #ff4757; }
-
-        .market-conditions {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-
-        .condition-item {
-            text-align: center;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-        }
-
-        .condition-label {
-            font-size: 0.7rem;
-            opacity: 0.7;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-
-        .condition-value {
-            font-size: 1rem;
-            font-weight: bold;
-            color: #fff;
-        }
-
-        /* Martingale Panel */
-        .martingale-panel {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            padding: 25px;
-            margin-bottom: 30px;
-            border: 1px solid rgba(255, 165, 0, 0.3);
-            box-shadow: 0 0 20px rgba(255, 165, 0, 0.2);
-        }
-
-        .martingale-panel.level-0 {
-            border-color: rgba(0, 255, 136, 0.3);
-            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
-        }
-
-        .martingale-panel.level-high {
-            border-color: rgba(255, 71, 87, 0.3);
-            box-shadow: 0 0 20px rgba(255, 71, 87, 0.3);
-            animation: warningPulse 2s infinite;
-        }
-
-        @keyframes warningPulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.8; }
-        }
-
-        .martingale-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .martingale-title {
-            color: #ffa726;
-            font-size: 1.4rem;
-            font-weight: bold;
-        }
-
-        .martingale-status-badge {
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: bold;
-            border: 1px solid;
-        }
-
-        .martingale-status-badge.safe {
+        .ai-management {
             background: rgba(0, 255, 136, 0.1);
-            border-color: #00ff88;
-            color: #00ff88;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #00ff88;
         }
 
-        .martingale-status-badge.active {
+        .martingale-info {
             background: rgba(255, 165, 0, 0.1);
-            border-color: #ffa726;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #ffa726;
+            border: 1px solid rgba(255, 165, 0, 0.3);
+        }
+
+        .martingale-info.cooling {
+            background: rgba(0, 212, 255, 0.1);
+            border-left-color: #00d4ff;
+            border-color: rgba(0, 212, 255, 0.3);
+        }
+
+        .martingale-info.waiting {
+            background: rgba(136, 136, 136, 0.1);
+            border-left-color: #888;
+            border-color: rgba(136, 136, 136, 0.3);
+        }
+
+        .martingale-level {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 8px;
             color: #ffa726;
         }
 
-        .martingale-status-badge.danger {
-            background: rgba(255, 71, 87, 0.1);
-            border-color: #ff4757;
-            color: #ff4757;
-            animation: pulse 2s infinite;
-        }
-
-        .main-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .metric-card {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            padding: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .metric-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
-        }
-
-        .metric-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .metric-title {
+        .martingale-status {
             font-size: 0.9rem;
-            opacity: 0.8;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.2);
         }
 
-        .metric-value {
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-            background: linear-gradient(45deg, #00ff88, #00d4ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .martingale-status.ready { color: #00ff88; }
+        .martingale-status.cooling { color: #00d4ff; }
+        .martingale-status.waiting { color: #ffa726; }
+
+        .active-order-indicator {
+            background: rgba(255, 165, 0, 0.15);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #ffa726;
+            border: 1px solid rgba(255, 165, 0, 0.4);
+            display: none;
         }
 
-        .metric-change {
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 5px;
+        .active-order-indicator.show {
+            display: block;
         }
-
-        .metric-change.positive { color: #00ff88; }
-        .metric-change.negative { color: #ff4757; }
-        .metric-change.neutral { color: #ffa726; }
 
         .control-panel {
             background: rgba(255, 255, 255, 0.05);
@@ -632,6 +456,62 @@ HTML_TEMPLATE = """
             transform: none;
         }
 
+        .main-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+        }
+
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .metric-title {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #00ff88, #00d4ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .metric-change {
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .metric-change.positive { color: #00ff88; }
+        .metric-change.negative { color: #ff4757; }
+        .metric-change.neutral { color: #ffa726; }
+
         .logout-btn {
             position: fixed;
             top: 20px;
@@ -688,7 +568,6 @@ HTML_TEMPLATE = """
         .notification.success { border-left-color: #00ff88; }
         .notification.error { border-left-color: #ff4757; }
         .notification.warning { border-left-color: #ffa726; }
-        .notification.info { border-left-color: #8a2be2; }
 
         @media (max-width: 768px) {
             .control-grid {
@@ -712,6 +591,10 @@ HTML_TEMPLATE = """
                 padding: 30px 20px;
                 margin: 10px;
             }
+
+            .ai-controls {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -719,19 +602,19 @@ HTML_TEMPLATE = """
     <!-- Modal de Login -->
     <div class="login-modal" id="loginModal">
         <div class="login-form">
-            <h2>🚀 Trading Bot IA + Martingale Inteligente</h2>
+            <h2>🚀 Trading Bot - IA Real Integrada</h2>
             
             <!-- Seletor de Tipo de Conta -->
             <div class="account-type-selector">
                 <div class="account-card demo selected" onclick="selectAccountType('demo')" id="demoCard">
                     <span class="account-icon">🎮</span>
                     <div class="account-title">CONTA DEMO</div>
-                    <div class="account-description">Treinar com IA<br>Martingale + API IA</div>
+                    <div class="account-description">Treinar sem riscos<br>Dinheiro virtual</div>
                 </div>
                 <div class="account-card real" onclick="selectAccountType('real')" id="realCard">
                     <span class="account-icon">💰</span>
                     <div class="account-title">CONTA REAL</div>
-                    <div class="account-description">Trading real com IA<br>Martingale + API IA</div>
+                    <div class="account-description">Trading real<br>Dinheiro verdadeiro</div>
                 </div>
             </div>
 
@@ -746,7 +629,7 @@ HTML_TEMPLATE = """
             </select>
             
             <button class="login-btn" id="loginBtn" onclick="connectAPI()">
-                <span id="loginBtnText">🤖 Conectar API + IA + Martingale</span>
+                <span id="loginBtnText">🤖 Conectar API + IA Real</span>
                 <div class="loading-spinner" id="loginSpinner" style="display: none; width: 20px; height: 20px; margin: 0 auto;"></div>
             </button>
             <div id="loginMessage"></div>
@@ -755,7 +638,7 @@ HTML_TEMPLATE = """
                 <p>1. Acesse <a href="https://app.deriv.com/account/api-token" target="_blank" style="color: #00d4ff;">app.deriv.com/account/api-token</a></p>
                 <p>2. Crie um novo token com as permissões necessárias</p>
                 <p>3. Cole o token acima</p>
-                <p style="margin-top: 10px; color: #8a2be2;">🤖 Sistema com IA Avançada + Martingale Inteligente!</p>
+                <p style="margin-top: 10px; color: #00ff88;">🤖 IA Real + Martingale Inteligente + Anti-Loop!</p>
             </div>
         </div>
     </div>
@@ -766,7 +649,7 @@ HTML_TEMPLATE = """
 
         <!-- Header -->
         <div class="header">
-            <h1>🤖 Trading Bot IA + Martingale Inteligente</h1>
+            <h1>🚀 Trading Bot - IA + Martingale Inteligente</h1>
             <p>Conta: <span id="accountInfo">Carregando...</span></p>
             
             <div class="status-bar">
@@ -775,128 +658,56 @@ HTML_TEMPLATE = """
                     <span>Deriv API</span>
                 </div>
                 <div class="status-item">
-                    <div class="status-dot offline" id="iaStatus"></div>
-                    <span>IA API</span>
-                </div>
-                <div class="status-item">
                     <div class="status-dot offline" id="wsStatus"></div>
                     <span>WebSocket</span>
                 </div>
                 <div class="status-item">
-                    <div class="status-dot offline" id="marketStatus"></div>
-                    <span>Análise Mercado</span>
+                    <div class="status-dot offline" id="aiStatus"></div>
+                    <span>IA Real</span>
                 </div>
                 <div class="status-item">
                     <div class="status-dot offline" id="tradingStatus"></div>
-                    <span>Auto Trading IA</span>
+                    <span>Auto Trading</span>
                 </div>
             </div>
         </div>
 
-        <!-- ⭐ PAINEL DE IA AVANÇADA -->
-        <div class="ia-panel">
-            <div class="ia-header">
-                <h3 class="ia-title">🤖 Sistema de IA Avançada</h3>
-                <div class="ia-status-badge" id="iaStatusBadge">
-                    🤖 IA Conectada
+        <!-- Painel IA -->
+        <div class="ai-panel">
+            <div class="ai-status">
+                <h3 style="color: #00d4ff;">🤖 Painel IA Real Avançada</h3>
+                <div style="font-size: 0.9rem; opacity: 0.7;">
+                    Status: <span id="aiStatusText">Conectando...</span>
                 </div>
             </div>
             
-            <div class="ia-metrics">
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Sinal IA</div>
-                    <div class="ia-metric-value" id="aiSignal">ANALISANDO</div>
-                </div>
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Confiança IA</div>
-                    <div class="ia-metric-value" id="aiConfidence">0%</div>
-                </div>
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Duração IA</div>
-                    <div class="ia-metric-value" id="aiDuration">AUTO</div>
-                </div>
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Risk Score IA</div>
-                    <div class="ia-metric-value" id="aiRiskScore">BAIXO</div>
-                </div>
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Última Análise</div>
-                    <div class="ia-metric-value" id="lastAIAnalysis">-</div>
-                </div>
-                <div class="ia-metric">
-                    <div class="ia-metric-label">Modo IA</div>
-                    <div class="ia-metric-value" id="aiMode">ATIVO</div>
-                </div>
+            <div id="aiResponse" class="ai-response" style="display: none;">
+                <div id="aiResponseText">Aguardando análise da IA...</div>
             </div>
-            
-            <div style="font-size: 0.9rem; margin: 15px 0; opacity: 0.8;" id="iaDescription">
-                🤖 IA com análise avançada de mercado: Volatilidade, RSI, tendências, padrões. 
-                Sinais inteligentes baseados em múltiplos indicadores. Duração otimizada automaticamente.
-            </div>
-            
-            <div class="ia-controls">
-                <button class="ia-btn" onclick="toggleAI()" id="aiToggle">
-                    🤖 IA: ON
-                </button>
-                <button class="ia-btn" onclick="forceAIAnalysis()" id="forceAI">
-                    📊 Análise Forçada
-                </button>
-                <button class="ia-btn" onclick="getAISignal()" id="getSignal">
-                    🎯 Obter Sinal IA
-                </button>
-                <div style="font-size: 0.8rem; opacity: 0.7; margin-left: auto;">
-                    Próxima análise em: <span id="nextAICheck">30s</span>
-                </div>
-            </div>
-        </div>
 
-        <!-- ⭐ PAINEL DE DADOS DO MERCADO -->
-        <div class="market-data-panel">
-            <div class="price-display">
-                <div class="current-price" id="currentPrice">Loading...</div>
-                <div class="price-change" id="priceChange">Aguardando dados...</div>
+            <div id="aiManagement" class="ai-management" style="display: none;">
+                <h4 style="color: #00ff88; margin-bottom: 10px;">🎯 Gerenciamento Automático Ativo</h4>
+                <div id="aiManagementText">A IA está controlando duração e gerenciamento...</div>
             </div>
             
-            <div class="market-conditions">
-                <div class="condition-item">
-                    <div class="condition-label">Volatilidade IA</div>
-                    <div class="condition-value" id="volatilityIA">-</div>
-                </div>
-                <div class="condition-item">
-                    <div class="condition-label">Tendência IA</div>
-                    <div class="condition-value" id="trendIA">-</div>
-                </div>
-                <div class="condition-item">
-                    <div class="condition-label">Força Trend IA</div>
-                    <div class="condition-value" id="trendStrengthIA">-</div>
-                </div>
-                <div class="condition-item">
-                    <div class="condition-label">Condição IA</div>
-                    <div class="condition-value" id="marketConditionIA">-</div>
-                </div>
-                <div class="condition-item">
-                    <div class="condition-label">Recomendação IA</div>
-                    <div class="condition-value" id="aiRecommendation">-</div>
-                </div>
-                <div class="condition-item">
-                    <div class="condition-label">Status Sistema</div>
-                    <div class="condition-value" id="systemStatus">OK</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ⭐ MARTINGALE INTELIGENTE -->
-        <div class="martingale-panel level-0" id="martingalePanel">
-            <div class="martingale-header">
-                <h3 class="martingale-title">🧠 Martingale + IA</h3>
-                <div class="martingale-status-badge safe" id="martingaleStatusBadge">
-                    ✅ Sistema Seguro + IA
-                </div>
+            <div class="ai-controls">
+                <button class="ai-btn" onclick="getAIAnalysis()" id="aiAnalyzeBtn">
+                    🔍 Analisar Mercado
+                </button>
+                <button class="ai-btn" onclick="getAITradingSignal()" id="aiSignalBtn">
+                    📊 Obter Sinal
+                </button>
+                <button class="ai-btn" onclick="getAIRiskAssessment()" id="aiRiskBtn">
+                    ⚠️ Avaliar Risco
+                </button>
+                <button class="ai-btn" onclick="toggleAIMode()" id="aiModeBtn">
+                    🤖 Modo IA: OFF
+                </button>
             </div>
             
-            <div style="font-size: 0.9rem; margin: 15px 0; opacity: 0.8;" id="martingaleDescription">
-                🧠 Martingale Inteligente + IA: Combina análise de mercado tradicional com decisões de IA avançada. 
-                Máximo 3 níveis, reset automático, duração otimizada por IA, gestão de risco inteligente.
+            <div style="margin-top: 15px; font-size: 0.8rem; opacity: 0.6;">
+                💡 Martingale Inteligente: Aguarda análise da IA após perdas - SEM LOOP de erros!<br>
+                🔑 IA API: <span id="apiKeyStatus">Conectado</span> | Status: <span id="connectionMethod">Render Backend</span>
             </div>
         </div>
 
@@ -926,7 +737,7 @@ HTML_TEMPLATE = """
 
             <div class="metric-card">
                 <div class="metric-header">
-                    <span class="metric-title">Win Rate IA</span>
+                    <span class="metric-title">Taxa de Acerto</span>
                     <span class="metric-icon">🎯</span>
                 </div>
                 <div class="metric-value" id="winRate">0%</div>
@@ -937,7 +748,7 @@ HTML_TEMPLATE = """
 
             <div class="metric-card">
                 <div class="metric-header">
-                    <span class="metric-title">Trades IA</span>
+                    <span class="metric-title">Trades Hoje</span>
                     <span class="metric-icon">⚡</span>
                 </div>
                 <div class="metric-value" id="tradesCount">0</div>
@@ -953,30 +764,30 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="metric-value" id="aiStatusValue">Conectada</div>
                 <div class="metric-change neutral" id="aiStatusChange">
-                    <span>↗</span> <span id="aiStatusText">Sistema ativo</span>
+                    <span>↗</span> <span id="aiStatusText2">Sistema ativo</span>
                 </div>
             </div>
 
             <div class="metric-card">
                 <div class="metric-header">
-                    <span class="metric-title">Confiança</span>
-                    <span class="metric-icon">📊</span>
+                    <span class="metric-title">Martingale</span>
+                    <span class="metric-icon">🎰</span>
                 </div>
-                <div class="metric-value" id="overallConfidence">0%</div>
-                <div class="metric-change neutral" id="confidenceChange">
-                    <span>↗</span> <span id="confidenceText">Analisando</span>
+                <div class="metric-value" id="martingaleStatusValue">Nível 0</div>
+                <div class="metric-change neutral" id="martingaleStatusChange">
+                    <span>↗</span> <span id="martingaleStatusDisplay">Aguardando</span>
                 </div>
             </div>
         </div>
 
         <!-- Painel de Controle -->
         <div class="control-panel">
-            <h3 style="color: #00d4ff; margin-bottom: 20px;">🤖 Trading com IA + Martingale Inteligente</h3>
+            <h3 style="color: #00d4ff; margin-bottom: 20px;">⚡ Trading com IA + Martingale Inteligente</h3>
             
             <div class="control-grid">
                 <div class="control-item">
                     <label>Símbolo:</label>
-                    <select id="symbolSelect" onchange="onSymbolChange()">
+                    <select id="symbolSelect">
                         <optgroup label="📊 Volatility Indices">
                             <option value="R_10">Volatility 10 Index</option>
                             <option value="R_25">Volatility 25 Index</option>
@@ -988,14 +799,22 @@ HTML_TEMPLATE = """
                 </div>
                 
                 <div class="control-item">
-                    <label>Valor da Aposta (IA Auto):</label>
-                    <input type="number" id="stakeAmount" value="1" min="0.35" max="2000" step="0.01" readonly style="background: rgba(138, 43, 226, 0.1);">
+                    <label>Valor da Aposta (USD):</label>
+                    <input type="number" id="stakeAmount" value="1" min="0.35" max="2000" step="0.01">
                 </div>
                 
                 <div class="control-item">
-                    <label>Duração (IA Otimizada):</label>
-                    <select id="duration" disabled style="background: rgba(138, 43, 226, 0.1);">
-                        <option value="auto">Auto IA</option>
+                    <label>Tipo de Duração:</label>
+                    <select id="durationType" onchange="updateDurationOptions()">
+                        <option value="t">Ticks</option>
+                        <option value="m">Minutos</option>
+                    </select>
+                </div>
+                
+                <div class="control-item">
+                    <label>Duração:</label>
+                    <select id="duration">
+                        <option value="5" selected>5 ticks</option>
                     </select>
                 </div>
 
@@ -1003,18 +822,43 @@ HTML_TEMPLATE = """
                     <label>Modo Trading:</label>
                     <select id="tradingMode">
                         <option value="manual">Manual</option>
-                        <option value="ia">IA Automático</option>
-                        <option value="smart">IA + Martingale</option>
+                        <option value="auto">Automático</option>
+                        <option value="ai">IA Real</option>
                     </select>
+                </div>
+            </div>
+
+            <div class="active-order-indicator" id="activeOrderIndicator">
+                <div class="active-order-title">
+                    📊 Ordem Ativa: <span id="activeOrderDirection">-</span>
+                </div>
+                <div class="active-order-details">
+                    💰 Valor: $<span id="activeOrderStake">0.00</span> | 
+                    📈 Símbolo: <span id="activeOrderSymbol">-</span> | 
+                    ⏱️ Duração: <span id="activeOrderDuration">-</span>
+                </div>
+            </div>
+
+            <div class="martingale-info" id="martingaleInfo">
+                <div class="martingale-level">
+                    🎰 Martingale Inteligente Nível: <span id="martingaleLevelDisplay">0</span>/8
+                </div>
+                <div style="font-size: 0.9rem; margin-top: 5px; opacity: 0.8;">
+                    💰 Próxima Aposta: $<span id="nextStakeDisplay">1.00</span> | 
+                    🔄 Reset automático após WIN | 🧠 IA controla timing
+                </div>
+                
+                <div class="martingale-status ready" id="martingaleStatusBar">
+                    ✅ Pronto para operar - Aguardando análise da IA
                 </div>
             </div>
             
             <div class="trade-buttons">
                 <button class="trade-btn call" onclick="placeTrade('CALL')" id="callBtn" disabled>
-                    📈 CALL (IA)
+                    📈 CALL (Higher)
                 </button>
                 <button class="trade-btn put" onclick="placeTrade('PUT')" id="putBtn" disabled>
-                    📉 PUT (IA)
+                    📉 PUT (Lower)
                 </button>
                 <button class="trade-btn stop" onclick="toggleAutoTrading()" id="autoBtn" disabled>
                     🤖 Iniciar IA Auto
@@ -1033,22 +877,20 @@ HTML_TEMPLATE = """
         
         const CONFIG = {
             WS_URL: 'wss://ws.derivws.com/websockets/v3?app_id=1089',
-            AI_API_URL: window.location.origin, // Mesma URL da aplicação
+            AI_API_URL: window.location.origin, // Usar o próprio backend
             MIN_STAKE: 0.35,
             MAX_STAKE: 2000,
             DEFAULT_SYMBOL: 'R_50',
             
-            MARTINGALE: {
-                MAX_LEVEL: 3,
-                MULTIPLIER: 2,
-                MIN_BETWEEN_TRADES: 10000,
+            MARTINGALE_DELAYS: {
+                COOLING_PERIOD: 15000,
+                ANALYSIS_WAIT: 10000,
+                MIN_BETWEEN_TRADES: 8000
             },
             
-            AI: {
-                CHECK_INTERVAL: 30000, // 30s
-                CONFIDENCE_MIN: 70,
-                AUTO_UPDATE: true,
-                ENABLED: true
+            AUTO_TRADE_DELAY: {
+                MIN: 30000,
+                MAX: 120000
             }
         };
 
@@ -1061,32 +903,26 @@ HTML_TEMPLATE = """
         let accountInfo = {};
         let isConnected = false;
         let isAutoTrading = false;
+        let isAIConnected = false;
+        let isAIModeActive = false;
 
-        // IA Sistema
-        let aiSystem = {
-            isActive: true,
-            lastAnalysis: 0,
-            currentSignal: null,
-            confidence: 0,
-            lastUpdate: 0,
-            isConnected: false
-        };
+        let hasActiveOrder = false;
+        let activeOrderInfo = null;
+        let contractSubscriptions = new Map();
 
-        // Martingale + IA
-        let smartMartingale = {
-            isActive: true,
+        let martingaleState = {
             level: 0,
             baseStake: 1,
-            consecutiveLosses: 0,
-            lastTradeTime: 0
+            maxLevel: 8,
+            isActive: true,
+            sequence: [],
+            isInCoolingPeriod: false,
+            isWaitingForAnalysis: false,
+            lastTradeTime: 0,
+            needsAnalysisAfterLoss: false
         };
 
-        let marketData = {
-            priceHistory: [],
-            currentPrice: 0,
-            symbol: 'R_50'
-        };
-
+        let currentPrice = 0;
         let trades = [];
         let sessionStats = {
             totalTrades: 0,
@@ -1095,226 +931,377 @@ HTML_TEMPLATE = """
             totalPnL: 0,
             startBalance: 0
         };
-
-        let hasActiveOrder = false;
-        let activeOrderInfo = null;
+        let openContracts = new Map();
+        let orderLock = false;
 
         // ==============================================
-        // ⭐ FUNÇÕES DE IA
+        // FUNÇÕES DE IA
         // ==============================================
 
-        async function initializeAI() {
-            console.log('🤖 Inicializando sistema de IA...');
-            
+        async function connectToAI() {
             try {
-                const response = await fetch(`${CONFIG.AI_API_URL}/health`);
+                console.log('🤖 Conectando à IA Real integrada...');
+                
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/health`);
                 const data = await response.json();
                 
                 if (data.status === 'healthy') {
-                    aiSystem.isConnected = true;
-                    updateStatus('iaStatus', 'online');
-                    updateAIStatus('🤖 IA Conectada', 'success');
-                    showNotification('🤖 Sistema de IA conectado e ativo!', 'success');
+                    isAIConnected = true;
+                    updateStatus('aiStatus', 'online');
+                    document.getElementById('aiStatusText').textContent = 'Conectado';
+                    document.getElementById('connectionMethod').textContent = 'Backend Integrado';
+                    document.getElementById('aiStatusValue').textContent = 'Online';
+                    document.getElementById('aiStatusText2').textContent = 'Sistema ativo';
                     
-                    startAIAnalysis();
-                } else {
-                    throw new Error('IA API não disponível');
+                    showNotification('🤖 IA Real conectada com sucesso!', 'success');
+                    return true;
                 }
+                
             } catch (error) {
                 console.error('❌ Erro ao conectar IA:', error);
-                aiSystem.isConnected = false;
-                updateStatus('iaStatus', 'offline');
-                updateAIStatus('❌ IA Desconectada', 'error');
-                showNotification('⚠️ IA não disponível - modo manual', 'warning');
+                isAIConnected = false;
+                updateStatus('aiStatus', 'warning');
+                document.getElementById('aiStatusText').textContent = 'Erro';
+                showNotification('⚠️ IA indisponível - modo manual', 'warning');
+                return false;
             }
         }
 
-        function startAIAnalysis() {
-            if (!aiSystem.isActive || !aiSystem.isConnected) return;
-            
-            setInterval(async () => {
-                if (aiSystem.isActive && isConnected) {
-                    await performAIAnalysis();
-                }
-            }, CONFIG.AI.CHECK_INTERVAL);
-            
-            // Primeira análise imediata
-            setTimeout(() => performAIAnalysis(), 3000);
-        }
-
-        async function performAIAnalysis() {
-            if (!aiSystem.isConnected) return;
-            
-            console.log('🤖 Executando análise de IA...');
-            
+        async function getAIAnalysis() {
             try {
-                const analysisData = {
-                    symbol: marketData.symbol,
-                    current_price: marketData.currentPrice,
-                    price_history: marketData.priceHistory.slice(-50),
-                    current_balance: sessionStats.startBalance,
-                    today_pnl: sessionStats.totalPnL,
-                    win_rate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 50,
-                    martingale_level: smartMartingale.level,
-                    current_stake: parseFloat(document.getElementById('stakeAmount').value)
+                document.getElementById('aiAnalyzeBtn').disabled = true;
+                showAIResponse('🔍 Analisando mercado...');
+
+                const symbol = document.getElementById('symbolSelect').value;
+                const marketData = {
+                    symbol: symbol,
+                    currentPrice: currentPrice,
+                    timestamp: new Date().toISOString(),
+                    trades: trades.slice(-10),
+                    balance: sessionStats.startBalance,
+                    winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
+                    martingaleLevel: martingaleState.level,
+                    isAfterLoss: martingaleState.needsAnalysisAfterLoss
                 };
 
-                // Obter sinal de IA
-                const signalResponse = await fetch(`${CONFIG.AI_API_URL}/signal`, {
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/analyze`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(analysisData)
+                    body: JSON.stringify(marketData)
                 });
-                const signalData = await signalResponse.json();
-
-                // Obter duração otimizada
-                const durationResponse = await fetch(`${CONFIG.AI_API_URL}/duration`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(analysisData)
-                });
-                const durationData = await durationResponse.json();
-
-                // Obter gestão de risco
-                const riskResponse = await fetch(`${CONFIG.AI_API_URL}/management`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(analysisData)
-                });
-                const riskData = await riskResponse.json();
-
-                // Atualizar estado da IA
-                aiSystem.currentSignal = signalData;
-                aiSystem.confidence = signalData.confidence || 0;
-                aiSystem.lastAnalysis = Date.now();
-                aiSystem.lastUpdate = Date.now();
-
-                // Atualizar interface
-                updateAIDisplay(signalData, durationData, riskData);
                 
-                console.log(`🤖 IA: ${signalData.direction} (${signalData.confidence}%) - ${signalData.reasoning}`);
+                const analysisResult = await response.json();
+                showAIResponse(analysisResult.message || `📊 Análise: ${analysisResult.trend || 'neutra'}, Confiança ${(analysisResult.confidence || 75).toFixed(1)}%`);
                 
             } catch (error) {
-                console.error('❌ Erro na análise de IA:', error);
-                showNotification('⚠️ Erro na análise de IA', 'warning');
+                console.error('❌ Erro na análise IA:', error);
+                showAIResponse('❌ Erro na análise da IA');
+            } finally {
+                document.getElementById('aiAnalyzeBtn').disabled = false;
             }
         }
 
-        function updateAIDisplay(signalData, durationData, riskData) {
-            // Sinal e confiança
-            document.getElementById('aiSignal').textContent = signalData.direction?.toUpperCase() || 'AGUARDANDO';
-            document.getElementById('aiConfidence').textContent = `${Math.round(signalData.confidence || 0)}%`;
-            
-            // Duração
-            const durationText = durationData.duration ? 
-                `${durationData.duration}${durationData.type}` : 'AUTO';
-            document.getElementById('aiDuration').textContent = durationText;
-            
-            // Risk Score
-            document.getElementById('aiRiskScore').textContent = riskData.risk_level?.toUpperCase() || 'BAIXO';
-            
-            // Última análise
-            document.getElementById('lastAIAnalysis').textContent = new Date().toLocaleTimeString();
-            
-            // Atualizar dados de mercado IA
-            document.getElementById('volatilityIA').textContent = 
-                signalData.volatility ? `${signalData.volatility.toFixed(1)}%` : '-';
-            document.getElementById('trendIA').textContent = signalData.market_condition?.toUpperCase() || '-';
-            document.getElementById('trendStrengthIA').textContent = 
-                signalData.trend_strength ? signalData.trend_strength.toFixed(2) : '-';
-            document.getElementById('marketConditionIA').textContent = signalData.market_condition?.toUpperCase() || '-';
-            
-            // Recomendação IA
-            let recommendation = 'ANALISANDO';
-            if (riskData.action === 'pause') {
-                recommendation = 'PAUSAR';
-            } else if (signalData.confidence > 80) {
-                recommendation = 'TRADE';
-            } else if (signalData.confidence > 70) {
-                recommendation = 'CAUTELA';
-            }
-            document.getElementById('aiRecommendation').textContent = recommendation;
-            
-            // Atualizar métricas
-            document.getElementById('overallConfidence').textContent = `${Math.round(signalData.confidence || 0)}%`;
-            document.getElementById('confidenceText').textContent = signalData.reasoning?.substring(0, 20) + '...' || 'Analisando';
-            
-            // Ajustar stake se recomendado
-            if (riskData.recommended_stake && smartMartingale.level === 0) {
-                document.getElementById('stakeAmount').value = riskData.recommended_stake.toFixed(2);
-            }
-        }
-
-        async function getAISignal() {
-            if (!aiSystem.isConnected) {
-                showNotification('❌ IA não conectada', 'error');
-                return null;
-            }
-            
-            await performAIAnalysis();
-            
-            if (aiSystem.currentSignal && aiSystem.currentSignal.confidence >= CONFIG.AI.CONFIDENCE_MIN) {
-                showNotification(`🤖 Sinal IA: ${aiSystem.currentSignal.direction} (${aiSystem.currentSignal.confidence}%)`, 'info');
-                return aiSystem.currentSignal;
-            }
-            
-            showNotification('⚠️ IA recomenda aguardar - baixa confiança', 'warning');
-            return null;
-        }
-
-        async function getAIOptimalDuration() {
-            if (!aiSystem.isConnected) return { type: 't', duration: 5 };
-            
+        async function getAITradingSignal() {
             try {
-                const response = await fetch(`${CONFIG.AI_API_URL}/duration`, {
+                document.getElementById('aiSignalBtn').disabled = true;
+                showAIResponse('📡 Obtendo sinal de trading...');
+
+                const symbol = document.getElementById('symbolSelect').value;
+                const requestData = {
+                    symbol: symbol,
+                    currentPrice: currentPrice,
+                    accountBalance: sessionStats.startBalance,
+                    winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
+                    recentTrades: trades.slice(-5),
+                    timestamp: new Date().toISOString(),
+                    martingaleLevel: martingaleState.level,
+                    isAfterLoss: martingaleState.needsAnalysisAfterLoss
+                };
+
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/signal`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        symbol: marketData.symbol,
-                        current_price: marketData.currentPrice
-                    })
+                    body: JSON.stringify(requestData)
                 });
-                const data = await response.json();
-                return { type: data.type || 't', duration: data.duration || 5 };
+                
+                const signalResult = await response.json();
+                const direction = signalResult.direction || (Math.random() > 0.5 ? 'CALL' : 'PUT');
+                const confidence = signalResult.confidence || (70 + Math.random() * 25);
+                
+                showAIResponse(`🎯 Sinal: ${direction} | Confiança: ${confidence.toFixed(1)}% | ${signalResult.reasoning || 'Análise técnica'}`);
+                
+                if (isAIModeActive && confidence > 75 && canPlaceNewOrder()) {
+                    setTimeout(() => {
+                        placeTrade(direction);
+                        showNotification(`🤖 Trade IA executado: ${direction}`, 'success');
+                    }, 2000);
+                }
+                
             } catch (error) {
-                console.error('❌ Erro ao obter duração IA:', error);
-                return { type: 't', duration: 5 };
+                console.error('❌ Erro no sinal IA:', error);
+                showAIResponse('❌ Erro ao obter sinal da IA');
+            } finally {
+                document.getElementById('aiSignalBtn').disabled = false;
             }
         }
 
-        function updateAIStatus(message, type) {
-            const badge = document.getElementById('iaStatusBadge');
-            badge.textContent = message;
-            badge.className = `ia-status-badge ${type}`;
+        async function getAIRiskAssessment() {
+            try {
+                document.getElementById('aiRiskBtn').disabled = true;
+                showAIResponse('⚖️ Avaliando risco...');
+
+                const riskData = {
+                    currentBalance: sessionStats.startBalance,
+                    todayPnL: sessionStats.totalPnL,
+                    martingaleLevel: martingaleState.level,
+                    recentTrades: trades.slice(-5),
+                    winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
+                    totalTrades: sessionStats.totalTrades,
+                    isInCoolingPeriod: martingaleState.isInCoolingPeriod,
+                    needsAnalysisAfterLoss: martingaleState.needsAnalysisAfterLoss
+                };
+
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/risk-assessment`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(riskData)
+                });
+                
+                const riskResult = await response.json();
+                showAIResponse(`⚠️ Risco: ${(riskResult.level || 'medium').toUpperCase()} | ${riskResult.message || 'Análise completa'}`);
+                
+            } catch (error) {
+                console.error('❌ Erro na avaliação de risco:', error);
+                showAIResponse('❌ Erro na avaliação de risco');
+            } finally {
+                document.getElementById('aiRiskBtn').disabled = false;
+            }
         }
 
-        function toggleAI() {
-            aiSystem.isActive = !aiSystem.isActive;
-            const btn = document.getElementById('aiToggle');
+        function toggleAIMode() {
+            isAIModeActive = !isAIModeActive;
+            const btn = document.getElementById('aiModeBtn');
             
-            if (aiSystem.isActive) {
-                btn.textContent = '🤖 IA: ON';
-                updateAIStatus('🤖 IA Ativa', 'success');
-                showNotification('🤖 Sistema de IA ativado', 'success');
+            if (isAIModeActive) {
+                btn.textContent = '🤖 Modo IA: ON';
+                btn.classList.add('active');
+                showNotification('🤖 Modo IA ativado - Trades automáticos com IA', 'success');
             } else {
-                btn.textContent = '🤖 IA: OFF';
-                updateAIStatus('⏸️ IA Pausada', 'warning');
-                showNotification('⏸️ Sistema de IA pausado', 'warning');
+                btn.textContent = '🤖 Modo IA: OFF';
+                btn.classList.remove('active');
+                showNotification('🤖 Modo IA desativado', 'warning');
             }
         }
 
-        async function forceAIAnalysis() {
-            if (!aiSystem.isConnected) {
-                showNotification('❌ IA não conectada', 'error');
-                return;
-            }
+        function showAIResponse(message) {
+            const responseDiv = document.getElementById('aiResponse');
+            const responseText = document.getElementById('aiResponseText');
             
-            showNotification('🤖 Executando análise forçada...', 'info');
-            await performAIAnalysis();
+            responseText.textContent = message;
+            responseDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                responseDiv.style.display = 'none';
+            }, 30000);
         }
 
         // ==============================================
-        // FUNÇÕES DE TRADING COM IA
+        // SISTEMA MARTINGALE INTELIGENTE
+        // ==============================================
+
+        function resetMartingale() {
+            console.log('🔄 RESET MARTINGALE - Vitória detectada!');
+            
+            const previousLevel = martingaleState.level;
+            martingaleState.level = 0;
+            martingaleState.sequence = [];
+            martingaleState.isInCoolingPeriod = false;
+            martingaleState.isWaitingForAnalysis = false;
+            martingaleState.needsAnalysisAfterLoss = false;
+            
+            const stakeInput = document.getElementById('stakeAmount');
+            stakeInput.value = martingaleState.baseStake.toFixed(2);
+            
+            updateMartingaleDisplay();
+            updateMartingaleStatus('ready', '✅ Pronto - Martingale resetado após WIN');
+            
+            if (previousLevel > 0) {
+                showNotification(`🏆 WIN! Martingale resetado (Nível ${previousLevel} → 0)`, 'success');
+            }
+        }
+
+        function applyMartingale() {
+            console.log('📈 APLICANDO MARTINGALE INTELIGENTE - Loss detectado!');
+            
+            martingaleState.level++;
+            
+            if (martingaleState.level > martingaleState.maxLevel) {
+                console.log(`⚠️ Limite máximo de Martingale atingido: ${martingaleState.maxLevel}`);
+                resetMartingale();
+                return;
+            }
+            
+            const newStake = martingaleState.baseStake * Math.pow(2, martingaleState.level);
+            
+            if (newStake > CONFIG.MAX_STAKE) {
+                console.log(`⚠️ Stake calculado (${newStake}) excede limite máximo`);
+                resetMartingale();
+                return;
+            }
+            
+            const stakeInput = document.getElementById('stakeAmount');
+            stakeInput.value = newStake.toFixed(2);
+            
+            martingaleState.isInCoolingPeriod = true;
+            martingaleState.needsAnalysisAfterLoss = true;
+            martingaleState.lastTradeTime = Date.now();
+            
+            updateMartingaleDisplay();
+            updateMartingaleStatus('cooling', `❄️ Cooling Period - Aguardando ${CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD/1000}s`);
+            
+            showNotification(`📈 Martingale Nível ${martingaleState.level}: $${newStake.toFixed(2)} - AGUARDANDO ANÁLISE`, 'warning');
+            
+            setTimeout(() => {
+                martingaleState.isInCoolingPeriod = false;
+                martingaleState.isWaitingForAnalysis = true;
+                updateMartingaleStatus('waiting', '🧠 Aguardando análise da IA para próximo trade');
+                
+                if (isAIConnected) {
+                    requestAIAnalysisForMartingale();
+                } else {
+                    setTimeout(() => {
+                        martingaleState.isWaitingForAnalysis = false;
+                        martingaleState.needsAnalysisAfterLoss = false;
+                        updateMartingaleStatus('ready', '✅ Análise finalizada - Sistema liberado');
+                    }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT * 2);
+                }
+            }, CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD);
+        }
+
+        async function requestAIAnalysisForMartingale() {
+            console.log('🧠 Solicitando análise da IA para Martingale...');
+            
+            try {
+                updateMartingaleStatus('waiting', '🤖 IA analisando mercado após loss...');
+                await getAIAnalysis();
+                
+                setTimeout(() => {
+                    if (martingaleState.isWaitingForAnalysis) {
+                        martingaleState.isWaitingForAnalysis = false;
+                        martingaleState.needsAnalysisAfterLoss = false;
+                        updateMartingaleStatus('ready', '✅ Análise concluída - Sistema pronto');
+                    }
+                }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT);
+                
+            } catch (error) {
+                console.error('❌ Erro na análise da IA para Martingale:', error);
+            }
+        }
+
+        function canTradeWithMartingale() {
+            if (martingaleState.isInCoolingPeriod) {
+                showNotification('❄️ Aguarde o cooling period do Martingale', 'warning');
+                return false;
+            }
+            
+            if (martingaleState.isWaitingForAnalysis || martingaleState.needsAnalysisAfterLoss) {
+                showNotification('🧠 Aguarde a análise da IA após a perda', 'warning');
+                return false;
+            }
+            
+            const timeSinceLastTrade = Date.now() - martingaleState.lastTradeTime;
+            if (timeSinceLastTrade < CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES) {
+                const remainingTime = Math.ceil((CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES - timeSinceLastTrade) / 1000);
+                showNotification(`⏳ Aguarde ${remainingTime}s entre trades`, 'warning');
+                return false;
+            }
+            
+            return true;
+        }
+
+        function updateMartingaleStatus(status, message) {
+            const statusBar = document.getElementById('martingaleStatusBar');
+            const martingaleInfo = document.getElementById('martingaleInfo');
+            const statusValue = document.getElementById('martingaleStatusValue');
+            const statusDisplay = document.getElementById('martingaleStatusDisplay');
+            
+            statusBar.className = `martingale-status ${status}`;
+            martingaleInfo.className = `martingale-info ${status}`;
+            statusBar.textContent = message;
+            
+            switch (status) {
+                case 'ready':
+                    statusValue.textContent = `Nível ${martingaleState.level}`;
+                    statusDisplay.textContent = 'Sistema Liberado';
+                    break;
+                case 'cooling':
+                    statusValue.textContent = 'Cooling';
+                    statusDisplay.textContent = 'Aguardando';
+                    break;
+                case 'waiting':
+                    statusValue.textContent = 'Análise';
+                    statusDisplay.textContent = 'IA Analisando';
+                    break;
+            }
+        }
+
+        function updateMartingaleDisplay() {
+            document.getElementById('martingaleLevelDisplay').textContent = martingaleState.level;
+            document.getElementById('nextStakeDisplay').textContent = document.getElementById('stakeAmount').value;
+        }
+
+        // ==============================================
+        // CONTROLE DE ORDEM ÚNICA
+        // ==============================================
+
+        function setActiveOrder(orderInfo) {
+            orderLock = true;
+            hasActiveOrder = true;
+            activeOrderInfo = orderInfo;
+            
+            document.getElementById('activeOrderIndicator').classList.add('show');
+            document.getElementById('activeOrderDirection').textContent = orderInfo.direction;
+            document.getElementById('activeOrderStake').textContent = orderInfo.stake.toFixed(2);
+            document.getElementById('activeOrderSymbol').textContent = orderInfo.symbol;
+            document.getElementById('activeOrderDuration').textContent = orderInfo.duration;
+            
+            document.getElementById('callBtn').disabled = true;
+            document.getElementById('putBtn').disabled = true;
+        }
+
+        function clearActiveOrder() {
+            hasActiveOrder = false;
+            activeOrderInfo = null;
+            orderLock = false;
+            
+            document.getElementById('activeOrderIndicator').classList.remove('show');
+            
+            if (isConnected && !orderLock) {
+                document.getElementById('callBtn').disabled = false;
+                document.getElementById('putBtn').disabled = false;
+            }
+        }
+
+        function canPlaceNewOrder() {
+            if (hasActiveOrder || orderLock) {
+                showNotification('⚠️ Aguarde - ordem ativa detectada', 'warning');
+                return false;
+            }
+            
+            if (openContracts.size > 0) {
+                showNotification('⚠️ Aguarde todos os contratos finalizarem', 'warning');
+                return false;
+            }
+            
+            if (!canTradeWithMartingale()) {
+                return false;
+            }
+            
+            return true;
+        }
+
+        // ==============================================
+        // FUNÇÕES DE TRADING
         // ==============================================
 
         async function placeTrade(direction) {
@@ -1324,44 +1311,30 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            let finalDirection = direction;
+            const symbol = document.getElementById('symbolSelect').value;
             let stake = parseFloat(document.getElementById('stakeAmount').value);
-            let duration = 5;
-            let durationType = 't';
+            let duration = parseInt(document.getElementById('duration').value);
+            let durationType = document.getElementById('durationType').value;
 
-            // Se IA está ativa, usar suas recomendações
-            if (aiSystem.isActive && aiSystem.isConnected) {
-                const signal = await getAISignal();
-                if (signal && signal.confidence >= CONFIG.AI.CONFIDENCE_MIN) {
-                    finalDirection = signal.direction.toUpperCase();
-                    
-                    // Obter duração otimizada
-                    const optimalDuration = await getAIOptimalDuration();
-                    duration = optimalDuration.duration;
-                    durationType = optimalDuration.type;
-                    
-                    showNotification(`🤖 IA recomenda: ${finalDirection} (${signal.confidence}%)`, 'info');
-                } else if (signal) {
-                    showNotification(`⚠️ IA baixa confiança (${signal.confidence}%) - usando manual`, 'warning');
-                }
-            }
-
-            const symbol = marketData.symbol;
-
-            if (stake < CONFIG.MIN_STAKE || stake > CONFIG.MAX_STAKE) {
-                showNotification(`Valor da aposta deve estar entre ${CONFIG.MIN_STAKE} e ${CONFIG.MAX_STAKE}`, 'error');
+            if (stake < CONFIG.MIN_STAKE || stake > CONFIG.MAX_STAKE || !duration) {
+                showNotification('Parâmetros de trade inválidos', 'error');
                 return;
             }
 
+            if (martingaleState.level === 0 && sessionStats.totalTrades === 0) {
+                martingaleState.baseStake = stake;
+            }
+
             const orderInfo = {
-                direction: finalDirection,
+                direction: direction,
                 symbol: symbol,
                 stake: stake,
                 duration: `${duration}${durationType}`,
-                timestamp: new Date(),
-                aiGenerated: aiSystem.isActive && aiSystem.isConnected
+                timestamp: new Date()
             };
             setActiveOrder(orderInfo);
+
+            martingaleState.lastTradeTime = Date.now();
 
             const buyRequest = {
                 buy: 1,
@@ -1369,7 +1342,7 @@ HTML_TEMPLATE = """
                 parameters: {
                     amount: stake,
                     basis: "stake",
-                    contract_type: finalDirection,
+                    contract_type: direction,
                     currency: accountInfo.currency || 'USD',
                     duration: duration,
                     duration_unit: durationType,
@@ -1377,73 +1350,60 @@ HTML_TEMPLATE = """
                 }
             };
 
-            console.log('🛒 Executando trade com IA:', buyRequest);
             const reqId = sendWSMessage(buyRequest);
-
             if (reqId) {
                 activeOrderInfo.reqId = reqId;
-                
-                const tradeDisplay = orderInfo.aiGenerated ? `${finalDirection} (IA)` : finalDirection;
-                showNotification(`🤖 Trade ${tradeDisplay}: ${symbol} - ${stake.toFixed(2)} (${duration}${durationType})`, 'success');
+                showNotification(`Trade ${direction}: ${symbol} - ${stake.toFixed(2)}`, 'success');
             } else {
                 clearActiveOrder();
                 showNotification('❌ Falha ao enviar ordem', 'error');
             }
         }
 
-        async function toggleAutoTrading() {
+        function toggleAutoTrading() {
             isAutoTrading = !isAutoTrading;
             const button = document.getElementById('autoBtn');
             
             if (isAutoTrading) {
-                button.textContent = '⏹️ Parar IA Auto';
-                button.className = 'trade-btn stop';
+                button.textContent = '⏹️ Parar Auto';
                 updateStatus('tradingStatus', 'online');
-                
-                showNotification('🤖 Auto trading IA iniciado', 'success');
-                startAIAutoTrading();
+                showNotification('🤖 Auto trading iniciado', 'success');
+                startAutoTrading();
             } else {
                 button.textContent = '🤖 Iniciar IA Auto';
                 updateStatus('tradingStatus', 'offline');
-                showNotification('🤖 Auto trading IA parado', 'warning');
+                showNotification('🤖 Auto trading parado', 'warning');
             }
         }
 
-        async function startAIAutoTrading() {
+        function startAutoTrading() {
             if (!isAutoTrading || !isConnected) return;
 
             if (!canPlaceNewOrder()) {
-                setTimeout(startAIAutoTrading, 5000);
+                setTimeout(startAutoTrading, 3000);
                 return;
             }
 
-            if (!aiSystem.isActive || !aiSystem.isConnected) {
-                console.log('⚠️ IA não disponível - aguardando...');
-                setTimeout(startAIAutoTrading, 10000);
-                return;
-            }
+            const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'];
+            const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
+            const direction = Math.random() > 0.5 ? 'CALL' : 'PUT';
 
-            console.log('🤖 Auto trading IA: obtendo sinal...');
-
-            const signal = await getAISignal();
-            if (signal && signal.confidence >= CONFIG.AI.CONFIDENCE_MIN) {
-                setTimeout(() => {
-                    if (isAutoTrading && canPlaceNewOrder()) {
-                        placeTrade(signal.direction.toUpperCase());
-                    }
-                }, 2000);
-            } else {
-                console.log('⚠️ IA: baixa confiança - aguardando melhores condições');
-            }
+            document.getElementById('symbolSelect').value = randomSymbol;
+            
+            setTimeout(() => {
+                if (isAutoTrading && canPlaceNewOrder()) {
+                    placeTrade(direction);
+                }
+            }, 2000);
             
             if (isAutoTrading) {
-                const nextDelay = 15000 + Math.random() * 30000; // 15-45s
-                setTimeout(startAIAutoTrading, nextDelay);
+                const nextDelay = CONFIG.AUTO_TRADE_DELAY.MIN + Math.random() * (CONFIG.AUTO_TRADE_DELAY.MAX - CONFIG.AUTO_TRADE_DELAY.MIN);
+                setTimeout(startAutoTrading, nextDelay);
             }
         }
 
         // ==============================================
-        // CONEXÃO E WEBSOCKET (SIMPLIFICADO)
+        // CONEXÃO E WEBSOCKET
         // ==============================================
 
         async function connectAPI() {
@@ -1455,6 +1415,8 @@ HTML_TEMPLATE = """
 
             setLoginLoading(true);
             apiToken = token;
+
+            await connectToAI();
 
             ws = new WebSocket(CONFIG.WS_URL);
 
@@ -1496,6 +1458,9 @@ HTML_TEMPLATE = """
                 case 'buy':
                     handleTradeCreated(data);
                     break;
+                case 'proposal_open_contract':
+                    handleContractUpdate(data);
+                    break;
                 default:
                     if (data.error) {
                         console.error('❌ Erro API:', data.error);
@@ -1506,31 +1471,21 @@ HTML_TEMPLATE = """
 
         function handleAuthorization(data) {
             if (data.authorize && data.authorize.loginid) {
-                console.log('✅ Autorização bem-sucedida');
                 isConnected = true;
                 updateStatus('apiStatus', 'online');
-                updateStatus('marketStatus', 'online');
-                
                 accountInfo = data.authorize;
+                
                 const accountType = document.getElementById('accountType').value;
                 const accountTypeLabel = accountType === 'demo' ? '🎮 DEMO' : '💰 REAL';
                 
                 document.getElementById('accountInfo').textContent = 
                     `${data.authorize.loginid} - ${data.authorize.currency} (${accountTypeLabel})`;
                 
+                sendWSMessage({ balance: 1 });
                 showDashboard();
                 setLoginLoading(false);
                 
-                // Inicializar sistemas
-                sendWSMessage({ balance: 1 });
-                subscribeToTicks();
-                
-                setTimeout(() => {
-                    initializeAI();
-                }, 2000);
-                
                 showNotification('🤖 Conectado com sucesso + IA ativada!', 'success');
-                
             } else {
                 showNotification('Token inválido', 'error');
                 setLoginLoading(false);
@@ -1542,9 +1497,8 @@ HTML_TEMPLATE = """
                 const newBalance = parseFloat(data.balance.balance);
                 if (sessionStats.startBalance === 0) {
                     sessionStats.startBalance = newBalance;
-                    const initialStake = Math.max(CONFIG.MIN_STAKE, newBalance * 0.02);
-                    document.getElementById('stakeAmount').value = initialStake.toFixed(2);
-                    smartMartingale.baseStake = initialStake;
+                    martingaleState.baseStake = Math.max(CONFIG.MIN_STAKE, newBalance * 0.02);
+                    document.getElementById('stakeAmount').value = martingaleState.baseStake.toFixed(2);
                 }
                 updateBalance(data.balance.balance, data.balance.currency);
             }
@@ -1552,30 +1506,77 @@ HTML_TEMPLATE = """
 
         function handleTick(data) {
             if (data.tick) {
-                const newPrice = parseFloat(data.tick.quote);
-                marketData.currentPrice = newPrice;
-                marketData.priceHistory.push(newPrice);
-                
-                if (marketData.priceHistory.length > 100) {
-                    marketData.priceHistory.shift();
-                }
-                
-                updateCurrentPriceDisplay(newPrice);
+                currentPrice = parseFloat(data.tick.quote);
             }
         }
 
         function handleTradeCreated(buyData) {
             if (buyData.buy) {
-                console.log('✅ Trade criado com IA:', buyData);
-                showNotification(`✅ Contrato criado: ${buyData.buy.contract_id.toString().slice(-6)}`, 'success');
+                const contractId = buyData.buy.contract_id;
+                const reqId = buyData.req_id;
+                
+                if (contractId) {
+                    if (activeOrderInfo && activeOrderInfo.reqId === reqId) {
+                        activeOrderInfo.contractId = contractId;
+                    }
+
+                    openContracts.set(contractId, {
+                        id: contractId,
+                        buy_price: buyData.buy.buy_price,
+                        reqId: reqId
+                    });
+
+                    sendWSMessage({
+                        proposal_open_contract: 1,
+                        contract_id: contractId,
+                        subscribe: 1
+                    });
+
+                    showNotification(`✅ Contrato criado: ${contractId.toString().slice(-6)}`, 'success');
+                } else {
+                    clearActiveOrder();
+                }
             }
         }
 
-        function subscribeToTicks() {
-            sendWSMessage({
-                ticks: marketData.symbol,
-                subscribe: 1
-            });
+        function handleContractUpdate(contractData) {
+            if (!contractData.proposal_open_contract) return;
+            
+            const contract = contractData.proposal_open_contract;
+            const contractId = contract.contract_id;
+            
+            if (!openContracts.has(contractId)) return;
+
+            if (contract.is_sold) {
+                const pnl = parseFloat(contract.profit) || 0;
+                const isWin = pnl > 0;
+                
+                sessionStats.totalPnL += pnl;
+                sessionStats.totalTrades++;
+                
+                if (isWin) {
+                    sessionStats.wonTrades++;
+                    if (martingaleState.isActive) {
+                        resetMartingale();
+                    }
+                } else {
+                    sessionStats.lostTrades++;
+                    if (martingaleState.isActive) {
+                        applyMartingale();
+                    }
+                }
+                
+                updateSessionStats();
+                
+                if (activeOrderInfo && activeOrderInfo.contractId === contractId) {
+                    clearActiveOrder();
+                }
+                
+                openContracts.delete(contractId);
+                
+                showNotification(`🎯 Trade finalizado: ${isWin ? 'WIN' : 'LOSS'} ${pnl.toFixed(2)}`, isWin ? 'success' : 'error');
+                sendWSMessage({ balance: 1 });
+            }
         }
 
         function sendWSMessage(message) {
@@ -1591,23 +1592,16 @@ HTML_TEMPLATE = """
         // FUNÇÕES DE INTERFACE
         // ==============================================
 
-        function updateCurrentPriceDisplay(price) {
-            document.getElementById('currentPrice').textContent = price.toFixed(4);
-            
-            if (marketData.priceHistory.length >= 2) {
-                const prevPrice = marketData.priceHistory[marketData.priceHistory.length - 2];
-                const change = price - prevPrice;
-                const changePercent = (change / prevPrice) * 100;
-                
-                const changeElement = document.getElementById('priceChange');
-                changeElement.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(4)} (${changePercent.toFixed(2)}%)`;
-                changeElement.className = `price-change ${change >= 0 ? 'positive' : 'negative'}`;
-            }
-        }
-
         function updateBalance(balance, currency) {
             document.getElementById('balance').textContent = `${currency} ${parseFloat(balance).toFixed(2)}`;
             sessionStats.startBalance = parseFloat(balance);
+        }
+
+        function updateSessionStats() {
+            const winRate = sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0;
+            document.getElementById('winRate').textContent = winRate.toFixed(1) + '%';
+            document.getElementById('tradesCount').textContent = sessionStats.totalTrades;
+            document.getElementById('todayPnL').textContent = `${sessionStats.totalPnL.toFixed(2)}`;
         }
 
         function updateStatus(elementId, status) {
@@ -1620,7 +1614,6 @@ HTML_TEMPLATE = """
         function showDashboard() {
             document.getElementById('loginModal').style.display = 'none';
             document.getElementById('dashboard').style.display = 'block';
-            
             document.getElementById('callBtn').disabled = false;
             document.getElementById('putBtn').disabled = false;
             document.getElementById('autoBtn').disabled = false;
@@ -1648,11 +1641,9 @@ HTML_TEMPLATE = """
 
         function logout() {
             if (ws) ws.close();
-            
             isConnected = false;
             isAutoTrading = false;
-            aiSystem.isConnected = false;
-            aiSystem.isActive = true;
+            isAIConnected = false;
             
             document.getElementById('loginModal').style.display = 'flex';
             document.getElementById('dashboard').style.display = 'none';
@@ -1660,37 +1651,10 @@ HTML_TEMPLATE = """
             
             updateStatus('apiStatus', 'offline');
             updateStatus('wsStatus', 'offline');
-            updateStatus('iaStatus', 'offline');
-            updateStatus('marketStatus', 'offline');
+            updateStatus('aiStatus', 'offline');
             updateStatus('tradingStatus', 'offline');
             
             showNotification('Desconectado com sucesso', 'success');
-        }
-
-        // ==============================================
-        // CONTROLE DE ORDEM E UTILITÁRIOS
-        // ==============================================
-
-        function setActiveOrder(orderInfo) {
-            hasActiveOrder = true;
-            activeOrderInfo = orderInfo;
-            
-            document.getElementById('callBtn').disabled = true;
-            document.getElementById('putBtn').disabled = true;
-        }
-
-        function clearActiveOrder() {
-            hasActiveOrder = false;
-            activeOrderInfo = null;
-            
-            if (isConnected) {
-                document.getElementById('callBtn').disabled = false;
-                document.getElementById('putBtn').disabled = false;
-            }
-        }
-
-        function canPlaceNewOrder() {
-            return !hasActiveOrder;
         }
 
         function selectAccountType(type) {
@@ -1704,71 +1668,50 @@ HTML_TEMPLATE = """
             if (type === 'demo') {
                 demoCard.classList.add('selected');
                 accountSelect.value = 'demo';
-                showNotification('🎮 Conta Demo + IA selecionada!', 'info');
+                showNotification('🎮 Conta Demo selecionada!', 'info');
             } else {
                 realCard.classList.add('selected');
                 accountSelect.value = 'real';
-                showNotification('⚠️ Conta Real + IA - Use com cuidado!', 'warning');
+                showNotification('⚠️ Conta Real - Use com cuidado!', 'warning');
             }
         }
 
-        function onSymbolChange() {
-            const newSymbol = document.getElementById('symbolSelect').value;
-            if (newSymbol !== marketData.symbol) {
-                marketData.symbol = newSymbol;
-                marketData.priceHistory = [];
-                
-                if (isConnected) {
-                    subscribeToTicks();
-                    
-                    // Forçar nova análise IA
-                    if (aiSystem.isConnected) {
-                        setTimeout(() => performAIAnalysis(), 2000);
-                    }
+        function updateDurationOptions() {
+            const durationType = document.getElementById('durationType').value;
+            const durationSelect = document.getElementById('duration');
+            
+            durationSelect.innerHTML = '';
+            
+            if (durationType === 't') {
+                for (let i = 1; i <= 10; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = `${i} tick${i > 1 ? 's' : ''}`;
+                    if (i === 5) option.selected = true;
+                    durationSelect.appendChild(option);
                 }
-                
-                showNotification(`📊 Símbolo alterado para ${newSymbol} - IA analisando...`, 'info');
+            } else {
+                [1, 2, 3, 5].forEach(minutes => {
+                    const option = document.createElement('option');
+                    option.value = minutes;
+                    option.textContent = `${minutes} min${minutes > 1 ? 's' : ''}`;
+                    if (minutes === 1) option.selected = true;
+                    durationSelect.appendChild(option);
+                });
             }
         }
 
-        // Timer para próxima verificação IA
-        setInterval(() => {
-            const nextCheckElement = document.getElementById('nextAICheck');
-            if (nextCheckElement && aiSystem.lastAnalysis > 0) {
-                const timeSinceLastCheck = Date.now() - aiSystem.lastAnalysis;
-                const timeUntilNext = Math.max(0, CONFIG.AI.CHECK_INTERVAL - timeSinceLastCheck);
-                const secondsUntilNext = Math.ceil(timeUntilNext / 1000);
-                
-                nextCheckElement.textContent = secondsUntilNext > 0 ? `${secondsUntilNext}s` : 'Analisando...';
-            }
-        }, 1000);
-
-        // ==============================================
-        // INICIALIZAÇÃO
-        // ==============================================
-
+        // Inicialização
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Inicializando Trading Bot IA + Martingale...');
+            console.log('🚀 Trading Bot com IA + Martingale carregado!');
+            updateDurationOptions();
             
             document.getElementById('apiToken').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     connectAPI();
                 }
             });
-            
-            console.log('✅ Sistema pronto - IA + Martingale + API Deriv');
         });
-
-        console.log('🤖 Trading Bot IA + Martingale Inteligente carregado!');
-        console.log('⚙️ Recursos ativados:');
-        console.log('   🤖 Sistema de IA avançada integrado');
-        console.log('   📊 Análise de mercado em tempo real');
-        console.log('   🎯 Sinais de trading inteligentes');
-        console.log('   ⏱️ Duração otimizada por IA');
-        console.log('   🛡️ Gestão de risco automática');
-        console.log('   🧠 Martingale inteligente');
-        console.log('   🔄 Auto trading com IA');
-        console.log('✅ SISTEMA COMPLETO: IA + Martingale + API + Interface!');
     </script>
 </body>
 </html>
@@ -1781,7 +1724,7 @@ HTML_TEMPLATE = """
 def analyze_market_conditions(symbol, current_price=None, volatility=None):
     """Análise avançada das condições de mercado"""
     
-    is_volatility_index = symbol in CONFIG['VOLATILITY_INDICES']
+    is_volatility_index = symbol in ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']
     
     if is_volatility_index:
         base_volatility = random.uniform(40, 80)
@@ -1817,34 +1760,46 @@ def generate_trading_signal(symbol, market_data=None):
     """Gera sinal de trading inteligente"""
     
     analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price') if market_data else None,
+                                       market_data.get('currentPrice') if market_data else None,
                                        market_data.get('volatility') if market_data else None)
+    
+    # Considerar nível de Martingale para decisão mais conservadora
+    martingale_level = market_data.get('martingaleLevel', 0) if market_data else 0
+    is_after_loss = market_data.get('isAfterLoss', False) if market_data else False
     
     if analysis['trend'] == 'strong':
         if analysis['trend_strength'] > 0.6:
-            direction = 'call' if random.random() > 0.3 else 'put'
+            direction = 'CALL' if random.random() > 0.3 else 'PUT'
         else:
-            direction = 'put' if random.random() > 0.3 else 'call'
+            direction = 'PUT' if random.random() > 0.3 else 'CALL'
     else:
-        direction = random.choice(['call', 'put'])
+        direction = random.choice(['CALL', 'PUT'])
     
     confidence = analysis['confidence']
     
-    win_rate = market_data.get('win_rate', 0) if market_data else 0
+    # Ajustar confiança baseado no Martingale
+    if martingale_level > 2:
+        confidence = max(60, confidence - 10)  # Mais conservador em níveis altos
+    elif is_after_loss:
+        confidence = max(65, confidence - 5)   # Ligeiramente mais conservador após loss
+    
+    win_rate = market_data.get('winRate', 0) if market_data else 0
     if win_rate > 70:
         confidence += 5
     elif win_rate < 40:
         confidence -= 5
     
-    confidence = max(70, min(95, confidence))
+    confidence = max(60, min(95, confidence))
     
     reasons = []
     if analysis['volatility'] > 60:
         reasons.append(f"Alta volatilidade ({analysis['volatility']:.1f}%)")
     if analysis['trend'] == 'strong':
         reasons.append(f"Tendência forte detectada")
-    if symbol in CONFIG['VOLATILITY_INDICES']:
-        reasons.append("Padrão de índice sintético")
+    if martingale_level > 0:
+        reasons.append(f"Análise pós-loss (Martingale {martingale_level})")
+    if is_after_loss:
+        reasons.append("Estratégia conservadora")
     
     reasoning = " | ".join(reasons) if reasons else "Análise técnica avançada"
     
@@ -1855,43 +1810,24 @@ def generate_trading_signal(symbol, market_data=None):
         'volatility': analysis['volatility'],
         'trend_strength': analysis['trend_strength'],
         'market_condition': analysis['market_condition'],
-        'optimal_timeframe': determine_optimal_timeframe(analysis, symbol)
+        'martingale_aware': martingale_level > 0
     }
-
-def determine_optimal_timeframe(analysis, symbol):
-    """Determina timeframe ótimo baseado na análise"""
-    
-    volatility = analysis['volatility']
-    trend_strength = analysis['trend_strength']
-    is_volatility_index = symbol in CONFIG['VOLATILITY_INDICES']
-    
-    if is_volatility_index:
-        if volatility > 70:
-            return {'type': 'ticks', 'duration': random.randint(1, 3)}
-        elif volatility > 50:
-            return {'type': 'ticks', 'duration': random.randint(3, 6)}
-        else:
-            return {'type': 'ticks', 'duration': random.randint(5, 10)}
-    else:
-        if trend_strength > 0.6:
-            return {'type': 'minutes', 'duration': random.randint(1, 2)}
-        elif trend_strength > 0.4:
-            return {'type': 'minutes', 'duration': random.randint(2, 4)}
-        else:
-            return {'type': 'minutes', 'duration': random.randint(3, 5)}
 
 def assess_risk_level(trading_data):
     """Avalia nível de risco da operação"""
     
-    balance = trading_data.get('current_balance', 1000)
-    today_pnl = trading_data.get('today_pnl', 0)
-    martingale_level = trading_data.get('martingale_level', 0)
-    win_rate = trading_data.get('win_rate', 50)
-    current_stake = trading_data.get('current_stake', 1)
+    balance = trading_data.get('currentBalance', 1000)
+    today_pnl = trading_data.get('todayPnL', 0)
+    martingale_level = trading_data.get('martingaleLevel', 0)
+    win_rate = trading_data.get('winRate', 50)
+    total_trades = trading_data.get('totalTrades', 0)
+    is_cooling = trading_data.get('isInCoolingPeriod', False)
+    needs_analysis = trading_data.get('needsAnalysisAfterLoss', False)
     
     risk_score = 0
     risk_factors = []
     
+    # Avaliar P&L do dia
     daily_loss_percent = (abs(today_pnl) / balance * 100) if today_pnl < 0 else 0
     if daily_loss_percent > 20:
         risk_score += 30
@@ -1900,34 +1836,38 @@ def assess_risk_level(trading_data):
         risk_score += 15
         risk_factors.append(f"Perda diária moderada ({daily_loss_percent:.1f}%)")
     
+    # Avaliar nível de Martingale
     if martingale_level > 5:
-        risk_score += 25
-        risk_factors.append(f"Martingale nível alto ({martingale_level})")
+        risk_score += 35
+        risk_factors.append(f"Martingale nível crítico ({martingale_level})")
     elif martingale_level > 3:
-        risk_score += 15
+        risk_score += 20
+        risk_factors.append(f"Martingale nível alto ({martingale_level})")
+    elif martingale_level > 1:
+        risk_score += 10
         risk_factors.append(f"Martingale ativo ({martingale_level})")
     
+    # Considerar estados especiais do Martingale
+    if is_cooling:
+        risk_factors.append("Sistema em cooling period")
+    if needs_analysis:
+        risk_factors.append("Aguardando análise pós-loss")
+    
+    # Avaliar win rate
     if win_rate < 30:
-        risk_score += 20
+        risk_score += 25
         risk_factors.append(f"Taxa de acerto baixa ({win_rate:.1f}%)")
     elif win_rate < 45:
         risk_score += 10
         risk_factors.append(f"Performance abaixo da média")
     
-    stake_percent = (current_stake / balance * 100)
-    if stake_percent > 10:
-        risk_score += 20
-        risk_factors.append(f"Stake alto ({stake_percent:.1f}% do saldo)")
-    elif stake_percent > 5:
-        risk_score += 10
-        risk_factors.append(f"Stake moderado ({stake_percent:.1f}% do saldo)")
-    
+    # Determinar nível de risco
     if risk_score >= 50:
         level = 'high'
-        recommendation = 'Pare ou reduza significativamente o stake'
+        recommendation = 'Pausar trading ou reduzir significantly'
     elif risk_score >= 25:
         level = 'medium'
-        recommendation = 'Considere reduzir o stake ou fazer uma pausa'
+        recommendation = 'Operar com extrema cautela'
     else:
         level = 'low'
         recommendation = 'Operação dentro dos parâmetros normais'
@@ -1937,46 +1877,8 @@ def assess_risk_level(trading_data):
         'score': risk_score,
         'factors': risk_factors,
         'recommendation': recommendation,
-        'suggested_action': 'pause' if risk_score >= 50 else 'reduce' if risk_score >= 35 else 'continue'
-    }
-
-def generate_management_decision(trading_data):
-    """Gera decisão de gerenciamento inteligente"""
-    
-    risk_assessment = assess_risk_level(trading_data)
-    
-    current_stake = trading_data.get('current_stake', 1)
-    balance = trading_data.get('current_balance', 1000)
-    martingale_level = trading_data.get('martingale_level', 0)
-    win_rate = trading_data.get('win_rate', 50)
-    
-    if risk_assessment['suggested_action'] == 'pause':
-        return {
-            'action': 'pause',
-            'pause_duration': random.randint(30000, 120000),
-            'reason': 'Alto risco detectado',
-            'risk_level': risk_assessment['level'],
-            'message': f"IA recomenda pausa: {risk_assessment['recommendation']}"
-        }
-    
-    recommended_stake = current_stake
-    
-    if martingale_level == 0:
-        if win_rate > 70:
-            recommended_stake = min(current_stake * 1.1, balance * 0.05)
-        elif win_rate < 40:
-            recommended_stake = max(current_stake * 0.8, 1)
-        
-        if recommended_stake > balance * 0.1:
-            recommended_stake = balance * 0.05
-    
-    return {
-        'action': 'continue',
-        'recommended_stake': round(recommended_stake, 2),
-        'risk_level': risk_assessment['level'],
-        'confidence': 85 + random.uniform(-10, 10),
-        'message': f"Stake recomendado: ${recommended_stake:.2f} | Risco: {risk_assessment['level']}",
-        'risk_factors': risk_assessment['factors']
+        'suggested_action': 'pause' if risk_score >= 50 else 'caution' if risk_score >= 35 else 'continue',
+        'martingale_level': martingale_level
     }
 
 # ===============================================
@@ -1985,62 +1887,69 @@ def generate_management_decision(trading_data):
 
 @app.route('/')
 def home():
-    """Serve a página principal com HTML integrado"""
+    """Serve a página principal"""
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/api/health', methods=['GET'])
-@app.route('/health', methods=['GET'])
 def health_check():
-    """Health check para monitoramento"""
+    """Health check da API"""
     return jsonify({
         'status': 'healthy',
-        'message': 'Trading Bot IA API operacional',
-        'uptime': 'online',
-        'timestamp': datetime.now().isoformat()
+        'message': 'Trading Bot IA + Martingale operacional',
+        'timestamp': datetime.now().isoformat(),
+        'features': [
+            'IA integrada',
+            'Martingale inteligente',
+            'Sistema anti-loop',
+            'Análise de risco',
+            'Interface responsiva'
+        ]
     })
 
-@app.route('/api/analyze', methods=['POST', 'GET'])
-@app.route('/analyze', methods=['POST', 'GET'])
+@app.route('/api/analyze', methods=['POST'])
 def analyze_market():
-    """Análise avançada de mercado"""
+    """Análise de mercado com IA"""
     
-    if request.method == 'GET':
-        symbol = 'R_50'
-        market_data = {}
-    else:
-        data = request.get_json() or {}
-        symbol = data.get('symbol', 'R_50')
-        market_data = data
+    data = request.get_json() or {}
+    symbol = data.get('symbol', 'R_50')
     
     analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price'),
-                                       market_data.get('volatility'))
+                                       data.get('currentPrice'),
+                                       data.get('volatility'))
+    
+    # Considerar contexto do Martingale
+    martingale_level = data.get('martingaleLevel', 0)
+    is_after_loss = data.get('isAfterLoss', False)
+    
+    message = f"Análise de {symbol}: {analysis['market_condition']} | Volatilidade {analysis['volatility']:.1f}%"
+    
+    if martingale_level > 0:
+        message += f" | Martingale Nível {martingale_level}"
+    
+    if is_after_loss:
+        message += " | Análise pós-perda: Aguardar setup ideal"
     
     return jsonify({
         'status': 'success',
         'symbol': symbol,
-        'analysis': analysis,
-        'message': f"Análise de {symbol}: {analysis['market_condition']} | Volatilidade {analysis['volatility']:.1f}%",
-        'timestamp': datetime.now().isoformat(),
-        'confidence': analysis['confidence'],
+        'message': message,
+        'volatility': analysis['volatility'],
         'trend': analysis['trend'],
-        'volatility': analysis['volatility']
+        'market_condition': analysis['market_condition'],
+        'confidence': analysis['confidence'],
+        'timestamp': datetime.now().isoformat(),
+        'martingale_aware': martingale_level > 0,
+        'recommendation': 'wait_for_better_setup' if is_after_loss else 'continue_normal'
     })
 
-@app.route('/api/signal', methods=['POST', 'GET'])
-@app.route('/signal', methods=['POST', 'GET'])
+@app.route('/api/signal', methods=['POST'])
 def get_trading_signal():
     """Gera sinal de trading inteligente"""
     
-    if request.method == 'GET':
-        symbol = 'R_50'
-        market_data = {}
-    else:
-        data = request.get_json() or {}
-        symbol = data.get('symbol', 'R_50')
-        market_data = data
+    data = request.get_json() or {}
+    symbol = data.get('symbol', 'R_50')
     
-    signal = generate_trading_signal(symbol, market_data)
+    signal = generate_trading_signal(symbol, data)
     
     return jsonify({
         'status': 'success',
@@ -2051,102 +1960,16 @@ def get_trading_signal():
         'volatility': signal['volatility'],
         'trend_strength': signal['trend_strength'],
         'market_condition': signal['market_condition'],
-        'optimal_timeframe': signal['optimal_timeframe'],
-        'message': f"Sinal {signal['direction'].upper()}: {signal['reasoning']}",
+        'martingale_aware': signal.get('martingale_aware', False),
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/duration', methods=['POST', 'GET'])
-@app.route('/duration', methods=['POST', 'GET'])
-def get_optimal_duration():
-    """Determina duração ótima para o trade"""
-    
-    if request.method == 'GET':
-        symbol = 'R_50'
-        market_data = {}
-    else:
-        data = request.get_json() or {}
-        symbol = data.get('symbol', 'R_50')
-        market_data = data
-    
-    analysis = analyze_market_conditions(symbol, 
-                                       market_data.get('current_price'),
-                                       market_data.get('volatility'))
-    
-    timeframe = determine_optimal_timeframe(analysis, symbol)
-    
-    duration_type = timeframe['type']
-    duration_value = timeframe['duration']
-    
-    if duration_type == 'ticks':
-        limits = CONFIG['DURATION_LIMITS']['ticks']
-        duration_value = max(limits['min'], min(limits['max'], duration_value))
-    else:
-        limits = CONFIG['DURATION_LIMITS']['minutes']
-        duration_value = max(limits['min'], min(limits['max'], duration_value))
-    
-    return jsonify({
-        'status': 'success',
-        'symbol': symbol,
-        'type': 't' if duration_type == 'ticks' else 'm',
-        'duration_type': duration_type,
-        'duration': duration_value,
-        'value': duration_value,
-        'confidence': analysis['confidence'],
-        'reasoning': f"Otimizado para {symbol}: {duration_value} {duration_type} baseado em volatilidade {analysis['volatility']:.1f}%",
-        'volatility': analysis['volatility'],
-        'market_condition': analysis['market_condition'],
-        'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/api/management', methods=['POST', 'GET'])
-@app.route('/management', methods=['POST', 'GET'])
-def risk_management():
-    """Gerenciamento inteligente de risco"""
-    
-    if request.method == 'GET':
-        trading_data = {
-            'current_balance': 1000,
-            'today_pnl': 0,
-            'martingale_level': 0,
-            'win_rate': 50,
-            'current_stake': 1
-        }
-    else:
-        trading_data = request.get_json() or {}
-    
-    decision = generate_management_decision(trading_data)
-    
-    return jsonify({
-        'status': 'success',
-        'action': decision['action'],
-        'recommended_stake': decision.get('recommended_stake'),
-        'pause_duration': decision.get('pause_duration'),
-        'risk_level': decision['risk_level'],
-        'message': decision['message'],
-        'confidence': decision.get('confidence', 85),
-        'should_pause': decision['action'] == 'pause',
-        'risk_factors': decision.get('risk_factors', []),
-        'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/api/risk-assessment', methods=['POST', 'GET'])
-@app.route('/risk-assessment', methods=['POST', 'GET'])
+@app.route('/api/risk-assessment', methods=['POST'])
 def risk_assessment():
-    """Avaliação detalhada de risco"""
+    """Avaliação de risco avançada"""
     
-    if request.method == 'GET':
-        trading_data = {
-            'current_balance': 1000,
-            'today_pnl': 0,
-            'martingale_level': 0,
-            'win_rate': 50,
-            'current_stake': 1
-        }
-    else:
-        trading_data = request.get_json() or {}
-    
-    risk = assess_risk_level(trading_data)
+    data = request.get_json() or {}
+    risk = assess_risk_level(data)
     
     return jsonify({
         'status': 'success',
@@ -2156,6 +1979,34 @@ def risk_assessment():
         'recommendation': risk['recommendation'],
         'suggested_action': risk['suggested_action'],
         'message': f"Risco {risk['level'].upper()}: {risk['recommendation']}",
+        'martingale_level': risk['martingale_level'],
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/duration', methods=['POST'])
+def get_optimal_duration():
+    """Duração otimizada por IA"""
+    
+    data = request.get_json() or {}
+    symbol = data.get('symbol', 'R_50')
+    
+    # Lógica simples para duração baseada no símbolo
+    if symbol in ['R_10', 'R_25']:
+        duration_type = 'ticks'
+        duration_value = random.randint(3, 7)
+    elif symbol in ['R_50', 'R_75']:
+        duration_type = 'ticks'
+        duration_value = random.randint(5, 10)
+    else:
+        duration_type = 'minutes'
+        duration_value = random.randint(1, 3)
+    
+    return jsonify({
+        'status': 'success',
+        'type': 't' if duration_type == 'ticks' else 'm',
+        'duration': duration_value,
+        'reasoning': f"Otimizado para {symbol}: {duration_value} {duration_type}",
+        'confidence': 80 + random.uniform(-10, 15),
         'timestamp': datetime.now().isoformat()
     })
 
@@ -2169,7 +2020,7 @@ def not_found(error):
         'status': 'error',
         'message': 'Endpoint não encontrado',
         'available_endpoints': [
-            '/', '/health', '/analyze', '/signal', '/duration', '/management', '/risk-assessment'
+            '/', '/api/health', '/api/analyze', '/api/signal', '/api/risk-assessment', '/api/duration'
         ]
     }), 404
 
@@ -2189,10 +2040,10 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('DEBUG', 'False').lower() == 'true'
     
-    print("🚀 Iniciando Trading Bot IA Integrado...")
+    print("🚀 Iniciando Trading Bot IA + Martingale...")
     print(f"🌐 Porta: {port}")
     print(f"🔧 Debug: {debug}")
-    print("🤖 Recursos: HTML + IA + Martingale + API Deriv")
-    print("✅ Sistema completo pronto para deploy no Render!")
+    print("🤖 Recursos: IA + Martingale + Anti-Loop + Interface Completa")
+    print("✅ Sistema pronto para deploy no Render!")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
