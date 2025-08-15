@@ -1,1 +1,0 @@
-# ia-trading-bot
