@@ -1,0 +1,36 @@
+# Trading Bot ML - Requirements
+# Para deploy na Render.com
+
+# Framework principal
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Machine Learning
+scikit-learn==1.3.2
+numpy==1.24.3
+pandas==2.0.3
+
+# Análise técnica
+ta==0.10.2
+
+# WebSocket e HTTP
+websockets==12.0
+aiohttp==3.9.1
+
+# Validação de dados
+pydantic==2.5.1
+
+# Cache (opcional)
+redis==5.0.1
+
+# Logging e utilities
+python-dateutil==2.8.2
+
+# CORS
+python-multipart==0.0.6
+
+# Para processamento de dados
+scipy==1.11.4
+
+# Timezone handling
+pytz==2023.3
