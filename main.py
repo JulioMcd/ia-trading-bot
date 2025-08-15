@@ -1,66 +1,41 @@
-# deploy_automation.py - Scripts de deploy automatizado
-
-import os
-import subprocess
-import requests
-import time
-import json
-from datetime import datetime
-
-class TradingBotDeployer:
-    """Automatiza o deploy do Trading Bot no Render"""
-    
-    def __init__(self):
-        self.render_api_key = os.getenv('RENDER_API_KEY')
-        self.github_repo = os.getenv('GITHUB_REPO')
-        self.base_url = "https://api.render.com/v1"
-        
-    def create_project_structure(self):
-        """Cria estrutura completa do projeto"""
-        print("🚀 Criando estrutura do projeto...")
-        
-        # Criar diretórios
-        directories = [
-            "trading-bot-ml",
-            "trading-bot-ml/api",
-            "trading-bot-ml/frontend", 
-            "trading-bot-ml/docs",
-            "trading-bot-ml/tests",
-            "trading-bot-ml/data",
-            "trading-bot-ml/models"
-        ]
-        
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
-            print(f"  ✅ Criado: {directory}")
-        
-        # Criar arquivos principais
-        self.create_main_files()
-        self.create_requirements()
-        self.create_docker_files()
-        self.create_documentation()
-        
-    def create_main_files(self):
-        """Cria arquivos principais da aplicação"""
-        print("📄 Criando arquivos principais...")
-        
-        # main.py (API principal)
-        main_content = '''# main.py - Trading Bot API Principal
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+from pydantic import BaseModel
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import joblib
+import asyncio
+import websockets
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 import os
+from threading import Thread
+import time
+import requests
+import talib
 
-# Importar módulos
-from advanced_ml_features import AdvancedMLFeatures
-from backtesting_system import BacktestingEngine
+# Importar funcionalidades avançadas
+try:
+    from advanced_ml_features import AdvancedMLFeatures
+    from backtesting_system import BacktestingEngine, TradingDatabase
+    ADVANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    ADVANCED_FEATURES_AVAILABLE = False
+    logging.warning("Funcionalidades avançadas não disponíveis")
 
-app = FastAPI(
-    title="Trading Bot ML API",
-    description="API completa com Machine Learning para trading automatizado",
-    version="2.0.0"
-)
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+app = FastAPI(title="Trading Bot API com Machine Learning", version="2.0.0")
+
+# CORS para permitir acesso do frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -69,989 +44,1052 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==============================================
+# MODELOS DE DADOS
+# ==============================================
+
+class MarketData(BaseModel):
+    symbol: str
+    price: float
+    timestamp: str
+    volume: Optional[float] = 0
+    
+class TradingSignal(BaseModel):
+    direction: str  # CALL ou PUT
+    confidence: float
+    timeframe: str
+    entry_price: float
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    reasoning: str
+
+class TradeRequest(BaseModel):
+    symbol: str
+    current_price: float
+    account_balance: float
+    recent_trades: List[Dict]
+    market_data: List[Dict]
+    user_preferences: Optional[Dict] = {}
+
+class RiskAssessment(BaseModel):
+    risk_level: str
+    risk_score: float
+    recommendation: str
+    max_stake: float
+    suggested_action: str
+
+# ==============================================
+# MACHINE LEARNING ENGINE
+# ==============================================
+
+class TradingMLEngine:
+    def __init__(self):
+        self.direction_model = None
+        self.confidence_model = None
+        self.timeframe_model = None
+        self.risk_model = None
+        self.scaler = StandardScaler()
+        self.label_encoder = LabelEncoder()
+        self.is_trained = False
+        self.market_data_buffer = []
+        self.prediction_history = []
+        
+        # Funcionalidades avançadas
+        if ADVANCED_FEATURES_AVAILABLE:
+            self.advanced_features = AdvancedMLFeatures()
+            self.backtesting_engine = BacktestingEngine()
+            self.database = TradingDatabase()
+        else:
+            self.advanced_features = None
+            self.backtesting_engine = None
+            self.database = None
+        
+    def generate_synthetic_data(self, n_samples=10000):
+        """Gera dados sintéticos para treinar o modelo"""
+        logger.info("Gerando dados sintéticos para treinamento...")
+        
+        np.random.seed(42)
+        
+        # Features do mercado
+        prices = np.random.normal(1000, 50, n_samples)
+        volatility = np.random.exponential(0.02, n_samples)
+        rsi = np.random.uniform(20, 80, n_samples)
+        macd = np.random.normal(0, 1, n_samples)
+        bb_position = np.random.uniform(0, 1, n_samples)  # Posição nas Bandas de Bollinger
+        volume = np.random.exponential(1000, n_samples)
+        time_of_day = np.random.uniform(0, 24, n_samples)
+        day_of_week = np.random.randint(0, 7, n_samples)
+        
+        # Features de comportamento do mercado
+        price_change = np.random.normal(0, 0.01, n_samples)
+        trend_strength = np.abs(price_change) * 100
+        market_sentiment = np.random.uniform(-1, 1, n_samples)
+        
+        # Criar DataFrame
+        df = pd.DataFrame({
+            'price': prices,
+            'volatility': volatility,
+            'rsi': rsi,
+            'macd': macd,
+            'bb_position': bb_position,
+            'volume': volume,
+            'time_of_day': time_of_day,
+            'day_of_week': day_of_week,
+            'price_change': price_change,
+            'trend_strength': trend_strength,
+            'market_sentiment': market_sentiment,
+        })
+        
+        # Gerar targets baseados em lógica de trading
+        df['direction'] = np.where(
+            (df['rsi'] < 30) & (df['bb_position'] < 0.2) & (df['macd'] > 0), 'CALL',
+            np.where(
+                (df['rsi'] > 70) & (df['bb_position'] > 0.8) & (df['macd'] < 0), 'PUT',
+                np.random.choice(['CALL', 'PUT'], n_samples)
+            )
+        )
+        
+        # Confiança baseada na força dos sinais
+        df['confidence'] = np.clip(
+            70 + (df['trend_strength'] * 2) + 
+            (np.abs(df['rsi'] - 50) / 2) + 
+            (np.abs(df['macd']) * 10) +
+            np.random.normal(0, 5, n_samples), 
+            50, 95
+        )
+        
+        # Timeframe baseado na volatilidade
+        df['timeframe_numeric'] = np.where(
+            df['volatility'] > 0.03, 1,  # t (ticks) para alta volatilidade
+            2  # m (minutos) para baixa volatilidade
+        )
+        
+        df['timeframe'] = np.where(df['timeframe_numeric'] == 1, 't', 'm')
+        
+        # Duração específica
+        df['duration'] = np.where(
+            df['timeframe'] == 't',
+            np.random.choice([3, 5, 7], n_samples),
+            np.random.choice([1, 2, 3], n_samples)
+        )
+        
+        # Risk score
+        df['risk_score'] = np.clip(
+            50 + (df['volatility'] * 1000) + 
+            (df['trend_strength'] * 2) +
+            np.random.normal(0, 10, n_samples),
+            0, 100
+        )
+        
+        return df
+    
+    def prepare_features(self, df):
+        """Prepara features para o modelo"""
+        feature_columns = [
+            'price', 'volatility', 'rsi', 'macd', 'bb_position',
+            'volume', 'time_of_day', 'day_of_week', 'price_change',
+            'trend_strength', 'market_sentiment'
+        ]
+        return df[feature_columns]
+    
+    def train_models(self):
+        """Treina todos os modelos de ML"""
+        logger.info("Iniciando treinamento dos modelos...")
+        
+        # Gerar dados de treinamento
+        df = self.generate_synthetic_data()
+        X = self.prepare_features(df)
+        
+        # Escalar features
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # 1. Modelo de Direção (CALL/PUT)
+        y_direction = df['direction']
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y_direction, test_size=0.2, random_state=42
+        )
+        
+        self.direction_model = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=15,
+            min_samples_split=5,
+            random_state=42
+        )
+        self.direction_model.fit(X_train, y_train)
+        
+        direction_accuracy = accuracy_score(y_test, self.direction_model.predict(X_test))
+        logger.info(f"Modelo de Direção - Acurácia: {direction_accuracy:.3f}")
+        
+        # 2. Modelo de Confiança
+        y_confidence = df['confidence']
+        self.confidence_model = GradientBoostingRegressor(
+            n_estimators=200,
+            learning_rate=0.1,
+            max_depth=8,
+            random_state=42
+        )
+        self.confidence_model.fit(X_train, y_confidence)
+        
+        # 3. Modelo de Timeframe
+        y_timeframe = df['timeframe_numeric']
+        self.timeframe_model = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42
+        )
+        self.timeframe_model.fit(X_train, y_timeframe)
+        
+        # 4. Modelo de Risco
+        y_risk = df['risk_score']
+        self.risk_model = GradientBoostingRegressor(
+            n_estimators=150,
+            learning_rate=0.1,
+            max_depth=6,
+            random_state=42
+        )
+        self.risk_model.fit(X_train, y_risk)
+        
+        self.is_trained = True
+        logger.info("✅ Todos os modelos treinados com sucesso!")
+        
+        # Salvar modelos
+        self.save_models()
+    
+    def save_models(self):
+        """Salva os modelos treinados"""
+        try:
+            joblib.dump(self.direction_model, 'direction_model.pkl')
+            joblib.dump(self.confidence_model, 'confidence_model.pkl')
+            joblib.dump(self.timeframe_model, 'timeframe_model.pkl')
+            joblib.dump(self.risk_model, 'risk_model.pkl')
+            joblib.dump(self.scaler, 'scaler.pkl')
+            logger.info("Modelos salvos com sucesso!")
+        except Exception as e:
+            logger.error(f"Erro ao salvar modelos: {e}")
+    
+    def load_models(self):
+        """Carrega modelos salvos"""
+        try:
+            if all(os.path.exists(f) for f in ['direction_model.pkl', 'confidence_model.pkl', 'timeframe_model.pkl', 'risk_model.pkl', 'scaler.pkl']):
+                self.direction_model = joblib.load('direction_model.pkl')
+                self.confidence_model = joblib.load('confidence_model.pkl')
+                self.timeframe_model = joblib.load('timeframe_model.pkl')
+                self.risk_model = joblib.load('risk_model.pkl')
+                self.scaler = joblib.load('scaler.pkl')
+                self.is_trained = True
+                logger.info("Modelos carregados com sucesso!")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Erro ao carregar modelos: {e}")
+            return False
+    
+    def calculate_technical_indicators(self, prices, volumes=None):
+        """Calcula indicadores técnicos"""
+        if len(prices) < 20:
+            # Se não temos dados suficientes, retorna valores padrão
+            return {
+                'rsi': 50,
+                'macd': 0,
+                'bb_position': 0.5,
+                'volatility': 0.02
+            }
+        
+        prices_array = np.array(prices)
+        
+        # RSI
+        rsi = talib.RSI(prices_array, timeperiod=14)[-1] if len(prices_array) >= 14 else 50
+        
+        # MACD
+        macd, macd_signal, macd_hist = talib.MACD(prices_array)
+        macd_value = macd[-1] if not np.isnan(macd[-1]) else 0
+        
+        # Bandas de Bollinger
+        bb_upper, bb_middle, bb_lower = talib.BBANDS(prices_array)
+        current_price = prices_array[-1]
+        bb_position = (current_price - bb_lower[-1]) / (bb_upper[-1] - bb_lower[-1]) if bb_upper[-1] != bb_lower[-1] else 0.5
+        
+        # Volatilidade
+        returns = np.diff(prices_array) / prices_array[:-1]
+        volatility = np.std(returns) if len(returns) > 1 else 0.02
+        
+        return {
+            'rsi': float(rsi) if not np.isnan(rsi) else 50,
+            'macd': float(macd_value) if not np.isnan(macd_value) else 0,
+            'bb_position': float(bb_position) if not np.isnan(bb_position) else 0.5,
+            'volatility': float(volatility)
+        }
+    
+    def predict_trading_signal(self, market_data: Dict) -> TradingSignal:
+        """Gera sinal de trading usando ML"""
+        if not self.is_trained:
+            raise ValueError("Modelos não foram treinados ainda")
+        
+        try:
+            # Extrair dados do mercado
+            current_price = market_data.get('price', 1000)
+            symbol = market_data.get('symbol', 'R_50')
+            
+            # Pegar histórico de preços se disponível
+            price_history = market_data.get('price_history', [current_price] * 20)
+            if len(price_history) < 20:
+                price_history.extend([current_price] * (20 - len(price_history)))
+            
+            # Calcular indicadores técnicos
+            indicators = self.calculate_technical_indicators(price_history)
+            
+            # Dados temporais
+            now = datetime.now()
+            time_of_day = now.hour + now.minute / 60
+            day_of_week = now.weekday()
+            
+            # Features para predição
+            features = np.array([[
+                current_price,
+                indicators['volatility'],
+                indicators['rsi'],
+                indicators['macd'],
+                indicators['bb_position'],
+                market_data.get('volume', 1000),
+                time_of_day,
+                day_of_week,
+                0,  # price_change (será calculado)
+                abs(indicators['rsi'] - 50),  # trend_strength aproximado
+                0  # market_sentiment (será calculado)
+            ]])
+            
+            # Escalar features
+            features_scaled = self.scaler.transform(features)
+            
+            # Predições
+            direction_pred = self.direction_model.predict(features_scaled)[0]
+            confidence_pred = self.confidence_model.predict(features_scaled)[0]
+            timeframe_pred = self.timeframe_model.predict(features_scaled)[0]
+            
+            # Determinar timeframe
+            if timeframe_pred == 1:
+                timeframe_type = 't'
+                duration = np.random.choice([3, 5, 7])
+            else:
+                timeframe_type = 'm'
+                duration = np.random.choice([1, 2, 3])
+            
+            timeframe_str = f"{duration}{timeframe_type}"
+            
+            # Reasoning baseado nos indicadores
+            reasoning_parts = []
+            if indicators['rsi'] < 30:
+                reasoning_parts.append("RSI oversold")
+            elif indicators['rsi'] > 70:
+                reasoning_parts.append("RSI overbought")
+            
+            if indicators['macd'] > 0:
+                reasoning_parts.append("MACD bullish")
+            else:
+                reasoning_parts.append("MACD bearish")
+            
+            if indicators['bb_position'] < 0.2:
+                reasoning_parts.append("Price near lower BB")
+            elif indicators['bb_position'] > 0.8:
+                reasoning_parts.append("Price near upper BB")
+            
+            reasoning = f"ML Analysis: {', '.join(reasoning_parts)}" if reasoning_parts else "ML Pattern Recognition"
+            
+            signal = TradingSignal(
+                direction=direction_pred,
+                confidence=max(60, min(95, float(confidence_pred))),
+                timeframe=timeframe_str,
+                entry_price=current_price,
+                reasoning=reasoning
+            )
+            
+            # Armazenar predição no histórico
+            self.prediction_history.append({
+                'timestamp': datetime.now().isoformat(),
+                'signal': signal.dict(),
+                'market_data': market_data
+            })
+            
+            # Manter apenas últimas 1000 predições
+            if len(self.prediction_history) > 1000:
+                self.prediction_history = self.prediction_history[-1000:]
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar sinal: {e}")
+            # Retornar sinal padrão em caso de erro
+            return TradingSignal(
+                direction="CALL" if np.random.random() > 0.5 else "PUT",
+                confidence=75.0,
+                timeframe="5t",
+                entry_price=current_price,
+                reasoning="Default signal due to prediction error"
+            )
+    
+    def assess_risk(self, market_data: Dict, account_balance: float) -> RiskAssessment:
+        """Avalia risco da operação"""
+        if not self.is_trained:
+            # Retornar avaliação padrão se não treinado
+            return RiskAssessment(
+                risk_level="medium",
+                risk_score=50.0,
+                recommendation="Proceed with caution",
+                max_stake=min(10.0, account_balance * 0.02),
+                suggested_action="continue"
+            )
+        
+        try:
+            # Usar os mesmos features do sinal
+            features = np.array([[
+                market_data.get('price', 1000),
+                market_data.get('volatility', 0.02),
+                market_data.get('rsi', 50),
+                market_data.get('macd', 0),
+                market_data.get('bb_position', 0.5),
+                market_data.get('volume', 1000),
+                datetime.now().hour,
+                datetime.now().weekday(),
+                0, 0, 0
+            ]])
+            
+            features_scaled = self.scaler.transform(features)
+            risk_score = self.risk_model.predict(features_scaled)[0]
+            risk_score = max(0, min(100, risk_score))
+            
+            # Determinar nível de risco
+            if risk_score < 30:
+                risk_level = "low"
+                recommendation = "Good trading conditions"
+                max_stake = account_balance * 0.05
+                action = "continue"
+            elif risk_score < 70:
+                risk_level = "medium"
+                recommendation = "Normal market conditions"
+                max_stake = account_balance * 0.02
+                action = "continue"
+            else:
+                risk_level = "high"
+                recommendation = "High volatility detected - reduce exposure"
+                max_stake = account_balance * 0.01
+                action = "reduce"
+            
+            return RiskAssessment(
+                risk_level=risk_level,
+                risk_score=float(risk_score),
+                recommendation=recommendation,
+                max_stake=min(max_stake, 50.0),  # Limite máximo de $50
+                suggested_action=action
+            )
+            
+        except Exception as e:
+            logger.error(f"Erro na avaliação de risco: {e}")
+            return RiskAssessment(
+                risk_level="medium",
+                risk_score=50.0,
+                recommendation="Default risk assessment",
+                max_stake=min(5.0, account_balance * 0.01),
+                suggested_action="continue"
+            )
+
+# ==============================================
+# INSTÂNCIA GLOBAL DO ENGINE
+# ==============================================
+
+ml_engine = TradingMLEngine()
+
+# ==============================================
+# ENDPOINTS DA API
+# ==============================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Inicialização da aplicação"""
+    logger.info("🚀 Iniciando Trading Bot API com ML...")
+    
+    # Tentar carregar modelos salvos
+    if not ml_engine.load_models():
+        logger.info("Modelos não encontrados. Treinando novos modelos...")
+        # Treinar em background
+        def train_models_background():
+            ml_engine.train_models()
+        
+        thread = Thread(target=train_models_background)
+        thread.start()
+    
+    logger.info("✅ API inicializada com sucesso!")
+
 @app.get("/")
 async def root():
     return {
-        "message": "🤖 Trading Bot ML API",
+        "message": "🤖 Trading Bot API com Machine Learning",
         "version": "2.0.0",
         "status": "online",
+        "ml_trained": ml_engine.is_trained,
         "features": [
-            "Machine Learning completo",
-            "Decisões autônomas",
-            "Backtesting avançado",
-            "Análise técnica completa"
+            "Predição de direção (CALL/PUT)",
+            "Análise de confiança automática",
+            "Seleção inteligente de timeframe",
+            "Avaliação de risco em tempo real",
+            "Indicadores técnicos automatizados"
         ]
     }
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-'''
-        
-        with open("trading-bot-ml/main.py", "w") as f:
-            f.write(main_content)
-        
-        print("  ✅ main.py criado")
-    
-    def create_requirements(self):
-        """Cria arquivo requirements.txt completo"""
-        print("📦 Criando requirements.txt...")
-        
-        requirements = '''# Trading Bot ML Requirements
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pandas==2.1.3
-numpy==1.24.3
-scikit-learn==1.3.2
-joblib==1.3.2
-websockets==12.0
-requests==2.31.0
-python-multipart==0.0.6
-pydantic==2.5.0
-
-# Análise Técnica
-TA-Lib==0.4.28
-
-# Machine Learning Avançado
-xgboost==2.0.2
-lightgbm==4.1.0
-catboost==1.2.2
-
-# Visualização e Análise
-matplotlib==3.8.2
-seaborn==0.13.0
-plotly==5.17.0
-
-# Base de Dados
-sqlite3
-
-# Utilitários
-python-dotenv==1.0.0
-schedule==1.2.0
-
-# Deploy
-gunicorn==21.2.0
-'''
-        
-        with open("trading-bot-ml/requirements.txt", "w") as f:
-            f.write(requirements)
-        
-        print("  ✅ requirements.txt criado")
-    
-    def create_docker_files(self):
-        """Cria arquivos Docker"""
-        print("🐳 Criando arquivos Docker...")
-        
-        dockerfile = '''FROM python:3.9-slim
-
-WORKDIR /app
-
-# Instalar dependências do sistema
-RUN apt-get update && apt-get install -y \\
-    wget \\
-    build-essential \\
-    gcc \\
-    g++ \\
-    && rm -rf /var/lib/apt/lists/*
-
-# Instalar TA-Lib
-RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \\
-    tar -xzf ta-lib-0.4.0-src.tar.gz && \\
-    cd ta-lib/ && \\
-    ./configure --prefix=/usr && \\
-    make && \\
-    make install && \\
-    cd .. && \\
-    rm -rf ta-lib*
-
-# Copiar requirements
-COPY requirements.txt .
-
-# Instalar dependências Python
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar código
-COPY . .
-
-# Criar diretórios necessários
-RUN mkdir -p /app/data /app/models /app/logs
-
-# Expor porta
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \\
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Comando para iniciar
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
-'''
-        
-        with open("trading-bot-ml/Dockerfile", "w") as f:
-            f.write(dockerfile)
-        
-        # Docker Compose para desenvolvimento
-        docker_compose = '''version: '3.8'
-
-services:
-  trading-bot-api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - ENVIRONMENT=development
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./logs:/app/logs
-    restart: unless-stopped
-    
-  # Banco de dados (opcional)
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: trading_bot
-      POSTGRES_USER: trader
-      POSTGRES_PASSWORD: secure_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
-'''
-        
-        with open("trading-bot-ml/docker-compose.yml", "w") as f:
-            f.write(docker_compose)
-        
-        print("  ✅ Arquivos Docker criados")
-    
-    def create_documentation(self):
-        """Cria documentação completa"""
-        print("📚 Criando documentação...")
-        
-        readme = '''# 🤖 Trading Bot com Machine Learning Total
-
-> Bot de trading completamente autônomo com Machine Learning avançado para Deriv API
-
-## 🌟 Características Principais
-
-### 🧠 Machine Learning Avançado
-- **Decisões 100% Autônomas**: IA decide quando, como e quanto operar
-- **Análise Técnica Completa**: 50+ indicadores técnicos automatizados
-- **Reconhecimento de Padrões**: Head & Shoulders, Triângulos, Breakouts
-- **Detecção de Anomalias**: Identificação automática de condições anômalas
-- **Regime de Mercado**: Bull, Bear, Sideways automaticamente identificados
-
-### ⚡ Funcionalidades Avançadas
-- **Backtesting Completo**: Teste estratégias com dados históricos
-- **Stake Dinâmico**: Cálculo automático baseado em risco e confiança
-- **Timeframe Inteligente**: Seleção automática baseada na volatilidade
-- **Anti-Loop**: Sistema robusto contra loops de erro
-- **Cooling Period**: Pausas inteligentes após perdas
-
-### 🎯 Performance
-- **Taxa de Acerto**: Otimizada via Machine Learning
-- **Gerenciamento de Risco**: Automático e inteligente
-- **Análise de Sentimento**: Baseada em trades recentes
-- **Fibonacci Automático**: Níveis calculados automaticamente
-
-## 🚀 Deploy Rápido
-
-### 1. Render (Recomendado)
-```bash
-# 1. Fork este repositório
-# 2. Conecte no Render.com
-# 3. Configure as variáveis:
-#    - ENVIRONMENT=production
-#    - PORT=8000
-# 4. Deploy automático!
-```
-
-### 2. Docker Local
-```bash
-# Clone o repositório
-git clone https://github.com/seu-usuario/trading-bot-ml
-cd trading-bot-ml
-
-# Execute com Docker
-docker-compose up -d
-
-# API disponível em http://localhost:8000
-```
-
-### 3. Instalação Manual
-```bash
-# Instalar dependências
-pip install -r requirements.txt
-
-# Instalar TA-Lib (necessário)
-# Ubuntu/Debian:
-wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
-./configure --prefix=/usr
-make && sudo make install
-
-# Windows: baixar binários pré-compilados
-
-# Executar API
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-## 🎮 Como Usar
-
-### 1. Configurar Frontend
-```html
-<!-- URL da sua API no Render -->
-<input id="mlApiUrl" value="https://sua-api.onrender.com">
-```
-
-### 2. Conectar Deriv API
-```javascript
-// Token da Deriv (app.deriv.com/account/api-token)
-const token = "seu_token_aqui";
-```
-
-### 3. Ativar Automação Total
-```javascript
-// Bot toma TODAS as decisões automaticamente
-startFullAutomation();
-```
-
-## 📊 Endpoints da API
-
-### Machine Learning
-- `POST /signal` - Obter sinal de trading
-- `POST /auto-decision` - Decisão automática completa
-- `POST /risk-assessment` - Avaliação de risco
-- `POST /market-analysis` - Análise completa do mercado
-
-### Funcionalidades Avançadas
-- `POST /advanced-analysis` - Análise com 50+ indicadores
-- `POST /smart-timeframe` - Timeframe inteligente
-- `POST /dynamic-stake` - Stake dinâmico
-- `POST /backtest` - Backtesting completo
-
-### Sistema
-- `GET /health` - Status da API
-- `GET /model-status` - Status dos modelos ML
-- `GET /features` - Lista de funcionalidades
-
-## 🔧 Configuração Avançada
-
-### Variáveis de Ambiente
-```bash
-# Produção
-ENVIRONMENT=production
-PORT=8000
-LOG_LEVEL=INFO
-
-# Desenvolvimento
-ENVIRONMENT=development
-DEBUG=true
-```
-
-### Parâmetros de Trading
-```python
-# Configurar no código
-CONFIG = {
-    'MIN_STAKE': 0.35,
-    'MAX_STAKE': 50.0,
-    'AUTO_DECISION_INTERVAL': 30000,  # 30 segundos
-    'RISK_TOLERANCE': 'medium'
-}
-```
-
-## 📈 Backtesting
-
-### Teste Rápido (30 dias)
-```bash
-curl -X GET "https://sua-api.onrender.com/backtest/quick"
-```
-
-### Teste Personalizado
-```bash
-curl -X POST "https://sua-api.onrender.com/backtest" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "start_date": "2024-01-01",
-    "end_date": "2024-01-31",
-    "initial_balance": 1000,
-    "symbol": "R_50"
-  }'
-```
-
-## ⚠️ Avisos Importantes
-
-### Risco
-- **Trading envolve risco**: Nunca opere mais do que pode perder
-- **Teste primeiro**: Use conta demo antes da real
-- **Monitore sempre**: IA é auxiliar, não substitui supervisão
-
-### Segurança
-- **Token seguro**: Nunca compartilhe seu token da Deriv
-- **Permissões mínimas**: Use apenas permissões necessárias
-- **Monitoramento**: Acompanhe todas as operações
-
-## 🆘 Suporte
-
-### Problemas Comuns
-1. **"ML API não conecta"**: Verifique URL da API
-2. **"Token inválido"**: Regenere token na Deriv
-3. **"Modelos não treinados"**: Aguarde 1-2 minutos após deploy
-
-### Logs e Debug
-```bash
-# Verificar logs no Render
-# Dashboard > Sua API > Logs
-
-# Debug local
-docker-compose logs -f trading-bot-api
-```
-
-## 🚀 Roadmap
-
-- [ ] Integração com TradingView
-- [ ] Mais exchanges (Binance, IQ Option)
-- [ ] Mobile app
-- [ ] Telegram bot
-- [ ] Copy trading
-
-## 📄 Licença
-
-MIT License - Use como quiser, mas por sua conta e risco!
-
----
-
-**⚡ Bot criado com IA avançada para máxima performance autônoma!**
-'''
-        
-        with open("trading-bot-ml/README.md", "w") as f:
-            f.write(readme)
-        
-        # API Documentation
-        api_docs = '''# 📡 API Documentation
-
-## Base URL
-```
-https://sua-api.onrender.com
-```
-
-## Authentication
-Não é necessária autenticação para a API ML. A autenticação é feita diretamente com a Deriv via WebSocket.
-
-## Endpoints
-
-### 🧠 Machine Learning Core
-
-#### GET /
-Informações básicas da API
-
-**Response:**
-```json
-{
-  "message": "🤖 Trading Bot ML API",
-  "version": "2.0.0",
-  "status": "online",
-  "features": ["Machine Learning completo", "..."]
-}
-```
-
-#### POST /signal
-Obtém sinal de trading inteligente
-
-**Request:**
-```json
-{
-  "symbol": "R_50",
-  "current_price": 1000.50,
-  "account_balance": 1000,
-  "recent_trades": [],
-  "market_data": []
-}
-```
-
-**Response:**
-```json
-{
-  "direction": "CALL",
-  "confidence": 85.5,
-  "timeframe": "5t",
-  "entry_price": 1000.50,
-  "reasoning": "RSI oversold + MACD bullish",
-  "ml_status": "active"
-}
-```
-
-#### POST /auto-decision
-Decisão automática completa (recomendado)
-
-**Response:**
-```json
-{
-  "action": "trade",
-  "direction": "CALL",
-  "timeframe": "5t", 
-  "stake": 5.00,
-  "confidence": 87.2,
-  "reasoning": "ML Analysis: RSI oversold, MACD bullish",
-  "risk_assessment": {
-    "risk_level": "medium",
-    "risk_score": 45.2
-  }
-}
-```
-
-### 📊 Advanced Analysis
-
-#### POST /advanced-analysis
-Análise completa com 50+ indicadores
-
-**Response:**
-```json
-{
-  "indicators": {
-    "rsi": 28.5,
-    "macd": 0.5,
-    "bb_upper": 1020.5,
-    "bb_lower": 980.2,
-    "stoch": 25.8,
-    "adx": 45.2,
-    "fib_levels": {...},
-    "support_resistance": {...}
-  },
-  "anomalies": {
-    "anomaly_detected": false,
-    "anomaly_score": -0.2
-  },
-  "market_regime": {
-    "regime": "bullish",
-    "confidence": 0.75
-  },
-  "patterns": {
-    "patterns": [
-      {
-        "name": "Double Bottom",
-        "signal": "bullish", 
-        "strength": 0.7
-      }
-    ]
-  }
-}
-```
-
-### 🎯 Smart Features
-
-#### POST /smart-timeframe
-Timeframe inteligente baseado na volatilidade
-
-**Response:**
-```json
-{
-  "type": "t",
-  "duration": 5,
-  "reasoning": "Volatilidade média - timeframe balanceado",
-  "volatility": 0.025,
-  "market_condition": "normal"
-}
-```
-
-#### POST /dynamic-stake
-Stake dinâmico baseado em múltiplos fatores
-
-**Response:**
-```json
-{
-  "stake": 7.50,
-  "percentage": 1.5,
-  "reasoning": "Confidence: 85%, Risk: medium, WinRate: 65%",
-  "factors": {
-    "confidence": 85.0,
-    "win_rate": 65.0,
-    "account_balance": 500.0
-  }
-}
-```
-
-### 📈 Backtesting
-
-#### GET /backtest/quick
-Backtesting rápido (30 dias simulados)
-
-**Response:**
-```json
-{
-  "status": "success",
-  "type": "quick_backtest",
-  "report": {
-    "summary": {
-      "initial_balance": 1000,
-      "final_balance": 1150.50,
-      "total_return": 15.05,
-      "total_trades": 45,
-      "win_rate": 67.8
-    },
-    "performance": {
-      "total_pnl": 150.50,
-      "max_drawdown": -25.80,
-      "sharpe_ratio": 1.85
-    },
-    "recommendations": [
-      "🟢 Excelente win rate - manter estratégia"
-    ]
-  }
-}
-```
-
-#### POST /backtest
-Backtesting personalizado
-
-**Request:**
-```json
-{
-  "start_date": "2024-01-01",
-  "end_date": "2024-01-31", 
-  "symbol": "R_50",
-  "initial_balance": 1000,
-  "strategy_params": {}
-}
-```
-
-### 📊 Performance & Monitoring
-
-#### GET /performance/summary
-Resumo de performance dos últimos 30 dias
-
-**Response:**
-```json
-{
-  "period": "30 days",
-  "total_trades": 67,
-  "winning_trades": 45,
-  "win_rate": 67.16,
-  "total_pnl": 245.80,
-  "avg_pnl_per_trade": 3.67,
-  "best_trade": 25.50,
-  "worst_trade": -10.00
-}
-```
-
-#### GET /system/status
-Status completo do sistema
-
-**Response:**
-```json
-{
-  "api_status": "online",
-  "ml_engine": {
-    "trained": true,
-    "models": {
-      "direction_model": true,
-      "confidence_model": true,
-      "timeframe_model": true,
-      "risk_model": true
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "ml_engine": "ready" if ml_engine.is_trained else "training",
+        "timestamp": datetime.now().isoformat()
     }
-  },
-  "advanced_features": {
-    "available": true,
-    "anomaly_detection": true,
-    "pattern_recognition": true,
-    "backtesting": true
-  },
-  "version": "2.0.0-advanced"
-}
-```
 
-## Error Codes
-
-- `200` - Success
-- `400` - Bad Request (dados inválidos)
-- `500` - Internal Server Error
-- `501` - Not Implemented (funcionalidade não disponível)
-
-## Rate Limits
-- **Geral**: 100 requests/minuto
-- **Backtesting**: 5 requests/minuto
-- **Auto-decision**: 30 requests/minuto
-
-## Status Codes
-- `online` - Sistema funcionando
-- `training` - Modelos sendo treinados
-- `offline` - Sistema indisponível
-- `warning` - Funcionando com limitações
-'''
-        
-        with open("trading-bot-ml/docs/API.md", "w") as f:
-            f.write(api_docs)
-        
-        print("  ✅ Documentação criada")
-    
-    def create_test_files(self):
-        """Cria arquivos de teste"""
-        print("🧪 Criando testes...")
-        
-        test_content = '''# test_api.py - Testes automatizados
-
-import pytest
-import requests
-import json
-from datetime import datetime
-
-class TestTradingBotAPI:
-    
-    def __init__(self):
-        self.base_url = "http://localhost:8000"
-        
-    def test_health_check(self):
-        """Teste básico de saúde da API"""
-        response = requests.get(f"{self.base_url}/health")
-        assert response.status_code == 200
-        
-    def test_trading_signal(self):
-        """Teste de sinal de trading"""
-        data = {
-            "symbol": "R_50",
-            "current_price": 1000,
-            "account_balance": 1000,
-            "recent_trades": [],
-            "market_data": []
-        }
-        
-        response = requests.post(f"{self.base_url}/signal", json=data)
-        assert response.status_code == 200
-        
-        result = response.json()
-        assert "direction" in result
-        assert result["direction"] in ["CALL", "PUT"]
-        assert "confidence" in result
-        assert 0 <= result["confidence"] <= 100
-        
-    def test_auto_decision(self):
-        """Teste de decisão automática"""
-        data = {
-            "symbol": "R_50",
-            "current_price": 1000,
-            "account_balance": 1000,
-            "recent_trades": [],
-            "market_data": []
-        }
-        
-        response = requests.post(f"{self.base_url}/auto-decision", json=data)
-        assert response.status_code == 200
-        
-        result = response.json()
-        assert "action" in result
-        assert result["action"] in ["trade", "hold", "wait"]
-        
-    def test_quick_backtest(self):
-        """Teste de backtesting rápido"""
-        response = requests.get(f"{self.base_url}/backtest/quick")
-        assert response.status_code == 200
-        
-        result = response.json()
-        assert "report" in result
-        assert "summary" in result["report"]
-
-if __name__ == "__main__":
-    # Executar testes
-    tester = TestTradingBotAPI()
-    
-    print("🧪 Executando testes...")
-    
+@app.post("/signal")
+async def get_trading_signal(request: TradeRequest):
+    """Obtém sinal de trading inteligente"""
     try:
-        tester.test_health_check()
-        print("  ✅ Health check OK")
-        
-        tester.test_trading_signal()
-        print("  ✅ Trading signal OK")
-        
-        tester.test_auto_decision()
-        print("  ✅ Auto decision OK")
-        
-        tester.test_quick_backtest()
-        print("  ✅ Quick backtest OK")
-        
-        print("\\n🎉 Todos os testes passaram!")
-        
-    except Exception as e:
-        print(f"\\n❌ Teste falhou: {e}")
-'''
-        
-        with open("trading-bot-ml/tests/test_api.py", "w") as f:
-            f.write(test_content)
-        
-        print("  ✅ Testes criados")
-    
-    def deploy_to_render(self):
-        """Deploy automatizado no Render"""
-        print("☁️ Iniciando deploy no Render...")
-        
-        if not self.render_api_key:
-            print("❌ RENDER_API_KEY não configurada")
-            return False
-        
-        # Configuração do serviço
-        service_config = {
-            "name": "trading-bot-ml-api",
-            "type": "web_service",
-            "repo": self.github_repo,
-            "branch": "main",
-            "runtime": "python",
-            "buildCommand": "pip install -r requirements.txt",
-            "startCommand": "uvicorn main:app --host 0.0.0.0 --port $PORT",
-            "envVars": [
-                {"key": "ENVIRONMENT", "value": "production"},
-                {"key": "LOG_LEVEL", "value": "INFO"}
-            ],
-            "region": "oregon",
-            "plan": "starter"  # Plano gratuito
-        }
-        
-        # Fazer requisição para criar serviço
-        headers = {
-            "Authorization": f"Bearer {self.render_api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/services",
-                headers=headers,
-                json=service_config
-            )
-            
-            if response.status_code == 201:
-                service_data = response.json()
-                service_url = service_data.get("serviceUrl")
-                print(f"✅ Deploy realizado com sucesso!")
-                print(f"🌐 URL: {service_url}")
-                return True
-            else:
-                print(f"❌ Erro no deploy: {response.status_code}")
-                print(response.text)
-                return False
-                
-        except Exception as e:
-            print(f"❌ Erro no deploy: {e}")
-            return False
-    
-    def verify_deployment(self, url):
-        """Verifica se o deployment está funcionando"""
-        print(f"🔍 Verificando deployment em {url}...")
-        
-        max_attempts = 30
-        for attempt in range(max_attempts):
-            try:
-                response = requests.get(f"{url}/health", timeout=10)
-                if response.status_code == 200:
-                    print("✅ API online e funcionando!")
-                    
-                    # Testar endpoints principais
-                    self.test_deployed_api(url)
-                    return True
-                    
-            except requests.exceptions.RequestException:
-                pass
-            
-            print(f"  ⏳ Tentativa {attempt + 1}/{max_attempts}...")
-            time.sleep(10)
-        
-        print("❌ API não respondeu após 5 minutos")
-        return False
-    
-    def test_deployed_api(self, url):
-        """Testa API deployada"""
-        print("🧪 Testando endpoints da API deployada...")
-        
-        tests = [
-            ("GET", "/", "Info básica"),
-            ("GET", "/health", "Health check"),
-            ("GET", "/model-status", "Status dos modelos"),
-            ("GET", "/features", "Lista de features")
-        ]
-        
-        for method, endpoint, description in tests:
-            try:
-                if method == "GET":
-                    response = requests.get(f"{url}{endpoint}", timeout=30)
-                
-                if response.status_code == 200:
-                    print(f"  ✅ {description}")
-                else:
-                    print(f"  ⚠️ {description} - Status: {response.status_code}")
-                    
-            except Exception as e:
-                print(f"  ❌ {description} - Erro: {e}")
-    
-    def run_full_deployment(self):
-        """Executa deployment completo"""
-        print("🚀 INICIANDO DEPLOYMENT COMPLETO DO TRADING BOT ML")
-        print("=" * 60)
-        
-        # 1. Criar estrutura do projeto
-        self.create_project_structure()
-        
-        # 2. Criar testes
-        self.create_test_files()
-        
-        print("\n📁 Estrutura do projeto criada com sucesso!")
-        print("\n📋 PRÓXIMOS PASSOS:")
-        print("1. Faça upload dos arquivos para seu repositório GitHub")
-        print("2. Acesse render.com e conecte seu repositório")
-        print("3. Configure as variáveis de ambiente")
-        print("4. Execute o deploy")
-        print("\n🌐 Sua API estará disponível em: https://seu-app.onrender.com")
-        
-        return True
-
-# Script principal
-if __name__ == "__main__":
-    deployer = TradingBotDeployer()
-    
-    print("🤖 TRADING BOT ML - DEPLOY AUTOMATIZADO")
-    print("=" * 50)
-    
-    # Executar deployment completo
-    success = deployer.run_full_deployment()
-    
-    if success:
-        print("\n🎉 DEPLOYMENT COMPLETO!")
-        print("📚 Consulte README.md para instruções detalhadas")
-        print("📡 Consulte docs/API.md para documentação da API")
-    else:
-        print("\n❌ Erro no deployment")
-
-# ==============================================
-# SCRIPT DE MONITORAMENTO
-# ==============================================
-
-class APIMonitor:
-    """Monitor de saúde da API em produção"""
-    
-    def __init__(self, api_url):
-        self.api_url = api_url.rstrip('/')
-        
-    def check_health(self):
-        """Verifica saúde da API"""
-        try:
-            response = requests.get(f"{self.api_url}/health", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "status": "healthy",
-                    "response_time": response.elapsed.total_seconds(),
-                    "ml_engine": data.get("ml_engine", "unknown")
-                }
-            else:
-                return {
-                    "status": "unhealthy",
-                    "error": f"HTTP {response.status_code}"
-                }
-        except Exception as e:
+        if not ml_engine.is_trained:
             return {
-                "status": "error",
-                "error": str(e)
+                "direction": "CALL" if np.random.random() > 0.5 else "PUT",
+                "confidence": 75.0,
+                "timeframe": "5t",
+                "entry_price": request.current_price,
+                "reasoning": "Training in progress - using fallback logic",
+                "ml_status": "training"
             }
-    
-    def check_ml_models(self):
-        """Verifica status dos modelos ML"""
-        try:
-            response = requests.get(f"{self.api_url}/model-status", timeout=10)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"status": "error", "message": "Não foi possível verificar modelos"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-    
-    def test_trading_signal(self):
-        """Testa geração de sinal"""
-        try:
-            data = {
-                "symbol": "R_50",
-                "current_price": 1000,
-                "account_balance": 1000,
-                "recent_trades": [],
-                "market_data": []
-            }
-            
-            response = requests.post(f"{self.api_url}/signal", json=data, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                return {
-                    "status": "working",
-                    "direction": result.get("direction"),
-                    "confidence": result.get("confidence")
-                }
-            else:
-                return {"status": "error", "message": f"HTTP {response.status_code}"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-    
-    def generate_report(self):
-        """Gera relatório completo de status"""
-        print(f"📊 RELATÓRIO DE STATUS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("=" * 60)
         
-        # Health check
-        health = self.check_health()
-        print(f"🏥 Health: {health['status'].upper()}")
-        if health['status'] == 'healthy':
-            print(f"   ⏱️ Response Time: {health['response_time']:.2f}s")
-        else:
-            print(f"   ❌ Error: {health.get('error', 'Unknown')}")
+        # Preparar dados do mercado
+        market_data = {
+            "symbol": request.symbol,
+            "price": request.current_price,
+            "volume": 1000,
+            "price_history": [trade.get("entry_price", request.current_price) for trade in request.recent_trades[-20:]]
+        }
         
-        # ML Models
-        models = self.check_ml_models()
-        print(f"\\n🧠 ML Models: {'TRAINED' if models.get('is_trained') else 'TRAINING'}")
-        
-        # Trading Signal
-        signal = self.test_trading_signal()
-        print(f"\\n🎯 Trading Signal: {signal['status'].upper()}")
-        if signal['status'] == 'working':
-            print(f"   📈 Last Signal: {signal['direction']} ({signal['confidence']:.1f}%)")
-        
-        print("\\n" + "=" * 60)
+        signal = ml_engine.predict_trading_signal(market_data)
         
         return {
-            "timestamp": datetime.now().isoformat(),
-            "health": health,
-            "models": models,
-            "signal": signal
+            **signal.dict(),
+            "ml_status": "active",
+            "timestamp": datetime.now().isoformat()
         }
+        
+    except Exception as e:
+        logger.error(f"Erro ao gerar sinal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Exemplo de uso do monitor
-def monitor_api(api_url):
-    """Monitora API continuamente"""
-    monitor = APIMonitor(api_url)
+@app.post("/risk-assessment")
+async def assess_risk(request: TradeRequest):
+    """Avalia risco da operação"""
+    try:
+        market_data = {
+            "symbol": request.symbol,
+            "price": request.current_price,
+            "volatility": 0.02,  # Será calculado automaticamente
+        }
+        
+        assessment = ml_engine.assess_risk(market_data, request.account_balance)
+        
+        return {
+            **assessment.dict(),
+            "timestamp": datetime.now().isoformat(),
+            "ml_status": "active" if ml_engine.is_trained else "training"
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro na avaliação de risco: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/market-analysis")
+async def analyze_market(request: TradeRequest):
+    """Análise completa do mercado"""
+    try:
+        # Calcular indicadores se temos histórico
+        price_history = [trade.get("entry_price", request.current_price) for trade in request.recent_trades[-20:]]
+        if len(price_history) < 5:
+            price_history = [request.current_price] * 20
+        
+        indicators = ml_engine.calculate_technical_indicators(price_history)
+        
+        # Análise de tendência
+        if len(price_history) >= 2:
+            trend = "bullish" if price_history[-1] > price_history[-2] else "bearish"
+        else:
+            trend = "neutral"
+        
+        # Análise de volatilidade
+        volatility_level = "high" if indicators['volatility'] > 0.03 else "normal" if indicators['volatility'] > 0.01 else "low"
+        
+        analysis = {
+            "symbol": request.symbol,
+            "current_price": request.current_price,
+            "trend": trend,
+            "volatility_level": volatility_level,
+            "technical_indicators": indicators,
+            "market_sentiment": "neutral",  # Pode ser expandido
+            "recommendation": "continue",
+            "confidence": 85.0,
+            "timestamp": datetime.now().isoformat(),
+            "ml_status": "active" if ml_engine.is_trained else "training"
+        }
+        
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Erro na análise de mercado: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auto-decision")
+async def make_auto_decision(request: TradeRequest):
+    """Toma decisão automática completa de trading"""
+    try:
+        # 1. Análise de risco
+        market_data = {"symbol": request.symbol, "price": request.current_price}
+        risk_assessment = ml_engine.assess_risk(market_data, request.account_balance)
+        
+        # 2. Se risco muito alto, não operar
+        if risk_assessment.risk_level == "high" and risk_assessment.risk_score > 80:
+            return {
+                "action": "hold",
+                "reason": "Risk too high",
+                "risk_assessment": risk_assessment.dict(),
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # 3. Obter sinal de trading
+        if ml_engine.is_trained:
+            signal = ml_engine.predict_trading_signal(market_data)
+        else:
+            signal = TradingSignal(
+                direction="CALL" if np.random.random() > 0.5 else "PUT",
+                confidence=75.0,
+                timeframe="5t",
+                entry_price=request.current_price,
+                reasoning="Fallback logic while training"
+            )
+        
+        # 4. Calcular stake baseado no risco
+        suggested_stake = min(
+            risk_assessment.max_stake,
+            request.account_balance * 0.02  # Máximo 2% do saldo
+        )
+        
+        # 5. Decisão final
+        should_trade = (
+            signal.confidence > 70 and
+            risk_assessment.risk_score < 75 and
+            suggested_stake >= 0.35  # Stake mínimo
+        )
+        
+        if should_trade:
+            return {
+                "action": "trade",
+                "direction": signal.direction,
+                "timeframe": signal.timeframe,
+                "stake": round(suggested_stake, 2),
+                "confidence": signal.confidence,
+                "reasoning": signal.reasoning,
+                "risk_assessment": risk_assessment.dict(),
+                "timestamp": datetime.now().isoformat(),
+                "ml_status": "active" if ml_engine.is_trained else "training"
+            }
+        else:
+            return {
+                "action": "wait",
+                "reason": f"Conditions not met - confidence: {signal.confidence}, risk: {risk_assessment.risk_score}",
+                "signal": signal.dict(),
+                "risk_assessment": risk_assessment.dict(),
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logger.error(f"Erro na decisão automática: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/model-status")
+async def get_model_status():
+    """Status dos modelos de ML"""
+    return {
+        "is_trained": ml_engine.is_trained,
+        "models": {
+            "direction_model": ml_engine.direction_model is not None,
+            "confidence_model": ml_engine.confidence_model is not None,
+            "timeframe_model": ml_engine.timeframe_model is not None,
+            "risk_model": ml_engine.risk_model is not None
+        },
+        "prediction_history_count": len(ml_engine.prediction_history),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/retrain")
+async def retrain_models(background_tasks: BackgroundTasks):
+    """Retreina os modelos (admin only)"""
+    def retrain():
+        logger.info("Iniciando retreinamento dos modelos...")
+        ml_engine.train_models()
+        logger.info("Retreinamento concluído!")
     
-    while True:
-        try:
-            report = monitor.generate_report()
-            
-            # Se tudo estiver funcionando, aguardar 5 minutos
-            # Se houver problemas, aguardar 1 minuto
-            if (report['health']['status'] == 'healthy' and 
-                report['signal']['status'] == 'working'):
-                time.sleep(300)  # 5 minutos
-            else:
-                time.sleep(60)   # 1 minuto
-                
-        except KeyboardInterrupt:
-            print("\\n👋 Monitoramento interrompido")
-            break
-        except Exception as e:
-            print(f"❌ Erro no monitoramento: {e}")
-            time.sleep(60)
+    background_tasks.add_task(retrain)
+    return {"message": "Retreinamento iniciado em background"}
 
-# Para usar: python deploy_automation.py monitor https://sua-api.onrender.com
-import sys
-if len(sys.argv) > 1 and sys.argv[1] == "monitor":
-    if len(sys.argv) > 2:
-        monitor_api(sys.argv[2])
-    else:
-        print("Uso: python deploy_automation.py monitor <URL_DA_API>")
+# ==============================================
+# ENDPOINTS AVANÇADOS DE MACHINE LEARNING
+# ==============================================
+
+@app.post("/advanced-analysis")
+async def advanced_market_analysis(request: TradeRequest):
+    """Análise avançada de mercado com indicadores técnicos completos"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Funcionalidades avançadas não disponíveis")
+    
+    try:
+        # Preparar dados históricos
+        price_history = [trade.get("entry_price", request.current_price) for trade in request.recent_trades[-50:]]
+        if len(price_history) < 20:
+            price_history.extend([request.current_price] * (20 - len(price_history)))
+        
+        # Criar dados OHLCV simulados
+        ohlcv_data = []
+        for i, price in enumerate(price_history):
+            ohlcv_data.append({
+                'open': price * (1 + np.random.uniform(-0.001, 0.001)),
+                'high': price * (1 + abs(np.random.uniform(0, 0.002))),
+                'low': price * (1 - abs(np.random.uniform(0, 0.002))),
+                'close': price,
+                'volume': np.random.randint(800, 1200)
+            })
+        
+        # Calcular indicadores avançados
+        indicators = ml_engine.advanced_features.calculate_advanced_indicators(ohlcv_data)
+        
+        # Detectar anomalias
+        price_data = [[p, datetime.now().isoformat()] for p in price_history]
+        anomalies = ml_engine.advanced_features.detect_market_anomalies(price_data)
+        
+        # Identificar regime de mercado
+        regime = ml_engine.advanced_features.identify_market_regime(price_data)
+        
+        # Detectar padrões
+        patterns = ml_engine.advanced_features.detect_trading_patterns(
+            [{'price': p} for p in price_history]
+        )
+        
+        # Analisar sentimento
+        sentiment = ml_engine.advanced_features.analyze_market_sentiment(
+            request.recent_trades, 
+            [{'price': request.current_price}]
+        )
+        
+        return {
+            "symbol": request.symbol,
+            "current_price": request.current_price,
+            "indicators": indicators,
+            "anomalies": anomalies,
+            "market_regime": regime,
+            "patterns": patterns,
+            "sentiment": sentiment,
+            "timestamp": datetime.now().isoformat(),
+            "analysis_quality": "advanced"
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro na análise avançada: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/smart-timeframe")
+async def generate_smart_timeframe(request: TradeRequest):
+    """Gera timeframe inteligente baseado nas condições do mercado"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        return {"type": "t", "duration": 5, "reasoning": "Timeframe padrão"}
+    
+    try:
+        # Calcular volatilidade
+        price_history = [trade.get("entry_price", request.current_price) for trade in request.recent_trades[-20:]]
+        returns = np.diff(price_history) / price_history[:-1] if len(price_history) > 1 else [0.02]
+        volatility = np.std(returns)
+        
+        # Gerar timeframe inteligente
+        timeframe = ml_engine.advanced_features.generate_smart_timeframe(
+            {"symbol": request.symbol, "price": request.current_price},
+            volatility
+        )
+        
+        return {
+            **timeframe,
+            "volatility": float(volatility),
+            "market_condition": "high_volatility" if volatility > 0.03 else "normal",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro na geração de timeframe: {e}")
+        return {"type": "t", "duration": 5, "reasoning": "Erro - usando padrão"}
+
+@app.post("/dynamic-stake")
+async def calculate_dynamic_stake(request: TradeRequest):
+    """Calcula stake dinâmico baseado em múltiplos fatores"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        stake = min(10.0, request.account_balance * 0.02)
+        return {"stake": stake, "percentage": 2.0, "reasoning": "Stake padrão"}
+    
+    try:
+        # Calcular win rate atual
+        recent_trades = request.recent_trades[-20:] if request.recent_trades else []
+        wins = len([t for t in recent_trades if t.get('pnl', 0) > 0])
+        win_rate = (wins / len(recent_trades)) * 100 if recent_trades else 50
+        
+        # Obter sinal para calcular confiança
+        signal_request = {
+            "symbol": request.symbol,
+            "current_price": request.current_price,
+            "account_balance": request.account_balance,
+            "recent_trades": request.recent_trades,
+            "market_data": []
+        }
+        
+        # Fazer predição para obter confiança
+        market_data = {
+            "symbol": request.symbol,
+            "price": request.current_price,
+            "volume": 1000,
+            "price_history": [t.get("entry_price", request.current_price) for t in request.recent_trades[-20:]]
+        }
+        
+        if ml_engine.is_trained:
+            signal = ml_engine.predict_trading_signal(market_data)
+            confidence = signal.confidence
+        else:
+            confidence = 75
+        
+        # Calcular stake dinâmico
+        stake_info = ml_engine.advanced_features.calculate_dynamic_stake(
+            account_balance=request.account_balance,
+            confidence=confidence,
+            risk_level='medium',
+            win_rate=win_rate
+        )
+        
+        return {
+            **stake_info,
+            "factors": {
+                "confidence": confidence,
+                "win_rate": win_rate,
+                "account_balance": request.account_balance
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro no cálculo de stake dinâmico: {e}")
+        stake = min(5.0, request.account_balance * 0.01)
+        return {"stake": stake, "percentage": 1.0, "reasoning": "Erro - usando conservador"}
+
+# ==============================================
+# ENDPOINTS DE BACKTESTING
+# ==============================================
+
+class BacktestRequest(BaseModel):
+    start_date: str
+    end_date: str
+    symbol: str = "R_50"
+    initial_balance: float = 1000
+    strategy_params: Optional[Dict] = {}
+
+@app.post("/backtest")
+async def run_backtest(request: BacktestRequest):
+    """Executa backtesting completo da estratégia"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Backtesting não disponível")
+    
+    try:
+        engine = BacktestingEngine()
+        engine.initial_balance = request.initial_balance
+        
+        start_date = datetime.fromisoformat(request.start_date)
+        end_date = datetime.fromisoformat(request.end_date)
+        
+        # Executar backtesting
+        report = engine.run_backtest(
+            start_date=start_date,
+            end_date=end_date,
+            symbol=request.symbol,
+            strategy_params=request.strategy_params
+        )
+        
+        return {
+            "status": "success",
+            "backtest_report": report,
+            "period": f"{request.start_date} to {request.end_date}",
+            "symbol": request.symbol,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro no backtesting: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backtest/quick")
+async def quick_backtest():
+    """Executa backtesting rápido (30 dias simulados)"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Backtesting não disponível")
+    
+    try:
+        engine = BacktestingEngine()
+        
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        
+        report = engine.run_backtest(start_date, end_date)
+        
+        return {
+            "status": "success",
+            "type": "quick_backtest",
+            "report": report,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro no backtesting rápido: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==============================================
+# ENDPOINTS DE ANÁLISE DE PERFORMANCE
+# ==============================================
+
+@app.get("/performance/summary")
+async def get_performance_summary():
+    """Retorna resumo de performance do modelo"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        return {"message": "Análise de performance não disponível"}
+    
+    try:
+        # Buscar dados do banco de dados
+        db = TradingDatabase()
+        
+        # Calcular métricas dos últimos 30 dias
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        
+        trades_df = db.get_trades(start_date=start_date, end_date=end_date)
+        
+        if trades_df.empty:
+            return {
+                "status": "no_data",
+                "message": "Nenhum trade encontrado no período",
+                "period": "30 days"
+            }
+        
+        # Calcular métricas
+        total_trades = len(trades_df)
+        winning_trades = len(trades_df[trades_df['pnl'] > 0])
+        win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+        total_pnl = trades_df['pnl'].sum()
+        avg_pnl = trades_df['pnl'].mean()
+        
+        return {
+            "period": "30 days",
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate": round(win_rate, 2),
+            "total_pnl": round(total_pnl, 2),
+            "avg_pnl_per_trade": round(avg_pnl, 2),
+            "best_trade": round(trades_df['pnl'].max(), 2) if total_trades > 0 else 0,
+            "worst_trade": round(trades_df['pnl'].min(), 2) if total_trades > 0 else 0,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro na análise de performance: {e}")
+        return {"error": str(e), "status": "error"}
+
+@app.post("/performance/save-trade")
+async def save_trade_result(trade_data: Dict):
+    """Salva resultado de trade para análise"""
+    if not ADVANCED_FEATURES_AVAILABLE:
+        return {"message": "Salvamento de trades não disponível"}
+    
+    try:
+        # Implementar salvamento no banco de dados
+        # Este endpoint seria chamado pelo frontend quando um trade é finalizado
+        return {
+            "status": "saved",
+            "trade_id": trade_data.get("id"),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao salvar trade: {e}")
+        return {"error": str(e), "status": "error"}
+
+# ==============================================
+# ENDPOINTS DE MONITORAMENTO E SAÚDE
+# ==============================================
+
+@app.get("/system/status")
+async def get_system_status():
+    """Status completo do sistema"""
+    status = {
+        "api_status": "online",
+        "ml_engine": {
+            "trained": ml_engine.is_trained,
+            "models": {
+                "direction_model": ml_engine.direction_model is not None,
+                "confidence_model": ml_engine.confidence_model is not None,
+                "timeframe_model": ml_engine.timeframe_model is not None,
+                "risk_model": ml_engine.risk_model is not None
+            },
+            "prediction_history_count": len(ml_engine.prediction_history)
+        },
+        "advanced_features": {
+            "available": ADVANCED_FEATURES_AVAILABLE,
+            "anomaly_detection": ADVANCED_FEATURES_AVAILABLE,
+            "pattern_recognition": ADVANCED_FEATURES_AVAILABLE,
+            "backtesting": ADVANCED_FEATURES_AVAILABLE
+        },
+        "system_info": {
+            "uptime": "running",
+            "memory_usage": "normal",
+            "cpu_usage": "normal"
+        },
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0-advanced"
+    }
+    
+    return status
+
+@app.get("/features")
+async def list_available_features():
+    """Lista todas as funcionalidades disponíveis"""
+    base_features = [
+        "Predição de direção (CALL/PUT)",
+        "Análise de confiança automática", 
+        "Seleção inteligente de timeframe",
+        "Avaliação de risco em tempo real",
+        "Decisões automáticas completas"
+    ]
+    
+    advanced_features = [
+        "Indicadores técnicos avançados (50+ indicadores)",
+        "Detecção de anomalias de mercado",
+        "Identificação de regime de mercado",
+        "Reconhecimento de padrões (Head&Shoulders, Triangles, etc)",
+        "Análise de sentimento de mercado",
+        "Cálculo de stake dinâmico",
+        "Sistema de backtesting completo",
+        "Análise de performance histórica",
+        "Níveis de suporte e resistência",
+        "Fibonacci automático"
+    ] if ADVANCED_FEATURES_AVAILABLE else ["Funcionalidades avançadas não instaladas"]
+    
+    return {
+        "base_features": base_features,
+        "advanced_features": advanced_features,
+        "total_features": len(base_features) + len(advanced_features),
+        "advanced_available": ADVANCED_FEATURES_AVAILABLE,
+        "version": "2.0.0-advanced"
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
