@@ -26,10 +26,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 from pydantic import BaseModel
-import redis
 import pickle
 import warnings
 warnings.filterwarnings('ignore')
+
+# Import Redis condicional
+try:
+    import redis
+    REDIS_AVAILABLE = True
+    logging.info("✅ Redis disponível")
+except ImportError:
+    REDIS_AVAILABLE = False
+    logging.warning("⚠️ Redis não disponível - funcionando sem cache")
 
 # ===============================
 # CONFIGURAÇÕES E MODELOS
@@ -92,14 +100,20 @@ class TradingML:
         self.model_performance = {}
         
         # Redis para cache (opcional - funciona sem)
-        try:
-            self.redis_client = redis.Redis(
-                host=os.getenv('REDIS_URL', 'localhost'),
-                port=6379,
-                decode_responses=True
-            )
-        except:
-            self.redis_client = None
+        self.redis_client = None
+        if REDIS_AVAILABLE:
+            try:
+                self.redis_client = redis.Redis(
+                    host=os.getenv('REDIS_URL', 'localhost'),
+                    port=6379,
+                    decode_responses=True
+                )
+                logging.info("✅ Redis cache conectado")
+            except Exception as e:
+                logging.warning(f"⚠️ Redis cache não disponível: {e}")
+                self.redis_client = None
+        else:
+            logging.info("📦 Funcionando sem cache Redis")
             
         logging.info("🤖 TradingML inicializado")
 
@@ -525,6 +539,7 @@ async def root():
         "message": "Trading Bot ML API",
         "version": "1.0.0",
         "models_trained": ml_engine.is_trained,
+        "redis_available": REDIS_AVAILABLE,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -578,6 +593,7 @@ async def analyze_market(request: AnalysisRequest):
             "current_price": current_data.close if current_data else request.current_price,
             "martingale_aware": request.martingale_level > 0,
             "recommendation": "wait_for_better_setup" if request.is_after_loss else "continue_normal",
+            "redis_status": "available" if REDIS_AVAILABLE else "not_available",
             "timestamp": datetime.now().isoformat()
         }
         
@@ -629,6 +645,7 @@ async def get_trading_signal(request: TradingRequest):
             "risk_level": signal.risk_level,
             "martingale_level": request.martingale_level,
             "is_after_loss": request.is_after_loss,
+            "redis_cache": "enabled" if REDIS_AVAILABLE else "disabled",
             "timestamp": datetime.now().isoformat()
         }
         
@@ -701,6 +718,7 @@ async def assess_risk(request: dict):
             "recommendation": recommendation,
             "martingale_level": martingale_level,
             "is_after_loss": request.get('isInCoolingPeriod', False),
+            "cache_status": "redis_enabled" if REDIS_AVAILABLE else "in_memory_only",
             "timestamp": datetime.now().isoformat()
         }
         
@@ -730,7 +748,8 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
                     "timestamp": current_data.timestamp.isoformat(),
                     "high": current_data.high,
                     "low": current_data.low,
-                    "volume": current_data.volume
+                    "volume": current_data.volume,
+                    "redis_available": REDIS_AVAILABLE
                 })
             
             await asyncio.sleep(1)  # Update a cada segundo
@@ -749,6 +768,8 @@ async def models_status():
         "models_count": len(ml_engine.models),
         "performance": ml_engine.model_performance,
         "symbols": list(set(k.split('_')[0] for k in ml_engine.models.keys())),
+        "redis_available": REDIS_AVAILABLE,
+        "cache_client": "redis" if ml_engine.redis_client else "memory",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -767,6 +788,7 @@ async def retrain_model(symbol: str, background_tasks: BackgroundTasks):
     
     return {
         "message": f"Retreinamento de {symbol} iniciado",
+        "redis_status": "enabled" if REDIS_AVAILABLE else "disabled",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -794,6 +816,7 @@ if __name__ == "__main__":
     logging.info(f"🌐 Porta: {port}")
     logging.info("🤖 Machine Learning: Ativado")
     logging.info("📊 Análise de gráficos: Tempo real")
+    logging.info(f"📦 Redis: {'Disponível' if REDIS_AVAILABLE else 'Indisponível (funcionando sem cache)'}")
     logging.info("🎯 Deploy: Render.com")
     
     uvicorn.run(
