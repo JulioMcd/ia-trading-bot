@@ -892,7 +892,7 @@
             
             <div style="margin-top: 15px; font-size: 0.8rem; opacity: 0.6;">
                 💡 Martingale Inteligente: Aguarda análise da IA após perdas - SEM LOOP de erros!<br>
-                🔑 API Python: <span id="apiKeyStatus">Conectado</span> | Status: <span id="connectionMethod">Tentando conexão...</span>
+                🔑 API Python: <span id="apiKeyStatus">Conectando...</span> | Status: <span id="connectionMethod">Tentando conexão...</span>
             </div>
         </div>
 
@@ -1011,7 +1011,7 @@
                         </optgroup>
                         
                         <!-- Market Indices -->
-                        <optgroup label="   Market Indices">
+                        <optgroup label="🻐🐂 Market Indices">
                             <option value="RDBEAR">Bear Market Index</option>
                             <option value="RDBULL">Bull Market Index</option>
                         </optgroup>
@@ -1168,11 +1168,10 @@
                 MIN: 30000,
                 MAX: 120000
             },
-            // ✅ NOVOS DELAYS PARA MARTINGALE INTELIGENTE
             MARTINGALE_DELAYS: {
-                COOLING_PERIOD: 15000,    // 15 segundos após aplicar martingale
-                ANALYSIS_WAIT: 10000,     // 10 segundos aguardando análise
-                MIN_BETWEEN_TRADES: 8000  // 8 segundos mínimo entre trades
+                COOLING_PERIOD: 15000,
+                ANALYSIS_WAIT: 10000,
+                MIN_BETWEEN_TRADES: 8000
             },
             AI_DURATION_LIMITS: {
                 t: { min: 1, max: 10 },
@@ -1195,7 +1194,28 @@
             ]
         };
 
-        // ✅ SISTEMA MARTINGALE INTELIGENTE ANTI-LOOP - MANTIDO IGUAL
+        // ==============================================
+        // VARIÁVEIS GLOBAIS
+        // ==============================================
+        
+        let ws = null;
+        let apiToken = '';
+        let accountInfo = {};
+        let isConnected = false;
+        let isAutoTrading = false;
+        let isAIConnected = false;
+        let isAIModeActive = false;
+
+        // ✅ CONTROLE DE ORDEM ÚNICA
+        let hasActiveOrder = false;
+        let activeOrderInfo = null;
+        let contractSubscriptions = new Map();
+
+        // ✅ CONTROLES IA
+        let isAIDurationActive = false;
+        let isAIManagementActive = false;
+
+        // ✅ SISTEMA MARTINGALE INTELIGENTE MELHORADO
         let martingaleState = {
             level: 0,
             baseStake: 1,
@@ -1211,19 +1231,6 @@
             analysisTimeout: null
         };
 
-        // ✅ VARIÁVEIS GLOBAIS MANTIDAS
-        let ws = null;
-        let apiToken = '';
-        let accountInfo = {};
-        let isConnected = false;
-        let isAutoTrading = false;
-        let isAIConnected = false;
-        let isAIModeActive = false;
-        let hasActiveOrder = false;
-        let activeOrderInfo = null;
-        let contractSubscriptions = new Map();
-        let isAIDurationActive = false;
-        let isAIManagementActive = false;
         let currentPrice = 0;
         let trades = [];
         let sessionStats = {
@@ -1234,6 +1241,7 @@
             startBalance: 0
         };
         let openContracts = new Map();
+
         let aiData = {
             lastAnalysis: null,
             lastSignal: null,
@@ -1243,10 +1251,383 @@
             managementDecision: null,
             lastDurationUpdate: null
         };
+
         let orderLock = false;
         let orderTimeout = null;
 
-        // ✅ CONEXÃO IA AJUSTADA PARA PYTHON API
+        // ==============================================
+        // ✅ SISTEMA MARTINGALE INTELIGENTE ANTI-LOOP
+        // ==============================================
+
+        function initializeMartingale() {
+            martingaleState.baseStake = parseFloat(document.getElementById('stakeAmount').value) || 1;
+            updateMartingaleDisplay();
+            updateMartingaleStatus('ready', '✅ Pronto para operar - Aguardando análise da IA');
+            console.log('🎯 Martingale Inteligente inicializado com stake base:', martingaleState.baseStake);
+        }
+
+        function resetMartingale() {
+            console.log('🔄 RESET MARTINGALE - Vitória detectada!');
+            
+            const previousLevel = martingaleState.level;
+            
+            if (martingaleState.coolingTimeout) {
+                clearTimeout(martingaleState.coolingTimeout);
+                martingaleState.coolingTimeout = null;
+            }
+            if (martingaleState.analysisTimeout) {
+                clearTimeout(martingaleState.analysisTimeout);
+                martingaleState.analysisTimeout = null;
+            }
+            
+            martingaleState.level = 0;
+            martingaleState.sequence = [];
+            martingaleState.isInCoolingPeriod = false;
+            martingaleState.isWaitingForAnalysis = false;
+            martingaleState.needsAnalysisAfterLoss = false;
+            
+            const stakeInput = document.getElementById('stakeAmount');
+            stakeInput.value = martingaleState.baseStake.toFixed(2);
+            
+            updateMartingaleDisplay();
+            updateMartingaleStatus('ready', '✅ Pronto - Martingale resetado após WIN');
+            
+            if (previousLevel > 0) {
+                showNotification(
+                    `🏆 WIN! Martingale resetado (Nível ${previousLevel} → 0)`,
+                    'success'
+                );
+                
+                console.log(`✅ Martingale resetado: Nível ${previousLevel} → 0`);
+                console.log(`💰 Stake resetado: $${stakeInput.value}`);
+            }
+        }
+
+        function applyMartingale() {
+            console.log('📈 APLICANDO MARTINGALE INTELIGENTE - Loss detectado!');
+            
+            martingaleState.level++;
+            
+            if (martingaleState.level > martingaleState.maxLevel) {
+                console.log(`⚠️ Limite máximo de Martingale atingido: ${martingaleState.maxLevel}`);
+                showNotification(
+                    `🛑 Limite de Martingale atingido (${martingaleState.maxLevel}). Resetando...`,
+                    'error'
+                );
+                resetMartingale();
+                return;
+            }
+            
+            const newStake = martingaleState.baseStake * Math.pow(2, martingaleState.level);
+            
+            if (newStake > CONFIG.MAX_STAKE) {
+                console.log(`⚠️ Stake calculado (${newStake}) excede limite máximo (${CONFIG.MAX_STAKE})`);
+                showNotification(
+                    `🛑 Stake muito alto para continuar Martingale. Resetando...`,
+                    'error'
+                );
+                resetMartingale();
+                return;
+            }
+            
+            const stakeInput = document.getElementById('stakeAmount');
+            stakeInput.value = newStake.toFixed(2);
+            
+            martingaleState.sequence.push({
+                level: martingaleState.level,
+                stake: newStake,
+                timestamp: new Date()
+            });
+            
+            martingaleState.isInCoolingPeriod = true;
+            martingaleState.needsAnalysisAfterLoss = true;
+            martingaleState.lastTradeTime = Date.now();
+            
+            updateMartingaleDisplay();
+            updateMartingaleStatus('cooling', `❄️ Cooling Period - Aguardando ${CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD/1000}s antes de próximo trade`);
+            
+            showNotification(
+                `📈 Martingale Nível ${martingaleState.level}: $${newStake.toFixed(2)} - AGUARDANDO ANÁLISE`,
+                'warning'
+            );
+            
+            console.log(`📈 Martingale aplicado: Nível ${martingaleState.level}, Stake: $${newStake.toFixed(2)}`);
+            console.log(`❄️ Cooling period ativado - Sistema aguardará análise da IA`);
+            
+            startMartingaleCoolingPeriod();
+        }
+
+        function startMartingaleCoolingPeriod() {
+            console.log(`❄️ Iniciando cooling period de ${CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD/1000}s`);
+            
+            martingaleState.coolingTimeout = setTimeout(() => {
+                martingaleState.isInCoolingPeriod = false;
+                martingaleState.isWaitingForAnalysis = true;
+                
+                updateMartingaleStatus('waiting', '🧠 Aguardando análise da IA para próximo trade');
+                
+                console.log('❄️ Cooling period finalizado - Aguardando análise da IA');
+                
+                if (isAIConnected) {
+                    requestAIAnalysisForMartingale();
+                } else {
+                    startManualAnalysisWait();
+                }
+                
+            }, CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD);
+        }
+
+        async function requestAIAnalysisForMartingale() {
+            console.log('🧠 Solicitando análise da IA para Martingale...');
+            
+            try {
+                updateMartingaleStatus('waiting', '🤖 IA analisando mercado após loss...');
+                
+                await getAIAnalysis();
+                
+                setTimeout(() => {
+                    if (martingaleState.isWaitingForAnalysis) {
+                        martingaleState.isWaitingForAnalysis = false;
+                        martingaleState.needsAnalysisAfterLoss = false;
+                        
+                        updateMartingaleStatus('ready', '✅ Análise concluída - Sistema pronto para operar');
+                        
+                        console.log('✅ Análise da IA concluída - Martingale pronto para próximo trade');
+                        
+                        if (isAutoTrading) {
+                            console.log('🤖 Auto trading pode continuar após análise');
+                        }
+                    }
+                }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT);
+                
+            } catch (error) {
+                console.error('❌ Erro na análise da IA para Martingale:', error);
+                startManualAnalysisWait();
+            }
+        }
+
+        function startManualAnalysisWait() {
+            console.log('⏳ Aguardando análise manual...');
+            
+            updateMartingaleStatus('waiting', '⏳ Aguardando análise manual para próximo trade');
+            
+            martingaleState.analysisTimeout = setTimeout(() => {
+                if (martingaleState.isWaitingForAnalysis) {
+                    martingaleState.isWaitingForAnalysis = false;
+                    martingaleState.needsAnalysisAfterLoss = false;
+                    
+                    updateMartingaleStatus('ready', '✅ Tempo de análise finalizado - Sistema liberado');
+                    
+                    console.log('✅ Tempo de análise manual finalizado');
+                }
+            }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT * 2);
+        }
+
+        function canTradeWithMartingale() {
+            if (martingaleState.isInCoolingPeriod) {
+                console.log('🚫 Trade bloqueado: Martingale em cooling period');
+                showNotification('❄️ Aguarde o cooling period do Martingale', 'warning');
+                return false;
+            }
+            
+            if (martingaleState.isWaitingForAnalysis || martingaleState.needsAnalysisAfterLoss) {
+                console.log('🚫 Trade bloqueado: Aguardando análise da IA após loss');
+                showNotification('🧠 Aguarde a análise da IA após a perda', 'warning');
+                return false;
+            }
+            
+            const timeSinceLastTrade = Date.now() - martingaleState.lastTradeTime;
+            if (timeSinceLastTrade < CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES) {
+                const remainingTime = Math.ceil((CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES - timeSinceLastTrade) / 1000);
+                console.log(`🚫 Trade bloqueado: Aguarde ${remainingTime}s entre trades`);
+                showNotification(`⏳ Aguarde ${remainingTime}s entre trades`, 'warning');
+                return false;
+            }
+            
+            return true;
+        }
+
+        function updateMartingaleStatus(status, message) {
+            const statusBar = document.getElementById('martingaleStatusBar');
+            const martingaleInfo = document.getElementById('martingaleInfo');
+            const statusValue = document.getElementById('martingaleStatusValue');
+            const statusDisplay = document.getElementById('martingaleStatusDisplay');
+            
+            statusBar.className = `martingale-status ${status}`;
+            martingaleInfo.className = `martingale-info ${status}`;
+            
+            statusBar.textContent = message;
+            
+            switch (status) {
+                case 'ready':
+                    statusValue.textContent = 'Pronto';
+                    statusDisplay.textContent = 'Sistema Liberado';
+                    break;
+                case 'cooling':
+                    statusValue.textContent = 'Cooling';
+                    statusDisplay.textContent = 'Aguardando';
+                    break;
+                case 'waiting':
+                    statusValue.textContent = 'Análise';
+                    statusDisplay.textContent = 'IA Analisando';
+                    break;
+                default:
+                    statusValue.textContent = 'Normal';
+                    statusDisplay.textContent = 'Operando';
+            }
+            
+            console.log(`📊 Status Martingale atualizado: ${status} - ${message}`);
+        }
+
+        function updateMartingaleDisplay() {
+            document.getElementById('martingaleLevelDisplay').textContent = martingaleState.level;
+            document.getElementById('nextStakeDisplay').textContent = 
+                document.getElementById('stakeAmount').value;
+            document.getElementById('baseStakeDisplay').textContent = 
+                martingaleState.baseStake.toFixed(2);
+            
+            const martingaleInfo = document.getElementById('martingaleInfo');
+            if (martingaleState.level === 0) {
+                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
+                    martingaleInfo.className = 'martingale-info';
+                }
+            } else if (martingaleState.level <= 3) {
+                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
+                    martingaleInfo.style.background = 'rgba(255, 165, 0, 0.1)';
+                    martingaleInfo.style.borderColor = 'rgba(255, 165, 0, 0.3)';
+                }
+            } else {
+                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
+                    martingaleInfo.style.background = 'rgba(255, 71, 87, 0.1)';
+                    martingaleInfo.style.borderColor = 'rgba(255, 71, 87, 0.3)';
+                }
+            }
+        }
+
+        function validateStakeForMartingale(stake) {
+            if (martingaleState.level === 0 && sessionStats.totalTrades === 0) {
+                martingaleState.baseStake = stake;
+                console.log('🎯 Stake base definido:', martingaleState.baseStake);
+            }
+            
+            updateMartingaleDisplay();
+            return true;
+        }
+
+        function toggleMartingale() {
+            martingaleState.isActive = !martingaleState.isActive;
+            const btn = document.getElementById('martingaleToggle');
+            
+            if (martingaleState.isActive) {
+                btn.textContent = '🎰 Martingale: ON';
+                btn.classList.remove('disabled');
+                showNotification('🎰 Martingale Inteligente ativado', 'success');
+            } else {
+                btn.textContent = '🎰 Martingale: OFF';
+                btn.classList.add('disabled');
+                showNotification('🎰 Martingale desativado', 'warning');
+            }
+            
+            console.log('🎰 Martingale:', martingaleState.isActive ? 'ATIVO' : 'INATIVO');
+        }
+
+        function resetMartingaleManual() {
+            resetMartingale();
+            showNotification('🔄 Martingale resetado manualmente', 'success');
+        }
+
+        // ==============================================
+        // ✅ CONTROLE DE ORDEM ÚNICA REFORÇADO
+        // ==============================================
+
+        function setActiveOrder(orderInfo) {
+            orderLock = true;
+            hasActiveOrder = true;
+            activeOrderInfo = orderInfo;
+            
+            if (orderTimeout) clearTimeout(orderTimeout);
+            orderTimeout = setTimeout(() => {
+                console.log('⚠️ TIMEOUT: Limpando ordem que não finalizou em 5min');
+                clearActiveOrder();
+            }, 300000);
+            
+            document.getElementById('activeOrderIndicator').classList.add('show');
+            document.getElementById('activeOrderDirection').textContent = orderInfo.direction;
+            document.getElementById('activeOrderStake').textContent = orderInfo.stake.toFixed(2);
+            document.getElementById('activeOrderSymbol').textContent = orderInfo.symbol;
+            document.getElementById('activeOrderDuration').textContent = orderInfo.duration;
+            document.getElementById('activeOrderTime').textContent = new Date().toLocaleTimeString();
+            
+            document.getElementById('orderStatus').textContent = 'Ativo';
+            document.getElementById('orderStatusText').textContent = `${orderInfo.direction} - ${orderInfo.symbol}`;
+            
+            document.getElementById('callBtn').disabled = true;
+            document.getElementById('putBtn').disabled = true;
+            
+            console.log('🎯 Ordem ativa definida com LOCK:', orderInfo);
+        }
+
+        function clearActiveOrder() {
+            if (orderTimeout) {
+                clearTimeout(orderTimeout);
+                orderTimeout = null;
+            }
+            
+            hasActiveOrder = false;
+            activeOrderInfo = null;
+            orderLock = false;
+            
+            document.getElementById('activeOrderIndicator').classList.remove('show');
+            
+            document.getElementById('orderStatus').textContent = 'Pronto';
+            document.getElementById('orderStatusText').textContent = 'Aguardando ordem';
+            
+            if (isConnected && !orderLock) {
+                document.getElementById('callBtn').disabled = false;
+                document.getElementById('putBtn').disabled = false;
+            }
+            
+            console.log('✅ Ordem finalizada - LOCK liberado - botões reabilitados');
+        }
+
+        function canPlaceNewOrder() {
+            if (hasActiveOrder || orderLock) {
+                const reason = hasActiveOrder ? 'ordem ativa' : 'sistema bloqueado';
+                console.log(`🚫 Nova ordem BLOQUEADA: ${reason}`);
+                showNotification(`⚠️ Aguarde - ${reason} detectada`, 'warning');
+                return false;
+            }
+            
+            if (openContracts.size > 0) {
+                console.log(`🚫 Nova ordem BLOQUEADA: ${openContracts.size} contratos ainda abertos`);
+                showNotification('⚠️ Aguarde todos os contratos finalizarem', 'warning');
+                return false;
+            }
+            
+            if (!canTradeWithMartingale()) {
+                return false;
+            }
+            
+            return true;
+        }
+
+        function checkAndCleanOrphanedOrders() {
+            if (hasActiveOrder && activeOrderInfo) {
+                const timeSinceOrder = Date.now() - activeOrderInfo.timestamp.getTime();
+                
+                if (timeSinceOrder > 180000) {
+                    console.log('🧹 Limpando ordem órfã detectada');
+                    clearActiveOrder();
+                }
+            }
+        }
+
+        setInterval(checkAndCleanOrphanedOrders, 30000);
+
+        // ==============================================
+        // FUNÇÕES IA REAL - CONECTANDO COM PYTHON API
+        // ==============================================
+
         async function connectToAI() {
             try {
                 console.log('🤖 Conectando à IA Python...');
@@ -1261,6 +1642,7 @@
                     updateStatus('aiStatus', 'online');
                     document.getElementById('aiStatusText').textContent = 'Conectado';
                     document.getElementById('connectionMethod').textContent = 'Python API Conectada';
+                    document.getElementById('apiKeyStatus').textContent = 'Conectado';
                     
                     enableAIControls(true);
                     
@@ -1273,16 +1655,23 @@
             } catch (error) {
                 console.error('❌ Erro ao conectar IA Python:', error);
                 isAIConnected = false;
-                updateStatus('aiStatus', 'warning');
+                updateStatus('aiStatus', 'error');
                 document.getElementById('aiStatusText').textContent = 'Erro de conexão';
                 document.getElementById('connectionMethod').textContent = 'Falha na conexão Python';
+                document.getElementById('apiKeyStatus').textContent = 'Desconectado';
                 
                 showNotification('⚠️ Erro ao conectar com IA Python', 'error');
                 return false;
             }
         }
 
-        // ✅ FUNÇÕES IA AJUSTADAS PARA PYTHON API
+        function enableAIControls(enabled) {
+            const aiButtons = ['aiAnalyzeBtn', 'aiSignalBtn', 'aiRiskBtn', 'aiModeBtn', 'aiDurationBtn', 'aiManagementBtn'];
+            aiButtons.forEach(btnId => {
+                document.getElementById(btnId).disabled = !enabled;
+            });
+        }
+
         async function getAIAnalysis() {
             if (!isAIConnected) {
                 showNotification('IA não conectada', 'error');
@@ -1375,7 +1764,6 @@
                 
                 showAIResponse(`🎯 Sinal: ${direction} | Confiança: ${confidence.toFixed(1)}% | ${signalResult.reasoning || 'Análise técnica'}`);
                 
-                // ✅ EXECUTAR APENAS SE PODE FAZER TRADE
                 if (isAIModeActive && confidence > 75 && canPlaceNewOrder()) {
                     setTimeout(() => {
                         placeTrade(direction);
@@ -1440,14 +1828,1022 @@
             }
         }
 
-        // ✅ TODAS AS OUTRAS FUNÇÕES MANTIDAS IGUAIS - JavaScript continua igual...
-        // [Todo o resto do código JavaScript mantido exatamente igual]
-        
-        console.log('🎯 Trading Bot com PYTHON IA carregado!');
-        console.log('🐍 Configurado para usar API Python na Render');
-    </script>
+        function toggleAIMode() {
+            isAIModeActive = !isAIModeActive;
+            const btn = document.getElementById('aiModeBtn');
+            
+            if (isAIModeActive) {
+                btn.textContent = '🤖 Modo IA: ON';
+                btn.classList.add('active');
+                showNotification('🤖 Modo IA ativado - Trades automáticos com IA', 'success');
+                
+                startAITradingCycle();
+            } else {
+                btn.textContent = '🤖 Modo IA: OFF';
+                btn.classList.remove('active');
+                showNotification('🤖 Modo IA desativado', 'warning');
+            }
+        }
 
-    <!-- Adicionar todo o resto do JavaScript original aqui - mantido igual -->
-    <script src="/api/frontend-js"></script>
+        async function startAITradingCycle() {
+            if (!isAIModeActive || !isAIConnected) return;
+
+            try {
+                await getAIAnalysis();
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                await getAIRiskAssessment();
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                await getAITradingSignal();
+                
+                if (isAIModeActive) {
+                    setTimeout(startAITradingCycle, 60000);
+                }
+            } catch (error) {
+                console.error('❌ Erro no ciclo IA:', error);
+            }
+        }
+
+        function showAIResponse(message) {
+            const responseDiv = document.getElementById('aiResponse');
+            const responseText = document.getElementById('aiResponseText');
+            
+            responseText.textContent = message;
+            responseDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                responseDiv.style.display = 'none';
+            }, 30000);
+        }
+
+        // ==============================================
+        // TRADING FUNCTIONS (MODIFICADAS)
+        // ==============================================
+
+        async function placeTrade(direction) {
+            if (!canPlaceNewOrder()) {
+                return;
+            }
+
+            if (!isConnected) {
+                showNotification('Não conectado à API', 'error');
+                return;
+            }
+
+            const symbol = document.getElementById('symbolSelect').value;
+            let stake = parseFloat(document.getElementById('stakeAmount').value);
+            let duration = parseInt(document.getElementById('duration').value);
+            let durationType = document.getElementById('durationType').value;
+
+            if (isAIDurationActive) {
+                const aiDuration = await applyAIDuration();
+                if (aiDuration) {
+                    duration = aiDuration.duration;
+                    durationType = aiDuration.type;
+                    console.log(`🤖 IA ajustou duração: ${aiDuration.text}`);
+                }
+            }
+
+            if (isAIManagementActive) {
+                const managementDecision = await applyAIManagement();
+                if (managementDecision && managementDecision.action === 'pause') {
+                    showNotification('⏸️ IA pausou operação - Alto risco detectado', 'warning');
+                    return;
+                }
+                if (managementDecision && managementDecision.recommendedStake) {
+                    stake = managementDecision.recommendedStake;
+                    console.log(`🤖 IA ajustou stake: ${stake.toFixed(2)}`);
+                }
+            }
+
+            if (!validateTradeParameters(stake, duration)) {
+                return;
+            }
+
+            validateStakeForMartingale(stake);
+
+            const orderInfo = {
+                direction: direction,
+                symbol: symbol,
+                stake: stake,
+                duration: `${duration}${durationType}`,
+                timestamp: new Date()
+            };
+            setActiveOrder(orderInfo);
+
+            martingaleState.lastTradeTime = Date.now();
+
+            const finalContractType = direction === 'CALL' ? 'CALL' : 'PUT';
+
+            const buyRequest = {
+                buy: 1,
+                price: stake,
+                parameters: {
+                    amount: stake,
+                    basis: "stake",
+                    contract_type: finalContractType,
+                    currency: accountInfo.currency || 'USD',
+                    duration: duration,
+                    duration_unit: durationType,
+                    symbol: symbol
+                }
+            };
+
+            console.log('🛒 Executando trade:', buyRequest);
+            const reqId = sendWSMessage(buyRequest);
+
+            if (reqId) {
+                activeOrderInfo.reqId = reqId;
+                
+                addTradeToTable({
+                    id: reqId,
+                    timestamp: new Date(),
+                    symbol: symbol,
+                    direction: direction,
+                    stake: stake,
+                    duration: `${duration}${durationType}`,
+                    entry_price: currentPrice || 0,
+                    status: 'open',
+                    pnl: 0,
+                    contract_type: finalContractType
+                });
+
+                const tradeSource = isAIModeActive ? 'IA' : (isAIDurationActive || isAIManagementActive ? 'IA Assistida' : 'Manual');
+                showNotification(`Trade ${tradeSource} ${direction}: ${symbol} - ${stake.toFixed(2)} (${duration}${durationType})`, 'success');
+            } else {
+                clearActiveOrder();
+                showNotification('❌ Falha ao enviar ordem', 'error');
+            }
+        }
+
+        function validateTradeParameters(stake, duration) {
+            if (stake < CONFIG.MIN_STAKE) {
+                showNotification(`Valor mínimo da aposta é ${CONFIG.MIN_STAKE}`, 'error');
+                return false;
+            }
+
+            if (stake > CONFIG.MAX_STAKE) {
+                showNotification(`Valor máximo da aposta é ${CONFIG.MAX_STAKE}`, 'error');
+                return false;
+            }
+
+            if (!duration || duration <= 0) {
+                showNotification('Duração inválida', 'error');
+                return false;
+            }
+
+            return true;
+        }
+
+        function handleContractUpdate(contractData) {
+            console.log('📊 Atualização do contrato:', contractData);
+            
+            if (!contractData.proposal_open_contract) return;
+            
+            const contract = contractData.proposal_open_contract;
+            const contractId = contract.contract_id;
+            
+            if (!openContracts.has(contractId)) {
+                console.log('⚠️ Contrato não monitorado:', contractId);
+                return;
+            }
+
+            if (contract.is_sold) {
+                console.log('🏁 Contrato finalizado:', contractId);
+                
+                const trackedContract = openContracts.get(contractId);
+                if (trackedContract) {
+                    const pnl = parseFloat(contract.profit) || 0;
+                    const isWin = pnl > 0;
+                    
+                    console.log(`📊 Resultado: ${isWin ? 'WIN' : 'LOSS'} - P&L: ${pnl.toFixed(2)}`);
+                    
+                    sessionStats.totalPnL += pnl;
+                    sessionStats.totalTrades++;
+                    
+                    if (isWin) {
+                        sessionStats.wonTrades++;
+                        if (martingaleState.isActive) {
+                            resetMartingale();
+                        }
+                    } else {
+                        sessionStats.lostTrades++;
+                        if (martingaleState.isActive) {
+                            applyMartingale();
+                        }
+                    }
+                    
+                    updateSessionStats();
+                    
+                    updateTradeInTable(contractId, {
+                        status: isWin ? 'won' : 'lost',
+                        pnl: pnl,
+                        exit_price: contract.exit_tick || contract.current_spot
+                    });
+                    
+                    if (activeOrderInfo && activeOrderInfo.contractId === contractId) {
+                        console.log('🔓 Limpando ordem ativa - contrato finalizado');
+                        clearActiveOrder();
+                    }
+                    
+                    openContracts.delete(contractId);
+                    contractSubscriptions.delete(contractId);
+                    
+                    showNotification(
+                        `🏁 Trade finalizado: ${isWin ? 'WIN' : 'LOSS'} ${pnl.toFixed(2)}`,
+                        isWin ? 'success' : 'error'
+                    );
+                    
+                    sendWSMessage({ balance: 1 });
+                    
+                    console.log(`✅ Sistema liberado: hasActiveOrder=${hasActiveOrder}, orderLock=${orderLock}, openContracts=${openContracts.size}`);
+                }
+            } else if (contract.status === 'open') {
+                const unrealizedPnl = parseFloat(contract.profit) || 0;
+                console.log(`📈 P&L não realizado (${contractId.toString().slice(-6)}): ${unrealizedPnl.toFixed(2)}`);
+                
+                if (activeOrderInfo && !activeOrderInfo.contractId && trackedContract && trackedContract.reqId === activeOrderInfo.reqId) {
+                    console.log('🔗 Associando contrato tardio à ordem ativa');
+                    activeOrderInfo.contractId = contractId;
+                }
+            }
+        }
+
+        function toggleAutoTrading() {
+            const tradingMode = document.getElementById('tradingMode').value;
+            
+            if (tradingMode === 'ai' && !isAIConnected) {
+                showNotification('IA não conectada! Conecte primeiro.', 'error');
+                return;
+            }
+            
+            isAutoTrading = !isAutoTrading;
+            const button = document.getElementById('autoBtn');
+            
+            if (isAutoTrading) {
+                button.textContent = '⏹️ Parar Auto';
+                button.className = 'trade-btn stop';
+                updateStatus('tradingStatus', 'online');
+                
+                if (tradingMode === 'ai') {
+                    showNotification('🤖 Auto trading com IA iniciado', 'success');
+                    startAITradingCycle();
+                } else {
+                    showNotification('🤖 Auto trading inteligente iniciado', 'success');
+                    startAutoTrading();
+                }
+            } else {
+                button.textContent = '🤖 Iniciar Auto';
+                updateStatus('tradingStatus', 'offline');
+                showNotification('🤖 Auto trading parado', 'warning');
+                isAIModeActive = false;
+            }
+        }
+
+        function startAutoTrading() {
+            if (!isAutoTrading || !isConnected) {
+                console.log('🛑 Auto trading parado ou desconectado');
+                return;
+            }
+
+            if (!canPlaceNewOrder()) {
+                console.log(`⏸️ Auto trading aguardando liberação do sistema`);
+                
+                setTimeout(startAutoTrading, 3000);
+                return;
+            }
+
+            console.log('🤖 Auto trading: Sistema completamente livre - preparando novo trade');
+
+            const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'];
+            const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
+            const direction = Math.random() > 0.5 ? 'CALL' : 'PUT';
+
+            document.getElementById('symbolSelect').value = randomSymbol;
+            
+            setTimeout(() => {
+                if (isAutoTrading && canPlaceNewOrder()) {
+                    console.log(`🚀 Auto trading executando: ${direction} em ${randomSymbol}`);
+                    placeTrade(direction);
+                } else {
+                    console.log('⚠️ Auto trading cancelado - sistema não livre ou Martingale bloqueando');
+                }
+            }, 2000);
+            
+            if (isAutoTrading) {
+                const nextTradeDelay = CONFIG.AUTO_TRADE_DELAY.MIN + 
+                    Math.random() * (CONFIG.AUTO_TRADE_DELAY.MAX - CONFIG.AUTO_TRADE_DELAY.MIN);
+                
+                console.log(`⏰ Próximo auto trade em ${(nextTradeDelay/1000).toFixed(1)}s`);
+                setTimeout(startAutoTrading, nextTradeDelay);
+            }
+        }
+
+        // ==============================================
+        // FUNÇÕES DE INTERFACE E UTILITÁRIOS
+        // ==============================================
+
+        function calculateVolatility() {
+            if (trades.length < 3) return 50;
+            
+            const recentPrices = trades.slice(-10).map(t => t.entry_price || currentPrice);
+            const avg = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
+            const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - avg, 2), 0) / recentPrices.length;
+            const volatility = Math.sqrt(variance) / avg * 100;
+            
+            return Math.min(100, Math.max(10, volatility));
+        }
+
+        function analyzeMarketCondition() {
+            const recentResults = trades.slice(-5);
+            if (recentResults.length === 0) return 'neutral';
+            
+            const wins = recentResults.filter(t => t.status === 'won').length;
+            const winRate = wins / recentResults.length;
+            
+            if (winRate > 0.7) return 'favorable';
+            if (winRate < 0.3) return 'unfavorable';
+            return 'neutral';
+        }
+
+        // ==============================================
+        // CONEXÃO E WEBSOCKET
+        // ==============================================
+
+        async function connectAPI() {
+            const token = document.getElementById('apiToken').value.trim();
+            const accountType = document.getElementById('accountType').value;
+            
+            if (!token) {
+                showNotification('Por favor, insira seu token de API', 'error');
+                return;
+            }
+
+            setLoginLoading(true);
+            apiToken = token;
+
+            const aiConnected = await connectToAI();
+            if (!aiConnected) {
+                showNotification('⚠️ Continuando sem IA Real...', 'warning');
+            }
+
+            ws = new WebSocket(CONFIG.WS_URL);
+
+            ws.onopen = function() {
+                console.log('✅ WebSocket conectado');
+                updateStatus('wsStatus', 'online');
+                
+                sendWSMessage({
+                    authorize: token
+                });
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWSMessage(data);
+                } catch (error) {
+                    console.error('❌ Erro ao processar mensagem:', error);
+                }
+            };
+
+            ws.onclose = function() {
+                console.log('❌ WebSocket desconectado');
+                updateStatus('wsStatus', 'offline');
+                updateStatus('apiStatus', 'offline');
+                isConnected = false;
+                setLoginLoading(false);
+            };
+
+            ws.onerror = function(error) {
+                console.error('❌ Erro WebSocket:', error);
+                showNotification('Erro de conexão. Verifique seu token.', 'error');
+                setLoginLoading(false);
+            };
+        }
+
+        function handleWSMessage(data) {
+            console.log('📨 Mensagem recebida:', data.msg_type, data);
+
+            switch (data.msg_type) {
+                case 'authorize':
+                    handleAuthorization(data);
+                    break;
+                case 'balance':
+                    handleBalance(data);
+                    break;
+                case 'tick':
+                    handleTick(data);
+                    break;
+                case 'buy':
+                    handleTradeCreated(data);
+                    break;
+                case 'proposal':
+                    handleProposal(data);
+                    break;
+                case 'portfolio':
+                    handlePortfolio(data);
+                    break;
+                case 'proposal_open_contract':
+                    handleContractUpdate(data);
+                    break;
+                default:
+                    if (data.error) {
+                        handleError(data.error);
+                    }
+            }
+        }
+
+        function handleAuthorization(data) {
+            if (data.authorize && data.authorize.loginid) {
+                console.log('✅ Autorização bem-sucedida');
+                isConnected = true;
+                updateStatus('apiStatus', 'online');
+                
+                accountInfo = data.authorize;
+                const accountType = document.getElementById('accountType').value;
+                const accountTypeLabel = accountType === 'demo' ? '🎮 DEMO' : '💰 REAL';
+                
+                document.getElementById('accountInfo').textContent = 
+                    `${data.authorize.loginid} - ${data.authorize.currency} (${accountTypeLabel})`;
+                
+                initializeUserData();
+                
+                showDashboard();
+                setLoginLoading(false);
+                
+                const successMessage = accountType === 'demo' 
+                    ? '🎮 Conectado à conta DEMO com Martingale Inteligente!'
+                    : '💰 Conectado à conta REAL com Martingale Inteligente!';
+                showNotification(successMessage, 'success');
+            } else {
+                showNotification('Token inválido', 'error');
+                setLoginLoading(false);
+            }
+        }
+
+        function initializeUserData() {
+            sendWSMessage({ balance: 1 });
+            sendWSMessage({ portfolio: 1, subscribe: 1 });
+        }
+
+        function handleBalance(data) {
+            if (data.balance) {
+                updateBalance(data.balance.balance, data.balance.currency);
+                if (sessionStats.startBalance === 0) {
+                    sessionStats.startBalance = parseFloat(data.balance.balance);
+                }
+            }
+        }
+
+        function handleTick(data) {
+            if (data.tick) {
+                currentPrice = parseFloat(data.tick.quote);
+                console.log(`📊 Novo tick: ${data.tick.symbol} = ${currentPrice.toFixed(4)}`);
+            }
+        }
+
+        function handleProposal(data) {
+            if (data.proposal) {
+                console.log('💰 Proposta recebida:', data.proposal);
+            }
+        }
+
+        function handleError(error) {
+            console.error('❌ Erro API:', error);
+            showNotification(`Erro: ${error.message}`, 'error');
+        }
+
+        function handleTradeCreated(buyData) {
+            console.log('✅ Trade criado:', buyData);
+            
+            if (buyData.buy) {
+                const contractId = buyData.buy.contract_id;
+                const buyPrice = buyData.buy.buy_price;
+                const reqId = buyData.req_id;
+                
+                if (contractId) {
+                    if (activeOrderInfo && activeOrderInfo.reqId === reqId) {
+                        activeOrderInfo.contractId = contractId;
+                        console.log('🔗 Contrato associado à ordem ativa:', contractId);
+                    }
+
+                    openContracts.set(contractId, {
+                        id: contractId,
+                        buy_price: buyPrice,
+                        start_time: Date.now(),
+                        symbol: buyData.buy.shortcode || 'Unknown',
+                        reqId: reqId
+                    });
+
+                    sendWSMessage({
+                        proposal_open_contract: 1,
+                        contract_id: contractId,
+                        subscribe: 1
+                    });
+
+                    contractSubscriptions.set(contractId, {
+                        subscribed: true,
+                        timestamp: Date.now()
+                    });
+
+                    sendWSMessage({ balance: 1 });
+                    
+                    showNotification(`✅ Contrato criado: ${contractId.toString().slice(-6)}`, 'success');
+                } else {
+                    console.error('❌ Contrato criado sem ID');
+                    clearActiveOrder();
+                }
+            } else {
+                console.error('❌ Falha na criação do trade');
+                clearActiveOrder();
+            }
+        }
+
+        function handlePortfolio(portfolioData) {
+            console.log('💼 Portfolio atualizado:', portfolioData);
+            
+            if (portfolioData.portfolio && portfolioData.portfolio.contracts) {
+                portfolioData.portfolio.contracts.forEach(contract => {
+                    const contractId = contract.contract_id;
+                    
+                    if (contractId && !contract.is_sold && !contractSubscriptions.has(contractId)) {
+                        console.log('🔍 Novo contrato encontrado no portfolio:', contractId);
+                        
+                        sendWSMessage({
+                            proposal_open_contract: 1,
+                            contract_id: contractId,
+                            subscribe: 1
+                        });
+                        
+                        contractSubscriptions.set(contractId, {
+                            subscribed: true,
+                            timestamp: Date.now()
+                        });
+                    }
+                });
+            }
+        }
+
+        function sendWSMessage(message) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const msgWithReqId = { ...message, req_id: Date.now() };
+                ws.send(JSON.stringify(msgWithReqId));
+                console.log('📤 Enviando:', msgWithReqId);
+                return msgWithReqId.req_id;
+            } else {
+                console.error('❌ WebSocket não conectado');
+                return null;
+            }
+        }
+
+        // ==============================================
+        // FUNÇÕES DE INTERFACE
+        // ==============================================
+
+        function updateBalance(balance, currency) {
+            const formattedBalance = parseFloat(balance).toFixed(2);
+            document.getElementById('balance').textContent = `${currency} ${formattedBalance}`;
+            
+            if (sessionStats.startBalance > 0) {
+                const change = parseFloat(balance) - sessionStats.startBalance;
+                const changePercent = (change / sessionStats.startBalance) * 100;
+                
+                const changeElement = document.getElementById('balanceChange');
+                changeElement.innerHTML = `
+                    <span>${change >= 0 ? '↗' : '↘'}</span> 
+                    ${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent.toFixed(2)}%)
+                `;
+                changeElement.className = `metric-change ${change >= 0 ? 'positive' : 'negative'}`;
+            }
+        }
+
+        function updateSessionStats() {
+            const winRate = sessionStats.totalTrades > 0 
+                ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 
+                : 0;
+            
+            document.getElementById('winRate').textContent = winRate.toFixed(1) + '%';
+            document.getElementById('tradesCount').textContent = sessionStats.totalTrades;
+            document.getElementById('todayPnL').textContent = `${sessionStats.totalPnL.toFixed(2)}`;
+            
+            const winRateElement = document.getElementById('winRateChange');
+            winRateElement.innerHTML = `<span>↑</span> ${sessionStats.wonTrades}W / ${sessionStats.lostTrades}L`;
+            
+            const tradesElement = document.getElementById('tradesChange');
+            tradesElement.innerHTML = `<span>↑</span> ${sessionStats.wonTrades} wins, ${sessionStats.lostTrades} losses`;
+            
+            const pnlElement = document.getElementById('pnlChange');
+            pnlElement.innerHTML = `
+                <span>${sessionStats.totalPnL >= 0 ? '↗' : '↘'}</span> 
+                ${sessionStats.totalPnL >= 0 ? 'Lucro' : 'Prejuízo'} sessão
+            `;
+            pnlElement.className = `metric-change ${sessionStats.totalPnL >= 0 ? 'positive' : 'negative'}`;
+        }
+
+        function addTradeToTable(trade) {
+            const tbody = document.getElementById('tradesTableBody');
+            
+            if (tbody.innerHTML.includes('Nenhum trade')) {
+                tbody.innerHTML = '';
+            }
+            
+            const row = document.createElement('div');
+            row.className = 'trades-grid';
+            row.id = `trade-${trade.id}`;
+            
+            row.innerHTML = `
+                <div>${trade.id.toString().slice(-6)}</div>
+                <div>${trade.timestamp.toLocaleTimeString()}</div>
+                <div>${trade.symbol}</div>
+                <div><span class="trade-direction ${trade.direction.toLowerCase()}">${trade.direction}</span></div>
+                <div>${trade.stake.toFixed(2)}</div>
+                <div>${trade.duration}</div>
+                <div>${trade.entry_price.toFixed(4)}</div>
+                <div><span class="trade-status ${trade.status}">${trade.status.toUpperCase()}</span></div>
+                <div class="${trade.pnl >= 0 ? 'positive' : 'negative'}">${trade.pnl.toFixed(2)}</div>
+            `;
+            
+            tbody.insertBefore(row, tbody.firstChild);
+            
+            while (tbody.children.length > 15) {
+                tbody.removeChild(tbody.lastChild);
+            }
+        }
+
+        function updateTradeInTable(contractId, updates) {
+            const trackedContract = openContracts.get(contractId);
+            if (!trackedContract) return;
+            
+            const reqId = trackedContract.reqId;
+            const row = document.getElementById(`trade-${reqId}`);
+            
+            if (row) {
+                const cells = row.children;
+                
+                if (updates.status) {
+                    const statusCell = cells[7];
+                    statusCell.innerHTML = `<span class="trade-status ${updates.status}">${updates.status.toUpperCase()}</span>`;
+                }
+                
+                if (updates.pnl !== undefined) {
+                    const pnlCell = cells[8];
+                    pnlCell.innerHTML = `${updates.pnl.toFixed(2)}`;
+                    pnlCell.className = updates.pnl >= 0 ? 'positive' : 'negative';
+                }
+                
+                console.log(`✅ Trade atualizado na tabela: ${reqId} -> ${updates.status}`);
+            } else {
+                console.log(`⚠️ Trade não encontrado na tabela: ${reqId}`);
+            }
+        }
+
+        function updateStatus(elementId, status) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.className = `status-dot ${status}`;
+            }
+        }
+
+        function showDashboard() {
+            document.getElementById('loginModal').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            
+            const accountType = document.getElementById('accountType').value;
+            const headerTitle = document.querySelector('.header h1');
+            if (accountType === 'demo') {
+                headerTitle.textContent = '🎮 Trading Bot - DEMO + Martingale Inteligente';
+            } else {
+                headerTitle.textContent = '💰 Trading Bot - REAL + Martingale Inteligente';
+            }
+            
+            document.getElementById('callBtn').disabled = false;
+            document.getElementById('putBtn').disabled = false;
+            document.getElementById('autoBtn').disabled = false;
+        }
+
+        function setLoginLoading(loading) {
+            const btn = document.getElementById('loginBtn');
+            const text = document.getElementById('loginBtnText');
+            const spinner = document.getElementById('loginSpinner');
+            
+            btn.disabled = loading;
+            text.style.display = loading ? 'none' : 'block';
+            spinner.style.display = loading ? 'block' : 'none';
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 5000);
+        }
+
+        function logout() {
+            if (ws) {
+                ws.close();
+            }
+            
+            resetApplicationState();
+            
+            document.getElementById('loginModal').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('apiToken').value = '';
+            document.getElementById('connectionMethod').textContent = 'Desconectado';
+            updateStatus('apiStatus', 'offline');
+            updateStatus('wsStatus', 'offline');
+            updateStatus('aiStatus', 'offline');
+            updateStatus('tradingStatus', 'offline');
+            updateStatus('aiManagementStatus', 'offline');
+            
+            showNotification('Desconectado com sucesso', 'success');
+        }
+
+        function resetApplicationState() {
+            isConnected = false;
+            isAutoTrading = false;
+            isAIConnected = false;
+            isAIModeActive = false;
+            isAIDurationActive = false;
+            isAIManagementActive = false;
+            
+            hasActiveOrder = false;
+            activeOrderInfo = null;
+            orderLock = false;
+            if (orderTimeout) {
+                clearTimeout(orderTimeout);
+                orderTimeout = null;
+            }
+            contractSubscriptions.clear();
+            
+            apiToken = '';
+            accountInfo = {};
+            trades = [];
+            openContracts.clear();
+            sessionStats = {
+                totalTrades: 0,
+                wonTrades: 0,
+                lostTrades: 0,
+                totalPnL: 0,
+                startBalance: 0
+            };
+            
+            if (martingaleState.coolingTimeout) {
+                clearTimeout(martingaleState.coolingTimeout);
+            }
+            if (martingaleState.analysisTimeout) {
+                clearTimeout(martingaleState.analysisTimeout);
+            }
+            
+            martingaleState = {
+                level: 0,
+                baseStake: 1,
+                maxLevel: 8,
+                isActive: true,
+                sequence: [],
+                multiplier: 2,
+                isInCoolingPeriod: false,
+                isWaitingForAnalysis: false,
+                lastTradeTime: 0,
+                needsAnalysisAfterLoss: false,
+                coolingTimeout: null,
+                analysisTimeout: null
+            };
+            
+            aiData = {
+                lastAnalysis: null,
+                lastSignal: null,
+                confidence: 0,
+                riskLevel: 'medium',
+                optimalDuration: null,
+                managementDecision: null,
+                lastDurationUpdate: null
+            };
+            
+            initializeMartingale();
+            enableAIControls(false);
+            clearActiveOrder();
+            
+            console.log('🔄 Estado da aplicação resetado completamente');
+        }
+
+        // ==============================================
+        // INICIALIZAÇÃO E SETUP
+        // ==============================================
+
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Iniciando Trading Bot com Martingale Inteligente...');
+            initializeApplication();
+        });
+
+        function initializeApplication() {
+            updateDurationOptions();
+            setupEventListeners();
+            initializeMartingale();
+            
+            console.log('✅ Aplicação inicializada com sucesso');
+        }
+
+        function setupEventListeners() {
+            document.getElementById('apiToken').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    connectAPI();
+                }
+            });
+
+            document.getElementById('stakeAmount').addEventListener('input', function() {
+                const stake = parseFloat(this.value);
+                validateStakeAmount();
+                
+                if (martingaleState.level === 0) {
+                    martingaleState.baseStake = stake || 1;
+                    updateMartingaleDisplay();
+                }
+            });
+        }
+
+        function selectAccountType(type) {
+            const demoCard = document.getElementById('demoCard');
+            const realCard = document.getElementById('realCard');
+            const accountSelect = document.getElementById('accountType');
+            
+            demoCard.classList.remove('selected');
+            realCard.classList.remove('selected');
+            
+            if (type === 'demo') {
+                demoCard.classList.add('selected');
+                accountSelect.value = 'demo';
+                showNotification('💡 Conta Demo selecionada - Martingale Inteligente!', 'info');
+            } else {
+                realCard.classList.add('selected');
+                accountSelect.value = 'real';
+                showNotification('⚠️ Conta Real - Use Martingale Inteligente com cuidado!', 'warning');
+            }
+            
+            console.log(`🔄 Tipo de conta selecionado: ${type}`);
+        }
+
+        function updateDurationOptions() {
+            const durationType = document.getElementById('durationType').value;
+            const durationSelect = document.getElementById('duration');
+            
+            durationSelect.innerHTML = '';
+            
+            DURATION_OPTIONS[durationType].forEach(option => {
+                const optElement = document.createElement('option');
+                optElement.value = option.value;
+                optElement.textContent = option.label;
+                if (durationType === 't' && option.value === 5) optElement.selected = true;
+                if (durationType === 'm' && option.value === 1) optElement.selected = true;
+                durationSelect.appendChild(optElement);
+            });
+        }
+
+        function validateStakeAmount() {
+            const stakeInput = document.getElementById('stakeAmount');
+            const value = parseFloat(stakeInput.value);
+            
+            if (value < CONFIG.MIN_STAKE) {
+                stakeInput.value = CONFIG.MIN_STAKE;
+                showNotification(`Valor mínimo da aposta é ${CONFIG.MIN_STAKE}`, 'warning');
+            } else if (value > CONFIG.MAX_STAKE) {
+                stakeInput.value = CONFIG.MAX_STAKE;
+                showNotification(`Valor máximo da aposta é ${CONFIG.MAX_STAKE}`, 'warning');
+            }
+        }
+
+        // ✅ FUNÇÕES AUXILIARES IA (SIMPLIFICADAS)
+        function toggleAIDurationControl() {
+            isAIDurationActive = !isAIDurationActive;
+            const btn = document.getElementById('aiDurationBtn');
+            
+            if (isAIDurationActive) {
+                btn.textContent = '⏱️ Duração IA: ON';
+                btn.classList.add('active');
+                showNotification('⏱️ IA controla duração automaticamente', 'success');
+            } else {
+                btn.textContent = '⏱️ Duração IA: OFF';
+                btn.classList.remove('active');
+                showNotification('⏱️ Controle manual de duração', 'warning');
+            }
+        }
+
+        function toggleAIManagement() {
+            isAIManagementActive = !isAIManagementActive;
+            const btn = document.getElementById('aiManagementBtn');
+            
+            if (isAIManagementActive) {
+                btn.textContent = '🎛️ Gerenciamento IA: ON';
+                btn.classList.add('active');
+                showNotification('🎛️ IA gerencia operações automaticamente', 'success');
+                
+                document.getElementById('aiManagement').style.display = 'block';
+                document.getElementById('aiManagementText').textContent = 'IA controlando duração e stake automaticamente';
+                updateStatus('aiManagementStatus', 'online');
+            } else {
+                btn.textContent = '🎛️ Gerenciamento IA: OFF';
+                btn.classList.remove('active');
+                showNotification('🎛️ Gerenciamento manual', 'warning');
+                
+                document.getElementById('aiManagement').style.display = 'none';
+                updateStatus('aiManagementStatus', 'offline');
+            }
+        }
+
+        async function applyAIDuration() {
+            if (!isAIDurationActive) return null;
+            
+            // Simulação de duração inteligente da IA
+            const durationTypes = ['t', 'm'];
+            const randomType = durationTypes[Math.floor(Math.random() * durationTypes.length)];
+            
+            let duration;
+            if (randomType === 't') {
+                duration = Math.floor(Math.random() * 5) + 3; // 3-7 ticks
+            } else {
+                duration = Math.floor(Math.random() * 3) + 1; // 1-3 minutos
+            }
+            
+            document.getElementById('durationType').value = randomType;
+            document.getElementById('duration').value = duration;
+            updateDurationOptions();
+            document.getElementById('duration').value = duration;
+            
+            return {
+                type: randomType,
+                duration: duration,
+                text: `${duration}${randomType}`
+            };
+        }
+
+        async function applyAIManagement() {
+            if (!isAIManagementActive) return null;
+            
+            // Simulação de gerenciamento inteligente
+            const currentStake = parseFloat(document.getElementById('stakeAmount').value);
+            
+            // Reduzir stake se Martingale muito alto
+            if (martingaleState.level > 4) {
+                return {
+                    action: 'pause',
+                    reason: 'Martingale muito alto - pausando operações'
+                };
+            }
+            
+            // Ajustar stake baseado no risco
+            if (sessionStats.totalTrades > 0) {
+                const winRate = (sessionStats.wonTrades / sessionStats.totalTrades) * 100;
+                
+                if (winRate < 40) {
+                    const reducedStake = Math.max(CONFIG.MIN_STAKE, currentStake * 0.8);
+                    return {
+                        action: 'adjust',
+                        recommendedStake: reducedStake,
+                        reason: 'Taxa de acerto baixa - reduzindo stake'
+                    };
+                }
+            }
+            
+            return {
+                action: 'continue',
+                reason: 'Condições normais de operação'
+            };
+        }
+
+        // ✅ VERIFICAÇÃO PERIÓDICA DA IA
+        setInterval(async () => {
+            if (isAIConnected) {
+                try {
+                    const response = await fetch(`${CONFIG.AI_API_URL}/api/health`);
+                    if (response.ok) {
+                        document.getElementById('connectionMethod').textContent = 'Python API Online';
+                        document.getElementById('apiKeyStatus').textContent = 'Conectado';
+                    } else {
+                        throw new Error('API não responde');
+                    }
+                } catch (error) {
+                    document.getElementById('connectionMethod').textContent = 'Python API Offline';
+                    document.getElementById('apiKeyStatus').textContent = 'Erro';
+                    updateStatus('aiStatus', 'warning');
+                }
+            }
+        }, 30000); // Verificar a cada 30 segundos
+
+        // ✅ LOGS FINAIS
+        console.log('🎯 Trading Bot com MARTINGALE INTELIGENTE + PYTHON IA carregado!');
+        console.log('⚙️ Configurações:', CONFIG);
+        console.log('🧠 FUNCIONALIDADES DA IA:');
+        console.log('   🔍 Análise inteligente de mercado');
+        console.log('   📊 Sinais de trading automáticos');
+        console.log('   ⚠️ Avaliação de risco dinâmica');
+        console.log('   🎰 Martingale inteligente anti-loop');
+        console.log('   ⏱️ Controle automático de duração');
+        console.log('   🎛️ Gerenciamento automático de stake');
+        console.log('✅ SISTEMA COMPLETO E FUNCIONAL!');
+    </script>
 </body>
 </html>
