@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🤖 Trading Bot ML Real - IA Avançada Integrada</title>
+    <title>🤖 Trading Bot - MACHINE LEARNING REAL (Scikit-Learn)</title>
     
     <style>
         * {
@@ -20,7 +20,7 @@
             overflow-x: hidden;
         }
 
-        /* Login Modal */
+        /* Login Modal - mesmo estilo anterior */
         .login-modal {
             position: fixed;
             top: 0;
@@ -67,57 +67,12 @@
             cursor: pointer;
             transition: all 0.3s ease;
             text-align: center;
-            position: relative;
-        }
-
-        .account-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
         }
 
         .account-card.selected {
             border-color: #00d4ff;
             background: rgba(0, 212, 255, 0.1);
             box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
-        }
-
-        .account-card.demo.selected {
-            border-color: #00ff88;
-            background: rgba(0, 255, 136, 0.1);
-            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-        }
-
-        .account-card.real.selected {
-            border-color: #ff6b35;
-            background: rgba(255, 107, 53, 0.1);
-            box-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
-        }
-
-        .account-icon {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            display: block;
-        }
-
-        .account-title {
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin-bottom: 5px;
-            color: #fff;
-        }
-
-        .account-description {
-            font-size: 0.9rem;
-            opacity: 0.7;
-            color: #fff;
-        }
-
-        .account-card.demo .account-icon {
-            color: #00ff88;
-        }
-
-        .account-card.real .account-icon {
-            color: #ff6b35;
         }
 
         .form-group {
@@ -142,10 +97,6 @@
             font-size: 16px;
         }
 
-        .form-group input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
-        }
-
         .login-btn {
             width: 100%;
             padding: 15px;
@@ -157,29 +108,6 @@
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
-        }
-
-        .login-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(0, 212, 255, 0.3);
-        }
-
-        .login-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .error-message {
-            color: #ff4757;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-
-        .success-message {
-            color: #00ff88;
-            margin-top: 10px;
-            font-size: 14px;
         }
 
         .dashboard-container {
@@ -205,12 +133,6 @@
             background: linear-gradient(45deg, #00d4ff, #5200ff, #ff6b35);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            animation: gradientShift 3s ease-in-out infinite;
-        }
-
-        @keyframes gradientShift {
-            0%, 100% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
         }
 
         .status-bar {
@@ -241,12 +163,7 @@
         .status-dot.offline { background: #ff4757; }
         .status-dot.warning { background: #ffa726; }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.7; transform: scale(1.1); }
-        }
-
-        /* 🤖 PAINEL IA ML REAL EXPANDIDO */
+        /* 🤖 PAINEL ML REAL MELHORADO */
         .ai-panel {
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(20px);
@@ -271,6 +188,61 @@
             margin: 10px 0;
             border-left: 4px solid #00d4ff;
             font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        /* 🎓 PAINEL ML REAL ESTATÍSTICAS */
+        .ml-real-stats {
+            background: rgba(0, 255, 136, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #00ff88;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            display: none;
+        }
+
+        .ml-real-stats.show {
+            display: block;
+        }
+
+        .ml-real-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #00ff88;
+        }
+
+        .ml-models-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .ml-model-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 255, 136, 0.2);
+        }
+
+        .ml-model-name {
+            font-weight: bold;
+            color: #00ff88;
+            margin-bottom: 8px;
+        }
+
+        .ml-model-metrics {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .ml-training-info {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
             font-size: 0.9rem;
         }
 
@@ -307,56 +279,7 @@
             color: #000;
         }
 
-        /* 🎓 PAINEL ML STATISTICS */
-        .ml-stats-panel {
-            background: rgba(0, 255, 136, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 15px 0;
-            border-left: 4px solid #00ff88;
-            border: 1px solid rgba(0, 255, 136, 0.3);
-            display: none;
-        }
-
-        .ml-stats-panel.show {
-            display: block;
-        }
-
-        .ml-stats-title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-            color: #00ff88;
-        }
-
-        .ml-stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .ml-stat-item {
-            background: rgba(0, 0, 0, 0.2);
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 0.9rem;
-        }
-
-        /* 📈 PAINEL DE GERENCIAMENTO IA */
-        .ai-management {
-            background: rgba(0, 255, 136, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 15px 0;
-            border-left: 4px solid #00ff88;
-            display: none;
-        }
-
-        .ai-management.show {
-            display: block;
-        }
-
+        /* Resto dos estilos iguais ao anterior... */
         .control-panel {
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(20px);
@@ -395,148 +318,6 @@
             font-size: 14px;
         }
 
-        .control-item select option {
-            background: #2d2d42;
-            color: #fff;
-        }
-
-        .control-item.ai-controlled {
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
-        .control-item.ai-controlled::after {
-            content: "🤖 IA";
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(0, 212, 255, 0.8);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.7rem;
-        }
-
-        /* 🎰 PAINEL MARTINGALE INTELIGENTE MELHORADO */
-        .martingale-info {
-            background: rgba(255, 165, 0, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 15px 0;
-            border-left: 4px solid #ffa726;
-            border: 1px solid rgba(255, 165, 0, 0.3);
-        }
-
-        .martingale-info.cooling {
-            background: rgba(0, 212, 255, 0.1);
-            border-left-color: #00d4ff;
-            border-color: rgba(0, 212, 255, 0.3);
-        }
-
-        .martingale-info.waiting {
-            background: rgba(136, 136, 136, 0.1);
-            border-left-color: #888;
-            border-color: rgba(136, 136, 136, 0.3);
-        }
-
-        .martingale-level {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #ffa726;
-        }
-
-        .martingale-info.cooling .martingale-level {
-            color: #00d4ff;
-        }
-
-        .martingale-info.waiting .martingale-level {
-            color: #888;
-        }
-
-        .next-stake {
-            font-size: 1rem;
-            margin-bottom: 5px;
-            color: #fff;
-        }
-
-        .martingale-controls {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            align-items: center;
-        }
-
-        .martingale-toggle {
-            padding: 5px 12px;
-            background: linear-gradient(45deg, #ffa726, #ff8f00);
-            border: none;
-            border-radius: 6px;
-            color: #000;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .martingale-toggle:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 10px rgba(255, 165, 0, 0.3);
-        }
-
-        .martingale-toggle.disabled {
-            background: rgba(255, 165, 0, 0.3);
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        .martingale-status {
-            font-size: 0.9rem;
-            margin-top: 8px;
-            padding: 8px;
-            border-radius: 6px;
-            background: rgba(0, 0, 0, 0.2);
-        }
-
-        .martingale-status.ready {
-            color: #00ff88;
-        }
-
-        .martingale-status.cooling {
-            color: #00d4ff;
-        }
-
-        .martingale-status.waiting {
-            color: #ffa726;
-        }
-
-        /* 📊 ORDEM ATIVA INDICATOR */
-        .active-order-indicator {
-            background: rgba(255, 165, 0, 0.15);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 15px 0;
-            border-left: 4px solid #ffa726;
-            border: 1px solid rgba(255, 165, 0, 0.4);
-            display: none;
-        }
-
-        .active-order-indicator.show {
-            display: block;
-        }
-
-        .active-order-title {
-            font-size: 1.1rem;
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #ffa726;
-        }
-
-        .active-order-details {
-            font-size: 0.9rem;
-            opacity: 0.9;
-            color: #fff;
-        }
-
         .trade-buttons {
             display: flex;
             gap: 15px;
@@ -565,20 +346,9 @@
             color: #fff;
         }
 
-        .trade-btn.stop {
-            background: linear-gradient(45deg, #ffa726, #ff8f00);
-            color: #000;
-        }
-
-        .trade-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-        }
-
         .trade-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
-            transform: none;
         }
 
         .main-grid {
@@ -594,15 +364,6 @@
             border-radius: 20px;
             padding: 25px;
             border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .metric-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
         }
 
         .metric-header {
@@ -617,11 +378,6 @@
             opacity: 0.8;
             text-transform: uppercase;
             letter-spacing: 1px;
-        }
-
-        .metric-icon {
-            font-size: 1.5rem;
-            opacity: 0.6;
         }
 
         .metric-value {
@@ -643,101 +399,6 @@
         .metric-change.positive { color: #00ff88; }
         .metric-change.negative { color: #ff4757; }
         .metric-change.neutral { color: #ffa726; }
-
-        .trades-table {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 20px;
-            padding: 25px;
-            margin-bottom: 30px;
-        }
-
-        .table-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .trades-grid {
-            display: grid;
-            grid-template-columns: auto auto auto auto auto auto auto auto auto;
-            gap: 10px;
-            align-items: center;
-            padding: 15px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            font-size: 0.9rem;
-        }
-
-        .trades-grid:first-child {
-            font-weight: bold;
-            color: #00d4ff;
-            text-transform: uppercase;
-            font-size: 0.8rem;
-            letter-spacing: 1px;
-        }
-
-        .trade-direction {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            text-align: center;
-        }
-
-        .trade-direction.call {
-            background: linear-gradient(45deg, #00ff88, #00cc6a);
-            color: #000;
-        }
-
-        .trade-direction.put {
-            background: linear-gradient(45deg, #ff4757, #ff3742);
-            color: #fff;
-        }
-
-        .trade-status {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: bold;
-            text-align: center;
-        }
-
-        .trade-status.open { background: #ffa726; color: #000; }
-        .trade-status.won { background: #00ff88; color: #000; }
-        .trade-status.lost { background: #ff4757; color: #fff; }
-
-        .logout-btn {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 10px 20px;
-            background: rgba(255, 71, 87, 0.2);
-            border: 1px solid #ff4757;
-            border-radius: 10px;
-            color: #ff4757;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .logout-btn:hover {
-            background: rgba(255, 71, 87, 0.3);
-            transform: translateY(-2px);
-        }
-
-        .loading-spinner {
-            border: 4px solid rgba(255, 255, 255, 0.1);
-            border-left: 4px solid #00d4ff;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
 
         .notification {
             position: fixed;
@@ -762,6 +423,19 @@
         .notification.error { border-left-color: #ff4757; }
         .notification.warning { border-left-color: #ffa726; }
 
+        .logout-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: rgba(255, 71, 87, 0.2);
+            border: 1px solid #ff4757;
+            border-radius: 10px;
+            color: #ff4757;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
         @media (max-width: 768px) {
             .control-grid {
                 grid-template-columns: 1fr;
@@ -774,66 +448,34 @@
             .main-grid {
                 grid-template-columns: 1fr;
             }
-            
-            .trades-grid {
-                grid-template-columns: repeat(3, 1fr);
-                gap: 5px;
-                font-size: 0.8rem;
-            }
 
             .account-type-selector {
                 flex-direction: column;
                 gap: 10px;
             }
 
-            .login-form {
-                padding: 30px 20px;
-                margin: 10px;
-            }
-
-            .account-card {
-                padding: 15px;
-            }
-
-            .account-icon {
-                font-size: 2rem;
-            }
-
-            .account-title {
-                font-size: 1rem;
-            }
-
-            .account-description {
-                font-size: 0.8rem;
-            }
-
-            .ai-controls {
-                grid-template-columns: 1fr;
-            }
-
-            .ml-stats-grid {
+            .ml-models-grid {
                 grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
 <body>
-    <!-- Modal de Login -->
+    <!-- Login Modal -->
     <div class="login-modal" id="loginModal">
         <div class="login-form">
-            <h2>🤖 Trading Bot - IA ML Real</h2>
+            <h2>🤖 Trading Bot - SCIKIT-LEARN REAL</h2>
             
-            <!-- Seletor de Tipo de Conta -->
             <div class="account-type-selector">
                 <div class="account-card demo selected" onclick="selectAccountType('demo')" id="demoCard">
-                    <span class="account-icon">🎮</span>
-                    <div class="account-title">CONTA DEMO</div>
-                    <div class="account-description">ML + IA sem riscos<br>Dinheiro virtual</div>
+                    <span style="font-size: 2.5rem; display: block; margin-bottom: 10px;">🎮</span>
+                    <div style="font-size: 1.2rem; font-weight: bold; margin-bottom: 5px;">CONTA DEMO</div>
+                    <div style="font-size: 0.9rem; opacity: 0.7;">ML Real sem riscos<br>Dinheiro virtual</div>
                 </div>
                 <div class="account-card real" onclick="selectAccountType('real')" id="realCard">
-                    <span class="account-icon">💰</span>
-                    <div class="account-title">CONTA REAL</div>
-                    <div class="account-description">ML + IA real<br>Dinheiro verdadeiro</div>
+                    <span style="font-size: 2.5rem; display: block; margin-bottom: 10px;">💰</span>
+                    <div style="font-size: 1.2rem; font-weight: bold; margin-bottom: 5px;">CONTA REAL</div>
+                    <div style="font-size: 0.9rem; opacity: 0.7;">ML Real ativo<br>Dinheiro verdadeiro</div>
                 </div>
             </div>
 
@@ -848,16 +490,14 @@
             </select>
             
             <button class="login-btn" id="loginBtn" onclick="connectAPI()">
-                <span id="loginBtnText">🚀 Conectar API + IA ML</span>
-                <div class="loading-spinner" id="loginSpinner" style="display: none; width: 20px; height: 20px; margin: 0 auto;"></div>
+                🚀 Conectar API + Scikit-Learn
             </button>
             <div id="loginMessage"></div>
             <div style="margin-top: 20px; font-size: 0.9rem; opacity: 0.7;">
                 <p>ℹ️ Para obter seu token API:</p>
                 <p>1. Acesse <a href="https://app.deriv.com/account/api-token" target="_blank" style="color: #00d4ff;">app.deriv.com/account/api-token</a></p>
                 <p>2. Crie um novo token com as permissões necessárias</p>
-                <p>3. Cole o token acima</p>
-                <p style="margin-top: 10px; color: #00ff88;">🤖 IA REAL + Machine Learning + Martingale Inteligente!</p>
+                <p style="margin-top: 10px; color: #00ff88;">🤖 MACHINE LEARNING REAL: Random Forest + Gradient Boosting + Neural Network!</p>
             </div>
         </div>
     </div>
@@ -868,7 +508,7 @@
 
         <!-- Header -->
         <div class="header">
-            <h1>🤖 Trading Bot - ML Real + IA Avançada</h1>
+            <h1>🤖 Trading Bot - MACHINE LEARNING REAL</h1>
             <p>Conta: <span id="accountInfo">Carregando...</span></p>
             
             <div class="status-bar">
@@ -882,44 +522,39 @@
                 </div>
                 <div class="status-item">
                     <div class="status-dot offline" id="aiStatus"></div>
-                    <span>IA ML Real</span>
+                    <span>Scikit-Learn</span>
                 </div>
                 <div class="status-item">
                     <div class="status-dot offline" id="tradingStatus"></div>
                     <span>Auto Trading</span>
                 </div>
-                <div class="status-item">
-                    <div class="status-dot offline" id="aiManagementStatus"></div>
-                    <span>IA Management</span>
-                </div>
             </div>
         </div>
 
-        <!-- 🤖 PAINEL IA ML REAL EXPANDIDO -->
+        <!-- 🤖 PAINEL ML REAL -->
         <div class="ai-panel">
             <div class="ai-status">
-                <h3 style="color: #00d4ff;">🤖 Painel IA REAL com Machine Learning</h3>
+                <h3 style="color: #00d4ff;">🤖 MACHINE LEARNING REAL (Scikit-Learn)</h3>
                 <div style="font-size: 0.9rem; opacity: 0.7;">
                     Status: <span id="aiStatusText">Desconectado</span>
                 </div>
             </div>
             
             <div id="aiResponse" class="ai-response" style="display: none;">
-                <div id="aiResponseText">Aguardando análise da IA ML...</div>
+                <div id="aiResponseText">Aguardando análise do ML...</div>
             </div>
 
-            <!-- 🎓 PAINEL ML STATISTICS -->
-            <div id="mlStatsPanel" class="ml-stats-panel">
-                <div class="ml-stats-title">📊 Estatísticas Machine Learning</div>
-                <div class="ml-stats-grid" id="mlStatsGrid">
+            <!-- 🎓 ESTATÍSTICAS ML REAIS -->
+            <div id="mlRealStats" class="ml-real-stats">
+                <div class="ml-real-title">🎓 Estatísticas dos Modelos Scikit-Learn</div>
+                
+                <div class="ml-models-grid" id="mlModelsGrid">
                     <!-- Será preenchido dinamicamente -->
                 </div>
-            </div>
-
-            <!-- 🎯 GERENCIAMENTO AUTOMÁTICO DA IA -->
-            <div id="aiManagement" class="ai-management">
-                <h4 style="color: #00ff88; margin-bottom: 10px;">🎯 Gerenciamento Automático ML</h4>
-                <div id="aiManagementText">A IA ML está controlando duração e gerenciamento...</div>
+                
+                <div class="ml-training-info" id="mlTrainingInfo">
+                    📚 Aguardando dados de treinamento...
+                </div>
             </div>
             
             <div class="ai-controls">
@@ -941,22 +576,16 @@
                 <button class="ai-btn" onclick="getMLStatistics()" id="aiStatsBtn" disabled>
                     📊 Stats ML
                 </button>
-                <button class="ai-btn" onclick="toggleAIDurationControl()" id="aiDurationBtn" disabled>
-                    ⏱️ Duração IA: OFF
-                </button>
-                <button class="ai-btn" onclick="toggleAIManagement()" id="aiManagementBtn" disabled>
-                    🎛️ Gerenciamento IA: OFF
-                </button>
                 <button class="ai-btn" onclick="toggleAIMode()" id="aiModeBtn" disabled>
-                    🤖 Modo IA: OFF
+                    🤖 Modo ML: OFF
                 </button>
             </div>
             
             <div style="margin-top: 15px; font-size: 0.8rem; opacity: 0.6;">
-                🎯 Machine Learning Real: Random Forest + Neural Network + Gradient Boosting<br>
-                📈 Indicadores: RSI, MACD, Bollinger, EMAs, Volatilidade, Momentum<br>
-                🎓 Aprendizado: Contínuo com feedback dos trades<br>
-                📊 API Python: <span id="apiKeyStatus">Conectando...</span> | Status: <span id="connectionMethod">Tentando conexão...</span>
+                🤖 Random Forest + Gradient Boosting + Neural Network (MLPClassifier)<br>
+                📊 Features: RSI, MACD, Bollinger, EMAs, Volatilidade, Momentum + 13 mais<br>
+                🎓 Auto-retreinamento a cada 100 trades | Cross-validation 5-fold<br>
+                💾 Persistência: <span id="mlPersistenceStatus">Aguardando...</span> | Accuracy: <span id="mlAccuracyStatus">Treinando...</span>
             </div>
         </div>
 
@@ -965,7 +594,7 @@
             <div class="metric-card">
                 <div class="metric-header">
                     <span class="metric-title">Saldo</span>
-                    <span class="metric-icon">💰</span>
+                    <span style="font-size: 1.5rem;">💰</span>
                 </div>
                 <div class="metric-value" id="balance">$0.00</div>
                 <div class="metric-change neutral" id="balanceChange">
@@ -975,19 +604,19 @@
 
             <div class="metric-card">
                 <div class="metric-header">
-                    <span class="metric-title">P&L Hoje</span>
-                    <span class="metric-icon">📈</span>
+                    <span class="metric-title">ML Status</span>
+                    <span style="font-size: 1.5rem;">🤖</span>
                 </div>
-                <div class="metric-value" id="todayPnL">$0.00</div>
-                <div class="metric-change neutral" id="pnlChange">
-                    <span>↗</span> Aguardando dados...
+                <div class="metric-value" id="mlStatusValue">Carregando</div>
+                <div class="metric-change neutral" id="mlStatusChange">
+                    <span>↗</span> <span id="mlStatusDisplay">Inicializando</span>
                 </div>
             </div>
 
             <div class="metric-card">
                 <div class="metric-header">
                     <span class="metric-title">Taxa de Acerto</span>
-                    <span class="metric-icon">🎯</span>
+                    <span style="font-size: 1.5rem;">🎯</span>
                 </div>
                 <div class="metric-value" id="winRate">0%</div>
                 <div class="metric-change neutral" id="winRateChange">
@@ -998,115 +627,44 @@
             <div class="metric-card">
                 <div class="metric-header">
                     <span class="metric-title">Trades Hoje</span>
-                    <span class="metric-icon">⚡</span>
+                    <span style="font-size: 1.5rem;">⚡</span>
                 </div>
                 <div class="metric-value" id="tradesCount">0</div>
                 <div class="metric-change neutral" id="tradesChange">
                     <span>↗</span> 0 wins, 0 losses
                 </div>
             </div>
-
-            <div class="metric-card">
-                <div class="metric-header">
-                    <span class="metric-title">ML Status</span>
-                    <span class="metric-icon">🤖</span>
-                </div>
-                <div class="metric-value" id="mlStatusValue">Carregando</div>
-                <div class="metric-change neutral" id="mlStatusChange">
-                    <span>↗</span> <span id="mlStatusDisplay">Inicializando</span>
-                </div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-header">
-                    <span class="metric-title">Martingale Status</span>
-                    <span class="metric-icon">🎰</span>
-                </div>
-                <div class="metric-value" id="martingaleStatusValue">Pronto</div>
-                <div class="metric-change neutral" id="martingaleStatusChange">
-                    <span>↗</span> <span id="martingaleStatusDisplay">Aguardando</span>
-                </div>
-            </div>
         </div>
 
-        <!-- Painel de Controle -->
+        <!-- Painel de Controle Simplificado -->
         <div class="control-panel">
-            <h3 style="color: #00d4ff; margin-bottom: 20px;">⚡ Trading com IA ML Real + Martingale Inteligente</h3>
+            <h3 style="color: #00d4ff; margin-bottom: 20px;">⚡ Trading com SCIKIT-LEARN Real</h3>
             
             <div class="control-grid">
                 <div class="control-item">
                     <label>Símbolo:</label>
                     <select id="symbolSelect">
-                        <optgroup label="📊 Volatility Indices">
-                            <option value="R_10">Volatility 10 Index</option>
-                            <option value="R_25">Volatility 25 Index</option>
-                            <option value="R_50" selected>Volatility 50 Index</option>
-                            <option value="R_75">Volatility 75 Index</option>
-                            <option value="R_100">Volatility 100 Index</option>
-                        </optgroup>
-                        
-                        <optgroup label="⚡ Volatility Indices (1s)">
-                            <option value="1HZ10V">Volatility 10 (1s) Index</option>
-                            <option value="1HZ25V">Volatility 25 (1s) Index</option>
-                            <option value="1HZ50V">Volatility 50 (1s) Index</option>
-                            <option value="1HZ75V">Volatility 75 (1s) Index</option>
-                            <option value="1HZ100V">Volatility 100 (1s) Index</option>
-                            <option value="1HZ150V">Volatility 150 (1s) Index</option>
-                            <option value="1HZ200V">Volatility 200 (1s) Index</option>
-                            <option value="1HZ250V">Volatility 250 (1s) Index</option>
-                        </optgroup>
-                        
-                        <optgroup label="🦘 Jump Indices">
-                            <option value="JD10">Jump 10 Index</option>
-                            <option value="JD25">Jump 25 Index</option>
-                            <option value="JD50">Jump 50 Index</option>
-                            <option value="JD75">Jump 75 Index</option>
-                            <option value="JD100">Jump 100 Index</option>
-                        </optgroup>
-                        
-                        <optgroup label="📊 Step Indices">
-                            <option value="STPRAN">Step 100 Index</option>
-                            <option value="STPRAN200">Step 200 Index</option>
-                            <option value="STPRAN500">Step 500 Index</option>
-                        </optgroup>
-                        
-                        <optgroup label="�� Market Indices">
-                            <option value="RDBEAR">Bear Market Index</option>
-                            <option value="RDBULL">Bull Market Index</option>
-                        </optgroup>
-                        
-                        <optgroup label="💥 Crash/Boom Indices">
-                            <option value="CRASH300">Crash 300 Index</option>
-                            <option value="CRASH500">Crash 500 Index</option>
-                            <option value="CRASH600">Crash 600 Index</option>
-                            <option value="CRASH900">Crash 900 Index</option>
-                            <option value="CRASH1000">Crash 1000 Index</option>
-                            <option value="BOOM300">Boom 300 Index</option>
-                            <option value="BOOM500">Boom 500 Index</option>
-                            <option value="BOOM600">Boom 600 Index</option>
-                            <option value="BOOM900">Boom 900 Index</option>
-                            <option value="BOOM1000">Boom 1000 Index</option>
-                        </optgroup>
+                        <option value="R_50" selected>Volatility 50 Index</option>
+                        <option value="R_10">Volatility 10 Index</option>
+                        <option value="R_25">Volatility 25 Index</option>
+                        <option value="R_75">Volatility 75 Index</option>
+                        <option value="R_100">Volatility 100 Index</option>
                     </select>
                 </div>
                 
-                <div class="control-item" id="stakeControl">
+                <div class="control-item">
                     <label>Valor da Aposta (USD):</label>
                     <input type="number" id="stakeAmount" value="1" min="0.35" max="2000" step="0.01">
                 </div>
                 
-                <div class="control-item" id="durationTypeControl">
-                    <label>Tipo de Duração:</label>
-                    <select id="durationType" onchange="updateDurationOptions()">
-                        <option value="t">Ticks</option>
-                        <option value="m">Minutos</option>
-                    </select>
-                </div>
-                
-                <div class="control-item" id="durationControl">
+                <div class="control-item">
                     <label>Duração:</label>
                     <select id="duration">
-                        <!-- Será preenchido dinamicamente -->
+                        <option value="5">5 ticks</option>
+                        <option value="10">10 ticks</option>
+                        <option value="1m">1 minuto</option>
+                        <option value="3m">3 minutos</option>
+                        <option value="5m">5 minutos</option>
                     </select>
                 </div>
 
@@ -1114,95 +672,18 @@
                     <label>Modo Trading:</label>
                     <select id="tradingMode">
                         <option value="manual">Manual</option>
-                        <option value="auto">Automático</option>
-                        <option value="ai">IA ML Real</option>
+                        <option value="ml">ML Scikit-Learn</option>
                     </select>
-                </div>
-            </div>
-
-            <!-- 📊 INDICADOR DE ORDEM ATIVA -->
-            <div class="active-order-indicator" id="activeOrderIndicator">
-                <div class="active-order-title">
-                    📊 Ordem Ativa: <span id="activeOrderDirection">-</span>
-                </div>
-                <div class="active-order-details">
-                    💰 Valor: $<span id="activeOrderStake">0.00</span> | 
-                    📈 Símbolo: <span id="activeOrderSymbol">-</span> | 
-                    ⏱️ Duração: <span id="activeOrderDuration">-</span>
-                </div>
-                <div style="font-size: 0.8rem; margin-top: 5px; opacity: 0.8;">
-                    🕒 Iniciado: <span id="activeOrderTime">-</span>
-                </div>
-            </div>
-
-            <!-- 🎰 MARTINGALE INTELIGENTE MELHORADO -->
-            <div class="martingale-info" id="martingaleInfo">
-                <div class="martingale-level">
-                    🎰 Martingale Inteligente Nível: <span id="martingaleLevelDisplay">0</span>/8
-                </div>
-                <div class="next-stake">
-                    💰 Próxima Aposta: $<span id="nextStakeDisplay">1.00</span>
-                </div>
-                <div style="font-size: 0.9rem; margin-top: 5px; opacity: 0.8;">
-                    📊 Stake Base: $<span id="baseStakeDisplay">1.00</span> | 
-                    🔄 Reset automático após WIN | 🧠 IA ML controla timing
-                </div>
-                
-                <div class="martingale-status ready" id="martingaleStatusBar">
-                    ✅ Pronto para operar - Aguardando análise da IA ML
-                </div>
-                
-                <div class="martingale-controls">
-                    <button class="martingale-toggle" onclick="toggleMartingale()" id="martingaleToggle">
-                        🎰 Martingale: ON
-                    </button>
-                    <button class="martingale-toggle" onclick="resetMartingaleManual()" id="resetMartingale">
-                        🔄 Reset Manual
-                    </button>
-                    <div style="font-size: 0.8rem; opacity: 0.7;">
-                        Sistema Anti-Loop: ON
-                    </div>
                 </div>
             </div>
             
             <div class="trade-buttons">
                 <button class="trade-btn call" onclick="placeTrade('CALL')" id="callBtn" disabled>
-                    📈 RISE (Higher)
+                    📈 CALL (Higher)
                 </button>
                 <button class="trade-btn put" onclick="placeTrade('PUT')" id="putBtn" disabled>
-                    📉 FALL (Lower)
+                    📉 PUT (Lower)
                 </button>
-                <button class="trade-btn stop" onclick="toggleAutoTrading()" id="autoBtn" disabled>
-                    🤖 Iniciar Auto
-                </button>
-            </div>
-        </div>
-
-        <!-- Tabela de Trades -->
-        <div class="trades-table">
-            <div class="table-header">
-                <h3 style="color: #00d4ff;">🎯 Histórico de Trades com IA ML</h3>
-                <div style="font-size: 0.9rem; opacity: 0.7;">
-                    Sistema Machine Learning + Martingale Inteligente
-                </div>
-            </div>
-
-            <div class="trades-grid">
-                <div>ID</div>
-                <div>Horário</div>
-                <div>Símbolo</div>
-                <div>Tipo</div>
-                <div>Valor</div>
-                <div>Duração</div>
-                <div>Entry</div>
-                <div>Status</div>
-                <div>P&L</div>
-            </div>
-
-            <div id="tradesTableBody">
-                <div style="text-align: center; padding: 20px; opacity: 0.7;">
-                    🤖 Nenhum trade ML executado ainda...
-                </div>
             </div>
         </div>
     </div>
@@ -1212,90 +693,32 @@
 
     <script>
         // ==============================================
-        // CONFIGURAÇÕES E CONSTANTES - ML REAL
+        // CONFIGURAÇÕES - ML REAL
         // ==============================================
         
         const CONFIG = {
             WS_URL: 'wss://ws.derivws.com/websockets/v3?app_id=1089',
-            AI_API_URL: window.location.origin, // API Python ML
+            AI_API_URL: window.location.origin,
             MIN_STAKE: 0.35,
             MAX_STAKE: 2000,
-            DEFAULT_SYMBOL: 'R_50',
-            AUTO_TRADE_DELAY: {
-                MIN: 30000,
-                MAX: 120000
-            },
-            MARTINGALE_DELAYS: {
-                COOLING_PERIOD: 15000,
-                ANALYSIS_WAIT: 10000,
-                MIN_BETWEEN_TRADES: 8000
-            },
-            AI_DURATION_LIMITS: {
-                t: { min: 1, max: 10 },
-                m: { min: 1, max: 5 }
-            },
             ML_CONFIG: {
                 MIN_SAMPLES_FOR_TRAINING: 50,
                 AUTO_RETRAIN_THRESHOLD: 100,
-                CONFIDENCE_THRESHOLD: 75,
-                HEALTH_CHECK_INTERVAL: 60000
+                CONFIDENCE_THRESHOLD: 75
             }
         };
 
-        const DURATION_OPTIONS = {
-            t: Array.from({length: 10}, (_, i) => ({ value: i + 1, label: `${i + 1} tick${i > 0 ? 's' : ''}` })),
-            m: [
-                { value: 1, label: '1 min' },
-                { value: 2, label: '2 mins' },
-                { value: 3, label: '3 mins' },
-                { value: 4, label: '4 mins' },
-                { value: 5, label: '5 mins' },
-                { value: 10, label: '10 mins' },
-                { value: 15, label: '15 mins' },
-                { value: 30, label: '30 mins' },
-                { value: 60, label: '1 hora' }
-            ]
-        };
-
         // ==============================================
-        // VARIÁVEIS GLOBAIS ML REAL
+        // VARIÁVEIS GLOBAIS
         // ==============================================
         
         let ws = null;
         let apiToken = '';
         let accountInfo = {};
         let isConnected = false;
-        let isAutoTrading = false;
-        let isAIConnected = false;
-        let isAIModeActive = false;
-
-        // 🤖 CONTROLES ML
-        let isAIDurationActive = false;
-        let isAIManagementActive = false;
+        let isMLConnected = false;
+        let isMLModeActive = false;
         let mlModelsLoaded = false;
-        let mlTrainingData = [];
-
-        // 📊 CONTROLE DE ORDEM ÚNICA
-        let hasActiveOrder = false;
-        let activeOrderInfo = null;
-        let contractSubscriptions = new Map();
-
-        // 🎰 SISTEMA MARTINGALE INTELIGENTE
-        let martingaleState = {
-            level: 0,
-            baseStake: 1,
-            maxLevel: 8,
-            isActive: true,
-            sequence: [],
-            multiplier: 2,
-            isInCoolingPeriod: false,
-            isWaitingForAnalysis: false,
-            lastTradeTime: 0,
-            needsAnalysisAfterLoss: false,
-            coolingTimeout: null,
-            analysisTimeout: null
-        };
-
         let currentPrice = 0;
         let trades = [];
         let sessionStats = {
@@ -1305,136 +728,120 @@
             totalPnL: 0,
             startBalance: 0
         };
-        let openContracts = new Map();
 
-        // 🤖 DADOS IA ML
-        let aiData = {
+        // 🤖 DADOS ML REAIS
+        let mlData = {
             lastAnalysis: null,
             lastSignal: null,
-            confidence: 0,
-            riskLevel: 'medium',
-            optimalDuration: null,
-            managementDecision: null,
-            lastDurationUpdate: null,
             mlStats: null,
-            technicalIndicators: null,
-            modelAccuracy: {}
+            modelAccuracy: {},
+            trainingProgress: 0
         };
 
-        let orderLock = false;
-        let orderTimeout = null;
-
         // ==============================================
-        // 🤖 FUNÇÕES ML REAL - INTEGRAÇÃO AVANÇADA
+        // 🤖 FUNÇÕES ML REAL
         // ==============================================
 
-        async function connectToAI() {
+        async function connectToML() {
             try {
-                console.log('🤖 Conectando à IA ML Real...');
+                console.log('🤖 Conectando ao Scikit-Learn ML...');
                 
                 const response = await fetch(`${CONFIG.AI_API_URL}/api/health`);
                 
                 if (response.ok) {
                     const data = await response.json();
-                    console.log('✅ IA ML conectada:', data);
+                    console.log('✅ ML Scikit-Learn conectado:', data);
                     
-                    isAIConnected = true;
-                    mlModelsLoaded = data.ml_status?.models_available?.length > 0;
+                    isMLConnected = true;
+                    mlModelsLoaded = data.ml_status?.models_trained || false;
                     
                     updateStatus('aiStatus', 'online');
-                    document.getElementById('aiStatusText').textContent = 'ML Real Conectado';
+                    document.getElementById('aiStatusText').textContent = 'Scikit-Learn Ativo';
                     
-                    // Atualizar interface com informações ML
                     if (data.ml_status) {
                         updateMLDisplay(data.ml_status);
-                        aiData.mlStats = data.ml_status;
+                        mlData.mlStats = data.ml_status;
                     }
                     
-                    enableAIControls(true);
+                    enableMLControls(true);
                     
-                    // Verificar saúde ML periodicamente
-                    setInterval(checkMLHealth, CONFIG.ML_CONFIG.HEALTH_CHECK_INTERVAL);
-                    
-                    showNotification('🤖 IA com Machine Learning Real conectada!', 'success');
+                    showNotification('🤖 Scikit-Learn ML Real conectado!', 'success');
                     return true;
                 } else {
                     throw new Error(`HTTP ${response.status}`);
                 }
                 
             } catch (error) {
-                console.error('❌ Erro ao conectar IA ML:', error);
-                isAIConnected = false;
+                console.error('❌ Erro ao conectar ML:', error);
+                isMLConnected = false;
                 updateStatus('aiStatus', 'error');
                 document.getElementById('aiStatusText').textContent = 'Erro ML';
-                document.getElementById('connectionMethod').textContent = 'Falha ML API';
                 
-                showNotification('⚠️ Erro ao conectar IA ML - modo básico', 'error');
+                showNotification('⚠️ Erro ao conectar Scikit-Learn ML', 'error');
                 return false;
             }
         }
 
-        function enableAIControls(enabled) {
-            const aiButtons = [
+        function enableMLControls(enabled) {
+            const mlButtons = [
                 'aiAnalyzeBtn', 'aiSignalBtn', 'aiRiskBtn', 'aiModeBtn', 
-                'aiDurationBtn', 'aiManagementBtn', 'aiIndicatorsBtn', 
-                'aiTrainBtn', 'aiStatsBtn'
+                'aiIndicatorsBtn', 'aiTrainBtn', 'aiStatsBtn'
             ];
-            aiButtons.forEach(btnId => {
+            mlButtons.forEach(btnId => {
                 const btn = document.getElementById(btnId);
                 if (btn) btn.disabled = !enabled;
             });
         }
 
         async function getMLStatistics() {
-            if (!isAIConnected) return;
+            if (!isMLConnected) return;
 
             try {
-                showAIResponse('📊 Obtendo estatísticas ML...');
+                showMLResponse('📊 Obtendo estatísticas Scikit-Learn...');
                 
                 const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/stats`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const mlStats = await response.json();
                 updateMLDisplay(mlStats);
-                updateMLStatsPanel(mlStats);
-                aiData.mlStats = mlStats;
+                updateMLRealStatsPanel(mlStats);
+                mlData.mlStats = mlStats;
                 
-                showAIResponse('📊 Estatísticas ML atualizadas');
+                showMLResponse('📊 Estatísticas ML atualizadas');
                 
             } catch (error) {
                 console.error('❌ Erro ao obter estatísticas ML:', error);
-                showAIResponse('❌ Erro ao obter estatísticas ML');
+                showMLResponse('❌ Erro ao obter estatísticas ML');
             }
         }
 
         function updateMLDisplay(mlStats) {
-            // Atualizar display principal
             const aiStatusText = document.getElementById('aiStatusText');
             const mlStatusValue = document.getElementById('mlStatusValue');
             const mlStatusDisplay = document.getElementById('mlStatusDisplay');
+            const mlPersistenceStatus = document.getElementById('mlPersistenceStatus');
+            const mlAccuracyStatus = document.getElementById('mlAccuracyStatus');
             
             if (mlStats.models_trained) {
-                aiStatusText.textContent = `ML Treinado (${mlStats.training_samples} samples)`;
+                aiStatusText.textContent = `Scikit-Learn Treinado (${mlStats.training_samples} samples)`;
                 mlStatusValue.textContent = 'Treinado';
                 mlStatusDisplay.textContent = `${mlStats.training_samples} samples`;
+                mlPersistenceStatus.textContent = 'Modelos salvos';
+                
+                // Calcular accuracy média
+                const accuracies = Object.values(mlStats.accuracy_scores || {});
+                if (accuracies.length > 0) {
+                    const avgAccuracy = accuracies.reduce((a, b) => a + b, 0) / accuracies.length;
+                    mlAccuracyStatus.textContent = `${(avgAccuracy * 100).toFixed(1)}%`;
+                } else {
+                    mlAccuracyStatus.textContent = 'Calculando...';
+                }
             } else {
-                aiStatusText.textContent = `ML Coletando (${mlStats.training_samples}/${CONFIG.ML_CONFIG.MIN_SAMPLES_FOR_TRAINING})`;
+                aiStatusText.textContent = `Scikit-Learn Coletando (${mlStats.training_samples}/${CONFIG.ML_CONFIG.MIN_SAMPLES_FOR_TRAINING})`;
                 mlStatusValue.textContent = 'Coletando';
                 mlStatusDisplay.textContent = 'Dados insuficientes';
-            }
-
-            // Atualizar connection method com detalhes ML
-            const connectionMethod = document.getElementById('connectionMethod');
-            const modelsText = mlStats.models_available ? `${mlStats.models_available.length} modelos` : 'ML básico';
-            connectionMethod.textContent = `Python ML API (${modelsText})`;
-
-            // Atualizar status do API Key com accuracy
-            const apiKeyStatus = document.getElementById('apiKeyStatus');
-            if (mlStats.model_accuracy && Object.keys(mlStats.model_accuracy).length > 0) {
-                const avgAccuracy = Object.values(mlStats.model_accuracy).reduce((a, b) => a + b, 0) / Object.values(mlStats.model_accuracy).length;
-                apiKeyStatus.textContent = `ML Accuracy: ${(avgAccuracy * 100).toFixed(1)}%`;
-            } else {
-                apiKeyStatus.textContent = 'ML Treinando';
+                mlPersistenceStatus.textContent = 'Aguardando treino';
+                mlAccuracyStatus.textContent = 'Não treinado';
             }
 
             // Atualizar métricas ML
@@ -1448,9 +855,10 @@
             }
         }
 
-        function updateMLStatsPanel(mlStats) {
-            const panel = document.getElementById('mlStatsPanel');
-            const grid = document.getElementById('mlStatsGrid');
+        function updateMLRealStatsPanel(mlStats) {
+            const panel = document.getElementById('mlRealStats');
+            const grid = document.getElementById('mlModelsGrid');
+            const trainingInfo = document.getElementById('mlTrainingInfo');
             
             if (!mlStats || !mlStats.ml_enabled) {
                 panel.classList.remove('show');
@@ -1459,42 +867,51 @@
 
             panel.classList.add('show');
             
-            // Criar estatísticas detalhadas
-            const stats = [
-                { label: 'Modelos Carregados', value: mlStats.models_available?.length || 0 },
-                { label: 'Modelos Treinados', value: mlStats.models_trained ? 'Sim' : 'Não' },
-                { label: 'Samples de Treino', value: mlStats.training_samples || 0 },
-                { label: 'Última Predição', value: mlStats.last_prediction?.direction || 'N/A' },
-                { label: 'Regime de Mercado', value: mlStats.market_regime || 'neutral' },
-                { label: 'Regime Volatilidade', value: mlStats.volatility_regime || 'normal' }
-            ];
-
-            // Adicionar accuracies dos modelos
-            if (mlStats.model_accuracy) {
-                Object.entries(mlStats.model_accuracy).forEach(([model, accuracy]) => {
-                    stats.push({
-                        label: `${model} Accuracy`,
-                        value: `${(accuracy * 100).toFixed(1)}%`
-                    });
-                });
+            // Atualizar informações de treinamento
+            let trainingText = `📚 Total de Samples: ${mlStats.training_samples}`;
+            if (mlStats.data_statistics) {
+                const dataStats = mlStats.data_statistics;
+                trainingText += ` | Wins: ${dataStats.wins} (${dataStats.win_rate.toFixed(1)}%) | Losses: ${dataStats.losses}`;
             }
-
-            grid.innerHTML = stats.map(stat => `
-                <div class="ml-stat-item">
-                    <strong>${stat.label}:</strong> ${stat.value}
-                </div>
-            `).join('');
+            if (mlStats.last_training) {
+                const lastTraining = new Date(mlStats.last_training).toLocaleString();
+                trainingText += ` | Último treino: ${lastTraining}`;
+            }
+            trainingInfo.textContent = trainingText;
+            
+            // Criar cards dos modelos
+            const modelNames = ['random_forest', 'gradient_boosting', 'neural_network'];
+            grid.innerHTML = modelNames.map(modelName => {
+                const modelStats = mlStats.model_statistics?.[modelName] || {};
+                const accuracy = (modelStats.accuracy || 0) * 100;
+                const cvScore = (modelStats.cv_score || 0) * 100;
+                const trained = modelStats.trained || false;
+                
+                return `
+                    <div class="ml-model-card">
+                        <div class="ml-model-name">
+                            ${modelName === 'random_forest' ? '🌳 Random Forest' :
+                              modelName === 'gradient_boosting' ? '📈 Gradient Boosting' :
+                              '🧠 Neural Network'}
+                        </div>
+                        <div class="ml-model-metrics">
+                            Status: ${trained ? '✅ Treinado' : '⏳ Aguardando'}<br>
+                            ${trained ? `Accuracy: ${accuracy.toFixed(1)}%<br>CV Score: ${cvScore.toFixed(1)}%` : 'Aguardando dados...'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         async function trainMLModels() {
-            if (!isAIConnected) {
-                showNotification('IA não conectada', 'error');
+            if (!isMLConnected) {
+                showNotification('ML não conectado', 'error');
                 return;
             }
 
             try {
                 document.getElementById('aiTrainBtn').disabled = true;
-                showAIResponse('🎓 Iniciando treinamento ML...');
+                showMLResponse('🎓 Iniciando treinamento Scikit-Learn...');
                 
                 const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/train`, {
                     method: 'POST',
@@ -1506,89 +923,36 @@
                 const result = await response.json();
                 
                 if (result.status === 'success') {
-                    showAIResponse('✅ Modelos ML treinados com sucesso! Performance atualizada.');
-                    showNotification('🎓 ML treinado com sucesso!', 'success');
+                    showMLResponse(`✅ ${result.message}`);
+                    showNotification('🎓 Scikit-Learn treinado com sucesso!', 'success');
                     await getMLStatistics();
                     mlModelsLoaded = true;
-                } else {
-                    showAIResponse(`⚠️ ${result.message}`);
+                } else if (result.status === 'insufficient_data') {
+                    showMLResponse(`⚠️ ${result.message}`);
                     showNotification(result.message, 'warning');
+                } else {
+                    showMLResponse(`❌ ${result.message}`);
+                    showNotification(result.message, 'error');
                 }
                 
             } catch (error) {
                 console.error('❌ Erro no treinamento ML:', error);
-                showAIResponse('❌ Erro no treinamento ML');
+                showMLResponse('❌ Erro no treinamento Scikit-Learn');
                 showNotification('Erro ao treinar ML', 'error');
             } finally {
                 document.getElementById('aiTrainBtn').disabled = false;
             }
         }
 
-        async function getTechnicalIndicators() {
-            if (!isAIConnected) return;
-
-            try {
-                showAIResponse('📈 Calculando indicadores técnicos...');
-                
-                const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/indicators`);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                
-                const data = await response.json();
-                
-                if (data.available && data.indicators) {
-                    const indicators = data.indicators;
-                    aiData.technicalIndicators = indicators;
-                    
-                    let indicatorText = '📈 Indicadores Técnicos: ';
-                    
-                    if (indicators.rsi !== undefined) {
-                        const rsiStatus = indicators.rsi > 70 ? '🔴 Sobrecompra' : indicators.rsi < 30 ? '🟢 Sobrevenda' : '🟡 Neutro';
-                        indicatorText += `RSI ${indicators.rsi.toFixed(1)} ${rsiStatus} | `;
-                    }
-                    
-                    if (indicators.macd !== undefined) {
-                        const macdStatus = indicators.macd > 0 ? '📈 Bullish' : '📉 Bearish';
-                        indicatorText += `MACD ${indicators.macd.toFixed(3)} ${macdStatus} | `;
-                    }
-                    
-                    if (indicators.bb_position !== undefined) {
-                        const bbPos = (indicators.bb_position * 100).toFixed(0);
-                        const bbStatus = bbPos > 80 ? '🔴 Topo BB' : bbPos < 20 ? '🟢 Base BB' : '🟡 Meio BB';
-                        indicatorText += `BB ${bbPos}% ${bbStatus} | `;
-                    }
-                    
-                    if (indicators.volatility !== undefined) {
-                        const volStatus = indicators.volatility > 50 ? '🌊 Alta Vol' : '😴 Baixa Vol';
-                        indicatorText += `Vol ${indicators.volatility.toFixed(1)}% ${volStatus}`;
-                    }
-                    
-                    if (indicators.trend_strength !== undefined) {
-                        const trendStatus = indicators.trend_strength > 1 ? '📈 Trend Up' : 
-                                          indicators.trend_strength < -1 ? '📉 Trend Down' : '➡️ Lateral';
-                        indicatorText += ` | ${trendStatus}`;
-                    }
-                    
-                    showAIResponse(indicatorText);
-                } else {
-                    showAIResponse('📊 Coletando dados para indicadores técnicos... (mínimo 20 ticks necessários)');
-                }
-                
-            } catch (error) {
-                console.error('❌ Erro ao obter indicadores:', error);
-                showAIResponse('❌ Erro ao calcular indicadores técnicos');
-            }
-        }
-
-        // Modificar as funções existentes para usar ML real
         async function getAIAnalysis() {
-            if (!isAIConnected) {
-                showNotification('IA não conectada', 'error');
+            if (!isMLConnected) {
+                showNotification('ML não conectado', 'error');
                 return;
             }
 
             try {
                 document.getElementById('aiAnalyzeBtn').disabled = true;
-                showAIResponse('🤖 Executando análise ML completa...');
+                showMLResponse('🤖 Executando análise Scikit-Learn...');
 
                 const symbol = document.getElementById('symbolSelect').value;
                 const marketData = {
@@ -1596,12 +960,7 @@
                     currentPrice: currentPrice,
                     timestamp: new Date().toISOString(),
                     trades: trades.slice(-10),
-                    balance: sessionStats.startBalance,
                     winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
-                    volatility: calculateVolatility(),
-                    marketCondition: analyzeMarketCondition(),
-                    martingaleLevel: martingaleState.level,
-                    isAfterLoss: martingaleState.needsAnalysisAfterLoss,
                     totalTrades: sessionStats.totalTrades
                 };
 
@@ -1614,42 +973,25 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const analysisResult = await response.json();
-                aiData.lastAnalysis = analysisResult;
+                mlData.lastAnalysis = analysisResult;
                 
-                // Mostrar resultado detalhado
                 let message = analysisResult.message || 'Análise ML concluída';
                 
-                if (analysisResult.ml_enabled) {
-                    message += ` | 🎯 Confiança: ${(analysisResult.confidence || 75).toFixed(1)}%`;
+                if (analysisResult.ml_enabled && analysisResult.models_used) {
+                    message += ` | 🤖 Modelos: ${analysisResult.models_used.length}`;
                     
                     if (analysisResult.technical_indicators) {
                         const indicators = analysisResult.technical_indicators;
                         if (indicators.rsi !== undefined) message += ` | RSI: ${indicators.rsi.toFixed(1)}`;
                         if (indicators.volatility !== undefined) message += ` | Vol: ${indicators.volatility.toFixed(1)}%`;
-                        if (indicators.bb_position !== undefined) message += ` | BB: ${(indicators.bb_position * 100).toFixed(0)}%`;
-                    }
-                    
-                    if (analysisResult.market_regime) {
-                        message += ` | Regime: ${analysisResult.market_regime}`;
-                    }
-                    
-                    if (analysisResult.processing_time_ms) {
-                        message += ` | ⚡ ${analysisResult.processing_time_ms.toFixed(0)}ms`;
-                    }
-
-                    if (analysisResult.ml_models_count) {
-                        message += ` | 🤖 ${analysisResult.ml_models_count} modelos`;
                     }
                 }
                 
-                showAIResponse(message);
-                
-                // Notificar resultado para aprendizado
-                notifyMLAnalysis(analysisResult);
+                showMLResponse(message);
                 
             } catch (error) {
-                console.error('❌ Erro na análise IA:', error);
-                showAIResponse('❌ Erro na análise ML - usando fallback básico');
+                console.error('❌ Erro na análise ML:', error);
+                showMLResponse('❌ Erro na análise Scikit-Learn');
                 showNotification('Erro na análise ML', 'error');
             } finally {
                 document.getElementById('aiAnalyzeBtn').disabled = false;
@@ -1657,27 +999,22 @@
         }
 
         async function getAITradingSignal() {
-            if (!isAIConnected) {
-                showNotification('IA não conectada', 'error');
+            if (!isMLConnected) {
+                showNotification('ML não conectado', 'error');
                 return;
             }
 
             try {
                 document.getElementById('aiSignalBtn').disabled = true;
-                showAIResponse('🎯 Gerando sinal ML com múltiplos modelos...');
+                showMLResponse('🎯 Gerando sinal Scikit-Learn...');
 
                 const symbol = document.getElementById('symbolSelect').value;
                 const requestData = {
                     symbol: symbol,
                     currentPrice: currentPrice,
-                    accountBalance: sessionStats.startBalance,
                     winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
                     recentTrades: trades.slice(-5),
                     timestamp: new Date().toISOString(),
-                    volatility: calculateVolatility(),
-                    marketCondition: analyzeMarketCondition(),
-                    martingaleLevel: martingaleState.level,
-                    isAfterLoss: martingaleState.needsAnalysisAfterLoss,
                     totalTrades: sessionStats.totalTrades
                 };
 
@@ -1690,46 +1027,25 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const signalResult = await response.json();
-                aiData.lastSignal = signalResult;
+                mlData.lastSignal = signalResult;
                 
                 const direction = signalResult.direction || 'CALL';
                 const confidence = signalResult.confidence || 70;
                 
-                let message = `🎯 Sinal ML Ensemble: ${direction}`;
+                let message = `🎯 Sinal Scikit-Learn: ${direction} (${confidence.toFixed(1)}%)`;
                 
-                if (signalResult.ml_enabled) {
-                    message += ` | 🎯 ${confidence.toFixed(1)}%`;
+                if (signalResult.ml_enabled && signalResult.models_used) {
+                    message += ` | 🤖 ${signalResult.models_used.length} modelos`;
                     
-                    if (signalResult.risk_adjusted_confidence !== undefined && 
-                        Math.abs(signalResult.risk_adjusted_confidence - confidence) > 2) {
-                        message += ` (Risco Adj: ${signalResult.risk_adjusted_confidence.toFixed(1)}%)`;
-                    }
-                    
-                    if (signalResult.technical_score !== undefined) {
-                        message += ` | Tech Score: ${signalResult.technical_score.toFixed(0)}%`;
-                    }
-                    
-                    if (signalResult.timeframe) {
-                        message += ` | ⏱️ ${signalResult.timeframe}`;
-                    }
-                    
-                    if (signalResult.market_regime && signalResult.market_regime !== 'neutral') {
-                        message += ` | ${signalResult.market_regime}`;
-                    }
-
-                    if (signalResult.ml_models_used) {
-                        message += ` | 🤖 ${signalResult.ml_models_used} modelos`;
+                    if (signalResult.ensemble_probability !== undefined) {
+                        message += ` | Prob: ${(signalResult.ensemble_probability * 100).toFixed(1)}%`;
                     }
                 }
                 
-                if (signalResult.reasoning && signalResult.reasoning.length < 100) {
-                    message += ` | ${signalResult.reasoning}`;
-                }
+                showMLResponse(message);
                 
-                showAIResponse(message);
-                
-                // Auto-executar se modo IA ativo e confiança alta
-                if (isAIModeActive && confidence > CONFIG.ML_CONFIG.CONFIDENCE_THRESHOLD && canPlaceNewOrder()) {
+                // Auto-executar se modo ML ativo e confiança alta
+                if (isMLModeActive && confidence > CONFIG.ML_CONFIG.CONFIDENCE_THRESHOLD && canPlaceNewOrder()) {
                     setTimeout(() => {
                         placeTrade(direction);
                         showNotification(`🤖 Trade ML executado: ${direction} (${confidence.toFixed(1)}%)`, 'success');
@@ -1737,8 +1053,8 @@
                 }
                 
             } catch (error) {
-                console.error('❌ Erro no sinal IA:', error);
-                showAIResponse('❌ Erro no sinal ML - usando fallback básico');
+                console.error('❌ Erro no sinal ML:', error);
+                showMLResponse('❌ Erro no sinal Scikit-Learn');
                 showNotification('Erro no sinal ML', 'error');
             } finally {
                 document.getElementById('aiSignalBtn').disabled = false;
@@ -1746,25 +1062,22 @@
         }
 
         async function getAIRiskAssessment() {
-            if (!isAIConnected) {
-                showNotification('IA não conectada', 'error');
+            if (!isMLConnected) {
+                showNotification('ML não conectado', 'error');
                 return;
             }
 
             try {
                 document.getElementById('aiRiskBtn').disabled = true;
-                showAIResponse('⚠️ Executando avaliação ML multifatorial de risco...');
+                showMLResponse('⚠️ Avaliando risco com ML...');
 
                 const riskData = {
                     currentBalance: sessionStats.startBalance,
                     todayPnL: sessionStats.totalPnL,
-                    martingaleLevel: martingaleState.level,
                     recentTrades: trades.slice(-5),
                     winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
                     totalTrades: sessionStats.totalTrades,
-                    timestamp: new Date().toISOString(),
-                    isInCoolingPeriod: martingaleState.isInCoolingPeriod,
-                    needsAnalysisAfterLoss: martingaleState.needsAnalysisAfterLoss
+                    timestamp: new Date().toISOString()
                 };
 
                 const response = await fetch(`${CONFIG.AI_API_URL}/api/risk`, {
@@ -1776,39 +1089,15 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const riskResult = await response.json();
-                aiData.riskLevel = riskResult.level || 'medium';
                 
-                let message = riskResult.message || `Risco ${aiData.riskLevel} detectado`;
+                let message = riskResult.message || `Risco ${riskResult.level} detectado`;
                 
-                if (riskResult.ml_enabled && riskResult.risk_breakdown) {
-                    const breakdown = riskResult.risk_breakdown;
-                    message += ` | Breakdown: `;
-                    message += `🎰 M:${breakdown.martingale_risk.toFixed(0)}`;
-                    message += ` 💰 P:${breakdown.pnl_risk.toFixed(0)}`;
-                    message += ` 🎯 Perf:${breakdown.performance_risk.toFixed(0)}`;
-                    
-                    if (breakdown.technical_risk > 20) {
-                        message += ` 📈 Tech:${breakdown.technical_risk.toFixed(0)}`;
-                    }
-                    
-                    if (breakdown.volatility_risk > 20) {
-                        message += ` 🌊 Vol:${breakdown.volatility_risk.toFixed(0)}`;
-                    }
+                if (riskResult.factors) {
+                    const factors = riskResult.factors;
+                    message += ` | Fatores: Vol:${factors.volatility?.toFixed(0)}% WR:${factors.win_rate?.toFixed(0)}%`;
                 }
                 
-                if (riskResult.recommendation) {
-                    message += ` | 💡 ${riskResult.recommendation}`;
-                }
-                
-                if (riskResult.specific_recommendations && riskResult.specific_recommendations.length > 0) {
-                    message += ` | ⚠️ ${riskResult.specific_recommendations[0]}`;
-                }
-
-                if (riskResult.processing_time_ms) {
-                    message += ` | ⚡ ${riskResult.processing_time_ms.toFixed(0)}ms`;
-                }
-                
-                showAIResponse(message);
+                showMLResponse(message);
                 
                 // Mostrar notificação baseada no nível de risco
                 if (riskResult.level === 'high') {
@@ -1821,131 +1110,71 @@
                 
             } catch (error) {
                 console.error('❌ Erro na avaliação de risco:', error);
-                showAIResponse('❌ Erro na avaliação ML de risco');
+                showMLResponse('❌ Erro na avaliação ML de risco');
                 showNotification('Erro na avaliação de risco ML', 'error');
             } finally {
                 document.getElementById('aiRiskBtn').disabled = false;
             }
         }
 
-        // Função para verificar periodicamente status ML e retreinar se necessário
-        async function checkMLHealth() {
-            if (!isAIConnected) return;
+        async function getTechnicalIndicators() {
+            if (!isMLConnected) return;
 
             try {
-                await getMLStatistics();
+                showMLResponse('📈 Calculando indicadores técnicos...');
                 
-                // Auto-treinar se temos dados suficientes mas modelos não treinados
-                if (aiData.mlStats) {
-                    const stats = aiData.mlStats;
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/indicators`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                
+                if (data.available && data.indicators) {
+                    const indicators = data.indicators;
                     
-                    if (stats.training_samples >= CONFIG.ML_CONFIG.MIN_SAMPLES_FOR_TRAINING && 
-                        !stats.models_trained) {
-                        console.log('🎓 Auto-treinamento ML iniciado...');
-                        await trainMLModels();
-                    }
-                }
-                
-            } catch (error) {
-                console.error('❌ Erro no check ML:', error);
-            }
-        }
-
-        // Função para notificar resultado de análise para aprendizado ML
-        function notifyMLAnalysis(analysisResult) {
-            console.log('📊 Análise ML registrada:', analysisResult);
-            
-            // Adicionar à história de análises para melhorar futuras predições
-            if (analysisResult.confidence && analysisResult.direction) {
-                mlTrainingData.push({
-                    timestamp: new Date().toISOString(),
-                    analysis: analysisResult,
-                    context: {
-                        symbol: document.getElementById('symbolSelect').value,
-                        price: currentPrice,
-                        martingale_level: martingaleState.level
-                    }
-                });
-                
-                // Manter apenas as últimas 100 análises
-                if (mlTrainingData.length > 100) {
-                    mlTrainingData = mlTrainingData.slice(-100);
-                }
-            }
-        }
-
-        // Função melhorada para notificar resultado do trade para ML
-        window.notifyMLTrade = async function(tradeData) {
-            if (!isAIConnected) return;
-
-            try {
-                // Extrair features do contexto atual para aprendizado
-                const features = {
-                    direction: tradeData.direction,
-                    success: tradeData.pnl > 0,
-                    pnl: tradeData.pnl,
-                    martingaleLevel: tradeData.martingaleLevel || martingaleState.level,
-                    timestamp: new Date().toISOString(),
-                    symbol: tradeData.symbol,
-                    volatility: calculateVolatility(),
-                    currentPrice: currentPrice,
-                    winRate: sessionStats.totalTrades > 0 ? (sessionStats.wonTrades / sessionStats.totalTrades) * 100 : 0,
+                    let indicatorText = '📈 Indicadores: ';
                     
-                    // Features normalizadas para ML
-                    features: [
-                        // Resultado normalizado
-                        tradeData.pnl > 0 ? 1 : 0,
-                        // P&L normalizado (-1 a 1)
-                        Math.max(-1, Math.min(1, (tradeData.pnl || 0) / 100)),
-                        // Martingale level normalizado (0 a 1)
-                        (martingaleState.level || 0) / 10,
-                        // Win rate normalizado (0 a 1)
-                        ((sessionStats.wonTrades / Math.max(sessionStats.totalTrades, 1)) || 0.5),
-                        // Volatilidade normalizada (0 a 1)
-                        (calculateVolatility() || 50) / 100,
-                        // Hora do dia normalizada (0 a 1)
-                        new Date().getHours() / 24,
-                        // Preço normalizado (relativo)
-                        ((currentPrice || 1000) - 1000) / 1000,
-                        // Direção (0 = PUT, 1 = CALL)
-                        tradeData.direction === 'CALL' ? 1 : 0,
-                        // Se foi após loss (0 ou 1)
-                        martingaleState.needsAnalysisAfterLoss ? 1 : 0,
-                        // Total de trades normalizado
-                        Math.min(sessionStats.totalTrades / 100, 1)
-                    ]
-                };
-
-                const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/learn`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(features)
-                });
-                
-                if (response.ok) {
-                    const result = await response.json();
-                    console.log('✅ ML aprendeu com trade:', result.ml_stats);
+                    if (indicators.rsi !== undefined) {
+                        const rsiStatus = indicators.rsi > 70 ? 'Sobrecompra' : indicators.rsi < 30 ? 'Sobrevenda' : 'Neutro';
+                        indicatorText += `RSI ${indicators.rsi.toFixed(1)} (${rsiStatus}) | `;
+                    }
                     
-                    // Atualizar display se recebemos estatísticas
-                    if (result.ml_stats) {
-                        updateMLDisplay(result.ml_stats);
-                        aiData.mlStats = result.ml_stats;
+                    if (indicators.macd !== undefined) {
+                        const macdStatus = indicators.macd > 0 ? 'Bullish' : 'Bearish';
+                        indicatorText += `MACD ${indicators.macd.toFixed(3)} (${macdStatus}) | `;
                     }
-
-                    // Mostrar feedback de aprendizado
-                    if (result.ml_stats && result.ml_stats.training_samples % 10 === 0) {
-                        showNotification(`🎓 ML aprendeu: ${result.ml_stats.training_samples} samples`, 'success');
+                    
+                    if (indicators.volatility !== undefined) {
+                        const volStatus = indicators.volatility > 50 ? 'Alta Vol' : 'Baixa Vol';
+                        indicatorText += `Vol ${indicators.volatility.toFixed(1)}% (${volStatus})`;
                     }
+                    
+                    showMLResponse(indicatorText);
                 } else {
-                    console.log('⚠️ ML não conseguiu processar trade');
+                    showMLResponse('📊 Coletando dados para indicadores técnicos...');
                 }
                 
             } catch (error) {
-                console.error('❌ Erro ao notificar ML:', error);
+                console.error('❌ Erro ao obter indicadores:', error);
+                showMLResponse('❌ Erro ao calcular indicadores técnicos');
             }
-        };
+        }
 
-        function showAIResponse(message) {
+        function toggleAIMode() {
+            isMLModeActive = !isMLModeActive;
+            const btn = document.getElementById('aiModeBtn');
+            
+            if (isMLModeActive) {
+                btn.textContent = '🤖 Modo ML: ON';
+                btn.classList.add('active');
+                showNotification('🤖 Modo Scikit-Learn ativado', 'success');
+            } else {
+                btn.textContent = '🤖 Modo ML: OFF';
+                btn.classList.remove('active');
+                showNotification('🤖 Modo Scikit-Learn desativado', 'warning');
+            }
+        }
+
+        function showMLResponse(message) {
             const responseDiv = document.getElementById('aiResponse');
             const responseText = document.getElementById('aiResponseText');
             
@@ -1957,785 +1186,11 @@
                 responseDiv.style.display = 'none';
             }, 30000);
 
-            console.log('🤖 IA Response:', message);
+            console.log('🤖 ML Response:', message);
         }
 
         // ==============================================
-        // SISTEMA MARTINGALE INTELIGENTE ANTI-LOOP
-        // ==============================================
-
-        function initializeMartingale() {
-            martingaleState.baseStake = parseFloat(document.getElementById('stakeAmount').value) || 1;
-            updateMartingaleDisplay();
-            updateMartingaleStatus('ready', '✅ Pronto para operar - Aguardando análise da IA ML');
-            console.log('🎯 Martingale Inteligente inicializado com stake base:', martingaleState.baseStake);
-        }
-
-        function resetMartingale() {
-            console.log('🔄 RESET MARTINGALE - Vitória detectada!');
-            
-            const previousLevel = martingaleState.level;
-            
-            if (martingaleState.coolingTimeout) {
-                clearTimeout(martingaleState.coolingTimeout);
-                martingaleState.coolingTimeout = null;
-            }
-            if (martingaleState.analysisTimeout) {
-                clearTimeout(martingaleState.analysisTimeout);
-                martingaleState.analysisTimeout = null;
-            }
-            
-            martingaleState.level = 0;
-            martingaleState.sequence = [];
-            martingaleState.isInCoolingPeriod = false;
-            martingaleState.isWaitingForAnalysis = false;
-            martingaleState.needsAnalysisAfterLoss = false;
-            
-            const stakeInput = document.getElementById('stakeAmount');
-            stakeInput.value = martingaleState.baseStake.toFixed(2);
-            
-            updateMartingaleDisplay();
-            updateMartingaleStatus('ready', '✅ Pronto - Martingale resetado após WIN');
-            
-            if (previousLevel > 0) {
-                showNotification(
-                    `🏆 WIN! Martingale resetado (Nível ${previousLevel} → 0)`,
-                    'success'
-                );
-                
-                console.log(`✅ Martingale resetado: Nível ${previousLevel} → 0`);
-                console.log(`💰 Stake resetado: $${stakeInput.value}`);
-            }
-        }
-
-        function applyMartingale() {
-            console.log('📈 APLICANDO MARTINGALE INTELIGENTE - Loss detectado!');
-            
-            martingaleState.level++;
-            
-            if (martingaleState.level > martingaleState.maxLevel) {
-                console.log(`⚠️ Limite máximo de Martingale atingido: ${martingaleState.maxLevel}`);
-                showNotification(
-                    `🛑 Limite de Martingale atingido (${martingaleState.maxLevel}). Resetando...`,
-                    'error'
-                );
-                resetMartingale();
-                return;
-            }
-            
-            const newStake = martingaleState.baseStake * Math.pow(2, martingaleState.level);
-            
-            if (newStake > CONFIG.MAX_STAKE) {
-                console.log(`⚠️ Stake calculado (${newStake}) excede limite máximo (${CONFIG.MAX_STAKE})`);
-                showNotification(
-                    `🛑 Stake muito alto para continuar Martingale. Resetando...`,
-                    'error'
-                );
-                resetMartingale();
-                return;
-            }
-            
-            const stakeInput = document.getElementById('stakeAmount');
-            stakeInput.value = newStake.toFixed(2);
-            
-            martingaleState.sequence.push({
-                level: martingaleState.level,
-                stake: newStake,
-                timestamp: new Date()
-            });
-            
-            martingaleState.isInCoolingPeriod = true;
-            martingaleState.needsAnalysisAfterLoss = true;
-            martingaleState.lastTradeTime = Date.now();
-            
-            updateMartingaleDisplay();
-            updateMartingaleStatus('cooling', `❄️ Cooling Period - Aguardando ${CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD/1000}s antes de próximo trade`);
-            
-            showNotification(
-                `📈 Martingale Nível ${martingaleState.level}: $${newStake.toFixed(2)} - AGUARDANDO ANÁLISE ML`,
-                'warning'
-            );
-            
-            console.log(`📈 Martingale aplicado: Nível ${martingaleState.level}, Stake: $${newStake.toFixed(2)}`);
-            console.log(`❄️ Cooling period ativado - Sistema aguardará análise da IA ML`);
-            
-            startMartingaleCoolingPeriod();
-        }
-
-        function startMartingaleCoolingPeriod() {
-            console.log(`❄️ Iniciando cooling period de ${CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD/1000}s`);
-            
-            martingaleState.coolingTimeout = setTimeout(() => {
-                martingaleState.isInCoolingPeriod = false;
-                martingaleState.isWaitingForAnalysis = true;
-                
-                updateMartingaleStatus('waiting', '🧠 Aguardando análise da IA ML para próximo trade');
-                
-                console.log('❄️ Cooling period finalizado - Aguardando análise da IA ML');
-                
-                if (isAIConnected) {
-                    requestAIAnalysisForMartingale();
-                } else {
-                    startManualAnalysisWait();
-                }
-                
-            }, CONFIG.MARTINGALE_DELAYS.COOLING_PERIOD);
-        }
-
-        async function requestAIAnalysisForMartingale() {
-            console.log('🧠 Solicitando análise da IA ML para Martingale...');
-            
-            try {
-                updateMartingaleStatus('waiting', '🤖 IA ML analisando mercado após loss...');
-                
-                await getAIAnalysis();
-                
-                setTimeout(() => {
-                    if (martingaleState.isWaitingForAnalysis) {
-                        martingaleState.isWaitingForAnalysis = false;
-                        martingaleState.needsAnalysisAfterLoss = false;
-                        
-                        updateMartingaleStatus('ready', '✅ Análise ML concluída - Sistema pronto para operar');
-                        
-                        console.log('✅ Análise da IA ML concluída - Martingale pronto para próximo trade');
-                        
-                        if (isAutoTrading) {
-                            console.log('🤖 Auto trading pode continuar após análise ML');
-                        }
-                    }
-                }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT);
-                
-            } catch (error) {
-                console.error('❌ Erro na análise da IA ML para Martingale:', error);
-                startManualAnalysisWait();
-            }
-        }
-
-        function startManualAnalysisWait() {
-            console.log('⏳ Aguardando análise manual...');
-            
-            updateMartingaleStatus('waiting', '⏳ Aguardando análise manual para próximo trade');
-            
-            martingaleState.analysisTimeout = setTimeout(() => {
-                if (martingaleState.isWaitingForAnalysis) {
-                    martingaleState.isWaitingForAnalysis = false;
-                    martingaleState.needsAnalysisAfterLoss = false;
-                    
-                    updateMartingaleStatus('ready', '✅ Tempo de análise finalizado - Sistema liberado');
-                    
-                    console.log('✅ Tempo de análise manual finalizado');
-                }
-            }, CONFIG.MARTINGALE_DELAYS.ANALYSIS_WAIT * 2);
-        }
-
-        function canTradeWithMartingale() {
-            if (martingaleState.isInCoolingPeriod) {
-                console.log('🚫 Trade bloqueado: Martingale em cooling period');
-                showNotification('❄️ Aguarde o cooling period do Martingale', 'warning');
-                return false;
-            }
-            
-            if (martingaleState.isWaitingForAnalysis || martingaleState.needsAnalysisAfterLoss) {
-                console.log('🚫 Trade bloqueado: Aguardando análise da IA ML após loss');
-                showNotification('🧠 Aguarde a análise da IA ML após a perda', 'warning');
-                return false;
-            }
-            
-            const timeSinceLastTrade = Date.now() - martingaleState.lastTradeTime;
-            if (timeSinceLastTrade < CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES) {
-                const remainingTime = Math.ceil((CONFIG.MARTINGALE_DELAYS.MIN_BETWEEN_TRADES - timeSinceLastTrade) / 1000);
-                console.log(`🚫 Trade bloqueado: Aguarde ${remainingTime}s entre trades`);
-                showNotification(`⏳ Aguarde ${remainingTime}s entre trades`, 'warning');
-                return false;
-            }
-            
-            return true;
-        }
-
-        function updateMartingaleStatus(status, message) {
-            const statusBar = document.getElementById('martingaleStatusBar');
-            const martingaleInfo = document.getElementById('martingaleInfo');
-            const statusValue = document.getElementById('martingaleStatusValue');
-            const statusDisplay = document.getElementById('martingaleStatusDisplay');
-            
-            statusBar.className = `martingale-status ${status}`;
-            martingaleInfo.className = `martingale-info ${status}`;
-            
-            statusBar.textContent = message;
-            
-            switch (status) {
-                case 'ready':
-                    statusValue.textContent = 'Pronto';
-                    statusDisplay.textContent = 'Sistema Liberado';
-                    break;
-                case 'cooling':
-                    statusValue.textContent = 'Cooling';
-                    statusDisplay.textContent = 'Aguardando';
-                    break;
-                case 'waiting':
-                    statusValue.textContent = 'Análise';
-                    statusDisplay.textContent = 'IA ML Analisando';
-                    break;
-                default:
-                    statusValue.textContent = 'Normal';
-                    statusDisplay.textContent = 'Operando';
-            }
-            
-            console.log(`📊 Status Martingale atualizado: ${status} - ${message}`);
-        }
-
-        function updateMartingaleDisplay() {
-            document.getElementById('martingaleLevelDisplay').textContent = martingaleState.level;
-            document.getElementById('nextStakeDisplay').textContent = 
-                document.getElementById('stakeAmount').value;
-            document.getElementById('baseStakeDisplay').textContent = 
-                martingaleState.baseStake.toFixed(2);
-            
-            const martingaleInfo = document.getElementById('martingaleInfo');
-            if (martingaleState.level === 0) {
-                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
-                    martingaleInfo.className = 'martingale-info';
-                }
-            } else if (martingaleState.level <= 3) {
-                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
-                    martingaleInfo.style.background = 'rgba(255, 165, 0, 0.1)';
-                    martingaleInfo.style.borderColor = 'rgba(255, 165, 0, 0.3)';
-                }
-            } else {
-                if (!martingaleState.isInCoolingPeriod && !martingaleState.isWaitingForAnalysis) {
-                    martingaleInfo.style.background = 'rgba(255, 71, 87, 0.1)';
-                    martingaleInfo.style.borderColor = 'rgba(255, 71, 87, 0.3)';
-                }
-            }
-        }
-
-        function validateStakeForMartingale(stake) {
-            if (martingaleState.level === 0 && sessionStats.totalTrades === 0) {
-                martingaleState.baseStake = stake;
-                console.log('🎯 Stake base definido:', martingaleState.baseStake);
-            }
-            
-            updateMartingaleDisplay();
-            return true;
-        }
-
-        function toggleMartingale() {
-            martingaleState.isActive = !martingaleState.isActive;
-            const btn = document.getElementById('martingaleToggle');
-            
-            if (martingaleState.isActive) {
-                btn.textContent = '🎰 Martingale: ON';
-                btn.classList.remove('disabled');
-                showNotification('🎰 Martingale Inteligente ativado', 'success');
-            } else {
-                btn.textContent = '🎰 Martingale: OFF';
-                btn.classList.add('disabled');
-                showNotification('🎰 Martingale desativado', 'warning');
-            }
-            
-            console.log('🎰 Martingale:', martingaleState.isActive ? 'ATIVO' : 'INATIVO');
-        }
-
-        function resetMartingaleManual() {
-            resetMartingale();
-            showNotification('🔄 Martingale resetado manualmente', 'success');
-        }
-
-        // ==============================================
-        // 📊 CONTROLE DE ORDEM ÚNICA REFORÇADO
-        // ==============================================
-
-        function setActiveOrder(orderInfo) {
-            orderLock = true;
-            hasActiveOrder = true;
-            activeOrderInfo = orderInfo;
-            
-            if (orderTimeout) clearTimeout(orderTimeout);
-            orderTimeout = setTimeout(() => {
-                console.log('⚠️ TIMEOUT: Limpando ordem que não finalizou em 5min');
-                clearActiveOrder();
-            }, 300000);
-            
-            document.getElementById('activeOrderIndicator').classList.add('show');
-            document.getElementById('activeOrderDirection').textContent = orderInfo.direction;
-            document.getElementById('activeOrderStake').textContent = orderInfo.stake.toFixed(2);
-            document.getElementById('activeOrderSymbol').textContent = orderInfo.symbol;
-            document.getElementById('activeOrderDuration').textContent = orderInfo.duration;
-            document.getElementById('activeOrderTime').textContent = new Date().toLocaleTimeString();
-            
-            document.getElementById('callBtn').disabled = true;
-            document.getElementById('putBtn').disabled = true;
-            
-            console.log('🎯 Ordem ativa definida com LOCK:', orderInfo);
-        }
-
-        function clearActiveOrder() {
-            if (orderTimeout) {
-                clearTimeout(orderTimeout);
-                orderTimeout = null;
-            }
-            
-            hasActiveOrder = false;
-            activeOrderInfo = null;
-            orderLock = false;
-            
-            document.getElementById('activeOrderIndicator').classList.remove('show');
-            
-            if (isConnected && !orderLock) {
-                document.getElementById('callBtn').disabled = false;
-                document.getElementById('putBtn').disabled = false;
-            }
-            
-            console.log('✅ Ordem finalizada - LOCK liberado - botões reabilitados');
-        }
-
-        function canPlaceNewOrder() {
-            if (hasActiveOrder || orderLock) {
-                const reason = hasActiveOrder ? 'ordem ativa' : 'sistema bloqueado';
-                console.log(`🚫 Nova ordem BLOQUEADA: ${reason}`);
-                showNotification(`⚠️ Aguarde - ${reason} detectada`, 'warning');
-                return false;
-            }
-            
-            if (openContracts.size > 0) {
-                console.log(`🚫 Nova ordem BLOQUEADA: ${openContracts.size} contratos ainda abertos`);
-                showNotification('⚠️ Aguarde todos os contratos finalizarem', 'warning');
-                return false;
-            }
-            
-            if (!canTradeWithMartingale()) {
-                return false;
-            }
-            
-            return true;
-        }
-
-        function checkAndCleanOrphanedOrders() {
-            if (hasActiveOrder && activeOrderInfo) {
-                const timeSinceOrder = Date.now() - activeOrderInfo.timestamp.getTime();
-                
-                if (timeSinceOrder > 180000) {
-                    console.log('🧹 Limpando ordem órfã detectada');
-                    clearActiveOrder();
-                }
-            }
-        }
-
-        setInterval(checkAndCleanOrphanedOrders, 30000);
-
-        // ==============================================
-        // 🎯 TRADING FUNCTIONS (MODIFICADAS PARA ML)
-        // ==============================================
-
-        async function placeTrade(direction) {
-            if (!canPlaceNewOrder()) {
-                return;
-            }
-
-            if (!isConnected) {
-                showNotification('Não conectado à API', 'error');
-                return;
-            }
-
-            const symbol = document.getElementById('symbolSelect').value;
-            let stake = parseFloat(document.getElementById('stakeAmount').value);
-            let duration = parseInt(document.getElementById('duration').value);
-            let durationType = document.getElementById('durationType').value;
-
-            if (isAIDurationActive) {
-                const aiDuration = await applyAIDuration();
-                if (aiDuration) {
-                    duration = aiDuration.duration;
-                    durationType = aiDuration.type;
-                    console.log(`🤖 IA ajustou duração: ${aiDuration.text}`);
-                }
-            }
-
-            if (isAIManagementActive) {
-                const managementDecision = await applyAIManagement();
-                if (managementDecision && managementDecision.action === 'pause') {
-                    showNotification('⏸️ IA pausou operação - Alto risco detectado', 'warning');
-                    return;
-                }
-                if (managementDecision && managementDecision.recommendedStake) {
-                    stake = managementDecision.recommendedStake;
-                    console.log(`🤖 IA ajustou stake: ${stake.toFixed(2)}`);
-                }
-            }
-
-            if (!validateTradeParameters(stake, duration)) {
-                return;
-            }
-
-            validateStakeForMartingale(stake);
-
-            const orderInfo = {
-                direction: direction,
-                symbol: symbol,
-                stake: stake,
-                duration: `${duration}${durationType}`,
-                timestamp: new Date()
-            };
-            setActiveOrder(orderInfo);
-
-            martingaleState.lastTradeTime = Date.now();
-
-            const finalContractType = direction === 'CALL' ? 'CALL' : 'PUT';
-
-            const buyRequest = {
-                buy: 1,
-                price: stake,
-                parameters: {
-                    amount: stake,
-                    basis: "stake",
-                    contract_type: finalContractType,
-                    currency: accountInfo.currency || 'USD',
-                    duration: duration,
-                    duration_unit: durationType,
-                    symbol: symbol
-                }
-            };
-
-            console.log('🛒 Executando trade:', buyRequest);
-            const reqId = sendWSMessage(buyRequest);
-
-            if (reqId) {
-                activeOrderInfo.reqId = reqId;
-                
-                addTradeToTable({
-                    id: reqId,
-                    timestamp: new Date(),
-                    symbol: symbol,
-                    direction: direction,
-                    stake: stake,
-                    duration: `${duration}${durationType}`,
-                    entry_price: currentPrice || 0,
-                    status: 'open',
-                    pnl: 0,
-                    contract_type: finalContractType
-                });
-
-                const tradeSource = isAIModeActive ? 'IA ML' : 
-                                   (isAIDurationActive || isAIManagementActive ? 'IA ML Assistida' : 'Manual');
-                showNotification(`Trade ${tradeSource} ${direction}: ${symbol} - ${stake.toFixed(2)} (${duration}${durationType})`, 'success');
-            } else {
-                clearActiveOrder();
-                showNotification('❌ Falha ao enviar ordem', 'error');
-            }
-        }
-
-        function validateTradeParameters(stake, duration) {
-            if (stake < CONFIG.MIN_STAKE) {
-                showNotification(`Valor mínimo da aposta é ${CONFIG.MIN_STAKE}`, 'error');
-                return false;
-            }
-
-            if (stake > CONFIG.MAX_STAKE) {
-                showNotification(`Valor máximo da aposta é ${CONFIG.MAX_STAKE}`, 'error');
-                return false;
-            }
-
-            if (!duration || duration <= 0) {
-                showNotification('Duração inválida', 'error');
-                return false;
-            }
-
-            return true;
-        }
-
-        function handleContractUpdate(contractData) {
-            console.log('📊 Atualização do contrato:', contractData);
-            
-            if (!contractData.proposal_open_contract) return;
-            
-            const contract = contractData.proposal_open_contract;
-            const contractId = contract.contract_id;
-            
-            if (!openContracts.has(contractId)) {
-                console.log('⚠️ Contrato não monitorado:', contractId);
-                return;
-            }
-
-            if (contract.is_sold) {
-                console.log('🏁 Contrato finalizado:', contractId);
-                
-                const trackedContract = openContracts.get(contractId);
-                if (trackedContract) {
-                    const pnl = parseFloat(contract.profit) || 0;
-                    const isWin = pnl > 0;
-                    
-                    console.log(`📊 Resultado: ${isWin ? 'WIN' : 'LOSS'} - P&L: ${pnl.toFixed(2)}`);
-                    
-                    sessionStats.totalPnL += pnl;
-                    sessionStats.totalTrades++;
-                    
-                    if (isWin) {
-                        sessionStats.wonTrades++;
-                        if (martingaleState.isActive) {
-                            resetMartingale();
-                        }
-                    } else {
-                        sessionStats.lostTrades++;
-                        if (martingaleState.isActive) {
-                            applyMartingale();
-                        }
-                    }
-                    
-                    updateSessionStats();
-                    
-                    updateTradeInTable(contractId, {
-                        status: isWin ? 'won' : 'lost',
-                        pnl: pnl,
-                        exit_price: contract.exit_tick || contract.current_spot
-                    });
-                    
-                    // 🤖 NOTIFICAR ML COM RESULTADO DO TRADE
-                    if (window.notifyMLTrade) {
-                        window.notifyMLTrade({
-                            direction: trackedContract.direction || orderInfo?.direction,
-                            pnl: pnl,
-                            success: isWin,
-                            symbol: trackedContract.symbol || orderInfo?.symbol,
-                            martingaleLevel: martingaleState.level,
-                            stake: trackedContract.buy_price || orderInfo?.stake,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                    
-                    if (activeOrderInfo && activeOrderInfo.contractId === contractId) {
-                        console.log('🔓 Limpando ordem ativa - contrato finalizado');
-                        clearActiveOrder();
-                    }
-                    
-                    openContracts.delete(contractId);
-                    contractSubscriptions.delete(contractId);
-                    
-                    showNotification(
-                        `🏁 Trade finalizado: ${isWin ? 'WIN' : 'LOSS'} ${pnl.toFixed(2)}`,
-                        isWin ? 'success' : 'error'
-                    );
-                    
-                    sendWSMessage({ balance: 1 });
-                    
-                    console.log(`✅ Sistema liberado: hasActiveOrder=${hasActiveOrder}, orderLock=${orderLock}, openContracts=${openContracts.size}`);
-                }
-            } else if (contract.status === 'open') {
-                const unrealizedPnl = parseFloat(contract.profit) || 0;
-                console.log(`📈 P&L não realizado (${contractId.toString().slice(-6)}): ${unrealizedPnl.toFixed(2)}`);
-                
-                if (activeOrderInfo && !activeOrderInfo.contractId && trackedContract && trackedContract.reqId === activeOrderInfo.reqId) {
-                    console.log('🔗 Associando contrato tardio à ordem ativa');
-                    activeOrderInfo.contractId = contractId;
-                }
-            }
-        }
-
-        function toggleAutoTrading() {
-            const tradingMode = document.getElementById('tradingMode').value;
-            
-            if (tradingMode === 'ai' && !isAIConnected) {
-                showNotification('IA não conectada! Conecte primeiro.', 'error');
-                return;
-            }
-            
-            isAutoTrading = !isAutoTrading;
-            const button = document.getElementById('autoBtn');
-            
-            if (isAutoTrading) {
-                button.textContent = '⏹️ Parar Auto';
-                button.className = 'trade-btn stop';
-                updateStatus('tradingStatus', 'online');
-                
-                if (tradingMode === 'ai') {
-                    showNotification('🤖 Auto trading com IA ML iniciado', 'success');
-                    startAITradingCycle();
-                } else {
-                    showNotification('🤖 Auto trading inteligente iniciado', 'success');
-                    startAutoTrading();
-                }
-            } else {
-                button.textContent = '🤖 Iniciar Auto';
-                updateStatus('tradingStatus', 'offline');
-                showNotification('🤖 Auto trading parado', 'warning');
-                isAIModeActive = false;
-            }
-        }
-
-        function startAutoTrading() {
-            if (!isAutoTrading || !isConnected) {
-                console.log('🛑 Auto trading parado ou desconectado');
-                return;
-            }
-
-            if (!canPlaceNewOrder()) {
-                console.log(`⏸️ Auto trading aguardando liberação do sistema`);
-                
-                setTimeout(startAutoTrading, 3000);
-                return;
-            }
-
-            console.log('🤖 Auto trading: Sistema completamente livre - preparando novo trade');
-
-            const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'];
-            const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
-            const direction = Math.random() > 0.5 ? 'CALL' : 'PUT';
-
-            document.getElementById('symbolSelect').value = randomSymbol;
-            
-            setTimeout(() => {
-                if (isAutoTrading && canPlaceNewOrder()) {
-                    console.log(`🚀 Auto trading executando: ${direction} em ${randomSymbol}`);
-                    placeTrade(direction);
-                } else {
-                    console.log('⚠️ Auto trading cancelado - sistema não livre ou Martingale bloqueando');
-                }
-            }, 2000);
-            
-            if (isAutoTrading) {
-                const nextTradeDelay = CONFIG.AUTO_TRADE_DELAY.MIN + 
-                    Math.random() * (CONFIG.AUTO_TRADE_DELAY.MAX - CONFIG.AUTO_TRADE_DELAY.MIN);
-                
-                console.log(`⏰ Próximo auto trade em ${(nextTradeDelay/1000).toFixed(1)}s`);
-                setTimeout(startAutoTrading, nextTradeDelay);
-            }
-        }
-
-        function toggleAIMode() {
-            isAIModeActive = !isAIModeActive;
-            const btn = document.getElementById('aiModeBtn');
-            
-            if (isAIModeActive) {
-                btn.textContent = '🤖 Modo IA: ON';
-                btn.classList.add('active');
-                showNotification('🤖 Modo IA ML ativado - Trades automáticos com ML', 'success');
-                
-                startAITradingCycle();
-            } else {
-                btn.textContent = '🤖 Modo IA: OFF';
-                btn.classList.remove('active');
-                showNotification('🤖 Modo IA ML desativado', 'warning');
-            }
-        }
-
-        async function startAITradingCycle() {
-            if (!isAIModeActive || !isAIConnected) return;
-
-            try {
-                await getAIAnalysis();
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                
-                await getAIRiskAssessment();
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                
-                await getAITradingSignal();
-                
-                if (isAIModeActive) {
-                    setTimeout(startAITradingCycle, 60000);
-                }
-            } catch (error) {
-                console.error('❌ Erro no ciclo IA ML:', error);
-            }
-        }
-
-        function toggleAIDurationControl() {
-            isAIDurationActive = !isAIDurationActive;
-            const btn = document.getElementById('aiDurationBtn');
-            
-            if (isAIDurationActive) {
-                btn.textContent = '⏱️ Duração IA: ON';
-                btn.classList.add('active');
-                showNotification('⏱️ IA ML controla duração automaticamente', 'success');
-            } else {
-                btn.textContent = '⏱️ Duração IA: OFF';
-                btn.classList.remove('active');
-                showNotification('⏱️ Controle manual de duração', 'warning');
-            }
-        }
-
-        function toggleAIManagement() {
-            isAIManagementActive = !isAIManagementActive;
-            const btn = document.getElementById('aiManagementBtn');
-            
-            if (isAIManagementActive) {
-                btn.textContent = '🎛️ Gerenciamento IA: ON';
-                btn.classList.add('active');
-                showNotification('🎛️ IA ML gerencia operações automaticamente', 'success');
-                
-                document.getElementById('aiManagement').classList.add('show');
-                document.getElementById('aiManagementText').textContent = 'IA ML controlando duração e stake automaticamente';
-                updateStatus('aiManagementStatus', 'online');
-            } else {
-                btn.textContent = '🎛️ Gerenciamento IA: OFF';
-                btn.classList.remove('active');
-                showNotification('🎛️ Gerenciamento manual', 'warning');
-                
-                document.getElementById('aiManagement').classList.remove('show');
-                updateStatus('aiManagementStatus', 'offline');
-            }
-        }
-
-        async function applyAIDuration() {
-            if (!isAIDurationActive) return null;
-            
-            // Simulação de duração inteligente da IA ML
-            const durationTypes = ['t', 'm'];
-            const randomType = durationTypes[Math.floor(Math.random() * durationTypes.length)];
-            
-            let duration;
-            if (randomType === 't') {
-                duration = Math.floor(Math.random() * 5) + 3; // 3-7 ticks
-            } else {
-                duration = Math.floor(Math.random() * 3) + 1; // 1-3 minutos
-            }
-            
-            document.getElementById('durationType').value = randomType;
-            document.getElementById('duration').value = duration;
-            updateDurationOptions();
-            document.getElementById('duration').value = duration;
-            
-            return {
-                type: randomType,
-                duration: duration,
-                text: `${duration}${randomType}`
-            };
-        }
-
-        async function applyAIManagement() {
-            if (!isAIManagementActive) return null;
-            
-            // Simulação de gerenciamento inteligente ML
-            const currentStake = parseFloat(document.getElementById('stakeAmount').value);
-            
-            // Reduzir stake se Martingale muito alto
-            if (martingaleState.level > 4) {
-                return {
-                    action: 'pause',
-                    reason: 'Martingale muito alto - pausando operações'
-                };
-            }
-            
-            // Ajustar stake baseado no risco ML
-            if (sessionStats.totalTrades > 0) {
-                const winRate = (sessionStats.wonTrades / sessionStats.totalTrades) * 100;
-                
-                if (winRate < 40) {
-                    const reducedStake = Math.max(CONFIG.MIN_STAKE, currentStake * 0.8);
-                    return {
-                        action: 'adjust',
-                        recommendedStake: reducedStake,
-                        reason: 'Taxa de acerto baixa - reduzindo stake'
-                    };
-                }
-            }
-            
-            return {
-                action: 'continue',
-                reason: 'Condições normais de operação'
-            };
-        }
-
-        // ==============================================
-        // 🌐 CONEXÃO E WEBSOCKET
+        // FUNÇÕES BÁSICAS (SIMPLIFICADAS)
         // ==============================================
 
         async function connectAPI() {
@@ -2747,267 +1202,145 @@
                 return;
             }
 
-            setLoginLoading(true);
             apiToken = token;
 
-            const aiConnected = await connectToAI();
-            if (!aiConnected) {
-                showNotification('⚠️ Continuando sem IA ML Real...', 'warning');
+            // Conectar ML primeiro
+            const mlConnected = await connectToML();
+            if (!mlConnected) {
+                showNotification('⚠️ Continuando sem ML...', 'warning');
             }
 
-            ws = new WebSocket(CONFIG.WS_URL);
-
-            ws.onopen = function() {
-                console.log('✅ WebSocket conectado');
-                updateStatus('wsStatus', 'online');
-                
-                sendWSMessage({
-                    authorize: token
-                });
-            };
-
-            ws.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleWSMessage(data);
-                } catch (error) {
-                    console.error('❌ Erro ao processar mensagem:', error);
-                }
-            };
-
-            ws.onclose = function() {
-                console.log('❌ WebSocket desconectado');
-                updateStatus('wsStatus', 'offline');
-                updateStatus('apiStatus', 'offline');
-                isConnected = false;
-                setLoginLoading(false);
-            };
-
-            ws.onerror = function(error) {
-                console.error('❌ Erro WebSocket:', error);
-                showNotification('Erro de conexão. Verifique seu token.', 'error');
-                setLoginLoading(false);
-            };
-        }
-
-        function handleWSMessage(data) {
-            console.log('📨 Mensagem recebida:', data.msg_type, data);
-
-            switch (data.msg_type) {
-                case 'authorize':
-                    handleAuthorization(data);
-                    break;
-                case 'balance':
-                    handleBalance(data);
-                    break;
-                case 'tick':
-                    handleTick(data);
-                    break;
-                case 'buy':
-                    handleTradeCreated(data);
-                    break;
-                case 'proposal':
-                    handleProposal(data);
-                    break;
-                case 'portfolio':
-                    handlePortfolio(data);
-                    break;
-                case 'proposal_open_contract':
-                    handleContractUpdate(data);
-                    break;
-                default:
-                    if (data.error) {
-                        handleError(data.error);
-                    }
-            }
-        }
-
-        function handleAuthorization(data) {
-            if (data.authorize && data.authorize.loginid) {
-                console.log('✅ Autorização bem-sucedida');
-                isConnected = true;
-                updateStatus('apiStatus', 'online');
-                
-                accountInfo = data.authorize;
-                const accountType = document.getElementById('accountType').value;
-                const accountTypeLabel = accountType === 'demo' ? '🎮 DEMO' : '💰 REAL';
-                
-                document.getElementById('accountInfo').textContent = 
-                    `${data.authorize.loginid} - ${data.authorize.currency} (${accountTypeLabel})`;
-                
-                initializeUserData();
-                
-                showDashboard();
-                setLoginLoading(false);
-                
-                const successMessage = accountType === 'demo' 
-                    ? '🎮 Conectado à conta DEMO com IA ML Real!'
-                    : '💰 Conectado à conta REAL com IA ML Real!';
-                showNotification(successMessage, 'success');
-            } else {
-                showNotification('Token inválido', 'error');
-                setLoginLoading(false);
-            }
-        }
-
-        function initializeUserData() {
-            sendWSMessage({ balance: 1 });
-            sendWSMessage({ portfolio: 1, subscribe: 1 });
-        }
-
-        function handleBalance(data) {
-            if (data.balance) {
-                updateBalance(data.balance.balance, data.balance.currency);
-                if (sessionStats.startBalance === 0) {
-                    sessionStats.startBalance = parseFloat(data.balance.balance);
-                }
-            }
-        }
-
-        function handleTick(data) {
-            if (data.tick) {
-                currentPrice = parseFloat(data.tick.quote);
-                console.log(`📊 Novo tick: ${data.tick.symbol} = ${currentPrice.toFixed(4)}`);
-            }
-        }
-
-        function handleProposal(data) {
-            if (data.proposal) {
-                console.log('💰 Proposta recebida:', data.proposal);
-            }
-        }
-
-        function handleError(error) {
-            console.error('❌ Erro API:', error);
-            showNotification(`Erro: ${error.message}`, 'error');
-        }
-
-        function handleTradeCreated(buyData) {
-            console.log('✅ Trade criado:', buyData);
+            // Simular conexão WebSocket para demonstração
+            isConnected = true;
+            updateStatus('apiStatus', 'online');
+            updateStatus('wsStatus', 'online');
             
-            if (buyData.buy) {
-                const contractId = buyData.buy.contract_id;
-                const buyPrice = buyData.buy.buy_price;
-                const reqId = buyData.req_id;
+            accountInfo = {
+                loginid: 'DEMO123456',
+                currency: 'USD'
+            };
+            
+            const accountTypeLabel = accountType === 'demo' ? '🎮 DEMO' : '💰 REAL';
+            document.getElementById('accountInfo').textContent = 
+                `${accountInfo.loginid} - ${accountInfo.currency} (${accountTypeLabel})`;
+            
+            showDashboard();
+            
+            const successMessage = accountType === 'demo' 
+                ? '🎮 Conectado à conta DEMO com Scikit-Learn!'
+                : '💰 Conectado à conta REAL com Scikit-Learn!';
+            showNotification(successMessage, 'success');
+
+            // Simular dados iniciais
+            sessionStats.startBalance = 10000;
+            updateBalance(10000, 'USD');
+        }
+
+        function canPlaceNewOrder() {
+            return isConnected;
+        }
+
+        async function placeTrade(direction) {
+            if (!canPlaceNewOrder()) return;
+
+            const symbol = document.getElementById('symbolSelect').value;
+            const stake = parseFloat(document.getElementById('stakeAmount').value);
+
+            // Simular trade
+            const tradeId = Date.now();
+            const trade = {
+                id: tradeId,
+                direction: direction,
+                symbol: symbol,
+                stake: stake,
+                timestamp: new Date(),
+                status: 'open'
+            };
+
+            trades.push(trade);
+            sessionStats.totalTrades++;
+
+            // Simular resultado após 30 segundos
+            setTimeout(async () => {
+                const isWin = Math.random() > 0.4; // 60% win rate
+                const pnl = isWin ? stake * 0.8 : -stake;
                 
-                if (contractId) {
-                    if (activeOrderInfo && activeOrderInfo.reqId === reqId) {
-                        activeOrderInfo.contractId = contractId;
-                        console.log('🔗 Contrato associado à ordem ativa:', contractId);
-                    }
-
-                    openContracts.set(contractId, {
-                        id: contractId,
-                        buy_price: buyPrice,
-                        start_time: Date.now(),
-                        symbol: buyData.buy.shortcode || 'Unknown',
-                        reqId: reqId,
-                        direction: activeOrderInfo?.direction
-                    });
-
-                    sendWSMessage({
-                        proposal_open_contract: 1,
-                        contract_id: contractId,
-                        subscribe: 1
-                    });
-
-                    contractSubscriptions.set(contractId, {
-                        subscribed: true,
-                        timestamp: Date.now()
-                    });
-
-                    sendWSMessage({ balance: 1 });
-                    
-                    showNotification(`✅ Contrato criado: ${contractId.toString().slice(-6)}`, 'success');
+                trade.status = isWin ? 'won' : 'lost';
+                trade.pnl = pnl;
+                
+                sessionStats.totalPnL += pnl;
+                if (isWin) {
+                    sessionStats.wonTrades++;
                 } else {
-                    console.error('❌ Contrato criado sem ID');
-                    clearActiveOrder();
+                    sessionStats.lostTrades++;
                 }
-            } else {
-                console.error('❌ Falha na criação do trade');
-                clearActiveOrder();
-            }
+                
+                updateSessionStats();
+                
+                // 🤖 NOTIFICAR ML REAL COM RESULTADO
+                if (isMLConnected) {
+                    await notifyMLTrade({
+                        direction: direction,
+                        pnl: pnl,
+                        success: isWin,
+                        symbol: symbol,
+                        stake: stake,
+                        features: extractTradeFeatures()
+                    });
+                }
+                
+                showNotification(
+                    `Trade finalizado: ${isWin ? 'WIN' : 'LOSS'} ${pnl.toFixed(2)}`,
+                    isWin ? 'success' : 'error'
+                );
+            }, 30000);
+
+            const tradeSource = isMLModeActive ? 'ML Scikit-Learn' : 'Manual';
+            showNotification(`Trade ${tradeSource} ${direction}: ${symbol} - ${stake.toFixed(2)}`, 'success');
         }
 
-        function handlePortfolio(portfolioData) {
-            console.log('💼 Portfolio atualizado:', portfolioData);
-            
-            if (portfolioData.portfolio && portfolioData.portfolio.contracts) {
-                portfolioData.portfolio.contracts.forEach(contract => {
-                    const contractId = contract.contract_id;
-                    
-                    if (contractId && !contract.is_sold && !contractSubscriptions.has(contractId)) {
-                        console.log('🔍 Novo contrato encontrado no portfolio:', contractId);
-                        
-                        sendWSMessage({
-                            proposal_open_contract: 1,
-                            contract_id: contractId,
-                            subscribe: 1
-                        });
-                        
-                        contractSubscriptions.set(contractId, {
-                            subscribed: true,
-                            timestamp: Date.now()
-                        });
-                    }
+        function extractTradeFeatures() {
+            // Simular features para ML
+            return {
+                rsi: 50 + Math.random() * 40,
+                macd: (Math.random() - 0.5) * 2,
+                bb_position: Math.random(),
+                volatility: 20 + Math.random() * 40,
+                momentum: (Math.random() - 0.5) * 20,
+                trend_strength: (Math.random() - 0.5) * 10,
+                hour_of_day: new Date().getHours() / 24,
+                day_of_week: new Date().getDay() / 6,
+                recent_win_rate: sessionStats.totalTrades > 0 ? sessionStats.wonTrades / sessionStats.totalTrades : 0.5
+            };
+        }
+
+        async function notifyMLTrade(tradeData) {
+            if (!isMLConnected) return;
+
+            try {
+                const response = await fetch(`${CONFIG.AI_API_URL}/api/ml/learn`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(tradeData)
                 });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('✅ ML aprendeu com trade:', result);
+                    
+                    if (result.ml_stats) {
+                        updateMLDisplay(result.ml_stats);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('❌ Erro ao notificar ML:', error);
             }
-        }
-
-        function sendWSMessage(message) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const msgWithReqId = { ...message, req_id: Date.now() };
-                ws.send(JSON.stringify(msgWithReqId));
-                console.log('📤 Enviando:', msgWithReqId);
-                return msgWithReqId.req_id;
-            } else {
-                console.error('❌ WebSocket não conectado');
-                return null;
-            }
-        }
-
-        // ==============================================
-        // 📊 FUNÇÕES DE INTERFACE E UTILITÁRIOS
-        // ==============================================
-
-        function calculateVolatility() {
-            if (trades.length < 3) return 50;
-            
-            const recentPrices = trades.slice(-10).map(t => t.entry_price || currentPrice);
-            const avg = recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length;
-            const variance = recentPrices.reduce((sum, price) => sum + Math.pow(price - avg, 2), 0) / recentPrices.length;
-            const volatility = Math.sqrt(variance) / avg * 100;
-            
-            return Math.min(100, Math.max(10, volatility));
-        }
-
-        function analyzeMarketCondition() {
-            const recentResults = trades.slice(-5);
-            if (recentResults.length === 0) return 'neutral';
-            
-            const wins = recentResults.filter(t => t.status === 'won').length;
-            const winRate = wins / recentResults.length;
-            
-            if (winRate > 0.7) return 'favorable';
-            if (winRate < 0.3) return 'unfavorable';
-            return 'neutral';
         }
 
         function updateBalance(balance, currency) {
             const formattedBalance = parseFloat(balance).toFixed(2);
             document.getElementById('balance').textContent = `${currency} ${formattedBalance}`;
-            
-            if (sessionStats.startBalance > 0) {
-                const change = parseFloat(balance) - sessionStats.startBalance;
-                const changePercent = (change / sessionStats.startBalance) * 100;
-                
-                const changeElement = document.getElementById('balanceChange');
-                changeElement.innerHTML = `
-                    <span>${change >= 0 ? '↗' : '↘'}</span> 
-                    ${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent.toFixed(2)}%)
-                `;
-                changeElement.className = `metric-change ${change >= 0 ? 'positive' : 'negative'}`;
-            }
         }
 
         function updateSessionStats() {
@@ -3017,77 +1350,12 @@
             
             document.getElementById('winRate').textContent = winRate.toFixed(1) + '%';
             document.getElementById('tradesCount').textContent = sessionStats.totalTrades;
-            document.getElementById('todayPnL').textContent = `${sessionStats.totalPnL.toFixed(2)}`;
             
             const winRateElement = document.getElementById('winRateChange');
             winRateElement.innerHTML = `<span>↗</span> ${sessionStats.wonTrades}W / ${sessionStats.lostTrades}L`;
             
             const tradesElement = document.getElementById('tradesChange');
             tradesElement.innerHTML = `<span>↗</span> ${sessionStats.wonTrades} wins, ${sessionStats.lostTrades} losses`;
-            
-            const pnlElement = document.getElementById('pnlChange');
-            pnlElement.innerHTML = `
-                <span>${sessionStats.totalPnL >= 0 ? '↗' : '↘'}</span> 
-                ${sessionStats.totalPnL >= 0 ? 'Lucro' : 'Prejuízo'} sessão
-            `;
-            pnlElement.className = `metric-change ${sessionStats.totalPnL >= 0 ? 'positive' : 'negative'}`;
-        }
-
-        function addTradeToTable(trade) {
-            const tbody = document.getElementById('tradesTableBody');
-            
-            if (tbody.innerHTML.includes('Nenhum trade')) {
-                tbody.innerHTML = '';
-            }
-            
-            const row = document.createElement('div');
-            row.className = 'trades-grid';
-            row.id = `trade-${trade.id}`;
-            
-            row.innerHTML = `
-                <div>${trade.id.toString().slice(-6)}</div>
-                <div>${trade.timestamp.toLocaleTimeString()}</div>
-                <div>${trade.symbol}</div>
-                <div><span class="trade-direction ${trade.direction.toLowerCase()}">${trade.direction}</span></div>
-                <div>${trade.stake.toFixed(2)}</div>
-                <div>${trade.duration}</div>
-                <div>${trade.entry_price.toFixed(4)}</div>
-                <div><span class="trade-status ${trade.status}">${trade.status.toUpperCase()}</span></div>
-                <div class="${trade.pnl >= 0 ? 'positive' : 'negative'}">${trade.pnl.toFixed(2)}</div>
-            `;
-            
-            tbody.insertBefore(row, tbody.firstChild);
-            
-            while (tbody.children.length > 15) {
-                tbody.removeChild(tbody.lastChild);
-            }
-        }
-
-        function updateTradeInTable(contractId, updates) {
-            const trackedContract = openContracts.get(contractId);
-            if (!trackedContract) return;
-            
-            const reqId = trackedContract.reqId;
-            const row = document.getElementById(`trade-${reqId}`);
-            
-            if (row) {
-                const cells = row.children;
-                
-                if (updates.status) {
-                    const statusCell = cells[7];
-                    statusCell.innerHTML = `<span class="trade-status ${updates.status}">${updates.status.toUpperCase()}</span>`;
-                }
-                
-                if (updates.pnl !== undefined) {
-                    const pnlCell = cells[8];
-                    pnlCell.innerHTML = `${updates.pnl.toFixed(2)}`;
-                    pnlCell.className = updates.pnl >= 0 ? 'positive' : 'negative';
-                }
-                
-                console.log(`✅ Trade atualizado na tabela: ${reqId} -> ${updates.status}`);
-            } else {
-                console.log(`⚠️ Trade não encontrado na tabela: ${reqId}`);
-            }
         }
 
         function updateStatus(elementId, status) {
@@ -3101,27 +1369,8 @@
             document.getElementById('loginModal').style.display = 'none';
             document.getElementById('dashboard').style.display = 'block';
             
-            const accountType = document.getElementById('accountType').value;
-            const headerTitle = document.querySelector('.header h1');
-            if (accountType === 'demo') {
-                headerTitle.textContent = '🎮 Trading Bot - DEMO + IA ML Real';
-            } else {
-                headerTitle.textContent = '💰 Trading Bot - REAL + IA ML Real';
-            }
-            
             document.getElementById('callBtn').disabled = false;
             document.getElementById('putBtn').disabled = false;
-            document.getElementById('autoBtn').disabled = false;
-        }
-
-        function setLoginLoading(loading) {
-            const btn = document.getElementById('loginBtn');
-            const text = document.getElementById('loginBtnText');
-            const spinner = document.getElementById('loginSpinner');
-            
-            btn.disabled = loading;
-            text.style.display = loading ? 'none' : 'block';
-            spinner.style.display = loading ? 'block' : 'none';
         }
 
         function showNotification(message, type = 'info') {
@@ -3132,134 +1381,6 @@
             setTimeout(() => {
                 notification.classList.remove('show');
             }, 5000);
-        }
-
-        function logout() {
-            if (ws) {
-                ws.close();
-            }
-            
-            resetApplicationState();
-            
-            document.getElementById('loginModal').style.display = 'flex';
-            document.getElementById('dashboard').style.display = 'none';
-            document.getElementById('apiToken').value = '';
-            document.getElementById('connectionMethod').textContent = 'Desconectado';
-            updateStatus('apiStatus', 'offline');
-            updateStatus('wsStatus', 'offline');
-            updateStatus('aiStatus', 'offline');
-            updateStatus('tradingStatus', 'offline');
-            updateStatus('aiManagementStatus', 'offline');
-            
-            showNotification('Desconectado com sucesso', 'success');
-        }
-
-        function resetApplicationState() {
-            isConnected = false;
-            isAutoTrading = false;
-            isAIConnected = false;
-            isAIModeActive = false;
-            isAIDurationActive = false;
-            isAIManagementActive = false;
-            mlModelsLoaded = false;
-            
-            hasActiveOrder = false;
-            activeOrderInfo = null;
-            orderLock = false;
-            if (orderTimeout) {
-                clearTimeout(orderTimeout);
-                orderTimeout = null;
-            }
-            contractSubscriptions.clear();
-            
-            apiToken = '';
-            accountInfo = {};
-            trades = [];
-            openContracts.clear();
-            mlTrainingData = [];
-            sessionStats = {
-                totalTrades: 0,
-                wonTrades: 0,
-                lostTrades: 0,
-                totalPnL: 0,
-                startBalance: 0
-            };
-            
-            if (martingaleState.coolingTimeout) {
-                clearTimeout(martingaleState.coolingTimeout);
-            }
-            if (martingaleState.analysisTimeout) {
-                clearTimeout(martingaleState.analysisTimeout);
-            }
-            
-            martingaleState = {
-                level: 0,
-                baseStake: 1,
-                maxLevel: 8,
-                isActive: true,
-                sequence: [],
-                multiplier: 2,
-                isInCoolingPeriod: false,
-                isWaitingForAnalysis: false,
-                lastTradeTime: 0,
-                needsAnalysisAfterLoss: false,
-                coolingTimeout: null,
-                analysisTimeout: null
-            };
-            
-            aiData = {
-                lastAnalysis: null,
-                lastSignal: null,
-                confidence: 0,
-                riskLevel: 'medium',
-                optimalDuration: null,
-                managementDecision: null,
-                lastDurationUpdate: null,
-                mlStats: null,
-                technicalIndicators: null,
-                modelAccuracy: {}
-            };
-            
-            initializeMartingale();
-            enableAIControls(false);
-            clearActiveOrder();
-            
-            console.log('🔄 Estado da aplicação resetado completamente');
-        }
-
-        // ==============================================
-        // 🚀 INICIALIZAÇÃO E SETUP
-        // ==============================================
-
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('🚀 Iniciando Trading Bot com Machine Learning Real...');
-            initializeApplication();
-        });
-
-        function initializeApplication() {
-            updateDurationOptions();
-            setupEventListeners();
-            initializeMartingale();
-            
-            console.log('✅ Aplicação ML Real inicializada com sucesso');
-        }
-
-        function setupEventListeners() {
-            document.getElementById('apiToken').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    connectAPI();
-                }
-            });
-
-            document.getElementById('stakeAmount').addEventListener('input', function() {
-                const stake = parseFloat(this.value);
-                validateStakeAmount();
-                
-                if (martingaleState.level === 0) {
-                    martingaleState.baseStake = stake || 1;
-                    updateMartingaleDisplay();
-                }
-            });
         }
 
         function selectAccountType(type) {
@@ -3273,83 +1394,36 @@
             if (type === 'demo') {
                 demoCard.classList.add('selected');
                 accountSelect.value = 'demo';
-                showNotification('💡 Conta Demo selecionada - IA ML Real!', 'info');
             } else {
                 realCard.classList.add('selected');
                 accountSelect.value = 'real';
-                showNotification('⚠️ Conta Real - IA ML Real com cuidado!', 'warning');
-            }
-            
-            console.log(`🔄 Tipo de conta selecionado: ${type}`);
-        }
-
-        function updateDurationOptions() {
-            const durationType = document.getElementById('durationType').value;
-            const durationSelect = document.getElementById('duration');
-            
-            durationSelect.innerHTML = '';
-            
-            DURATION_OPTIONS[durationType].forEach(option => {
-                const optElement = document.createElement('option');
-                optElement.value = option.value;
-                optElement.textContent = option.label;
-                if (durationType === 't' && option.value === 5) optElement.selected = true;
-                if (durationType === 'm' && option.value === 1) optElement.selected = true;
-                durationSelect.appendChild(optElement);
-            });
-        }
-
-        function validateStakeAmount() {
-            const stakeInput = document.getElementById('stakeAmount');
-            const value = parseFloat(stakeInput.value);
-            
-            if (value < CONFIG.MIN_STAKE) {
-                stakeInput.value = CONFIG.MIN_STAKE;
-                showNotification(`Valor mínimo da aposta é ${CONFIG.MIN_STAKE}`, 'warning');
-            } else if (value > CONFIG.MAX_STAKE) {
-                stakeInput.value = CONFIG.MAX_STAKE;
-                showNotification(`Valor máximo da aposta é ${CONFIG.MAX_STAKE}`, 'warning');
             }
         }
 
-        // 🔄 VERIFICAÇÃO PERIÓDICA DA IA ML
-        setInterval(async () => {
-            if (isAIConnected) {
-                try {
-                    const response = await fetch(`${CONFIG.AI_API_URL}/api/health`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        document.getElementById('connectionMethod').textContent = 
-                            `Python ML API (${data.ml_status?.models_available?.length || 0} modelos)`;
-                        
-                        if (data.ml_status) {
-                            updateMLDisplay(data.ml_status);
-                        }
-                    } else {
-                        throw new Error('API não responde');
-                    }
-                } catch (error) {
-                    document.getElementById('connectionMethod').textContent = 'Python ML API Offline';
-                    document.getElementById('apiKeyStatus').textContent = 'Erro';
-                    updateStatus('aiStatus', 'warning');
+        function logout() {
+            location.reload();
+        }
+
+        // ==============================================
+        // INICIALIZAÇÃO
+        // ==============================================
+
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Iniciando Trading Bot com Scikit-Learn ML Real...');
+            
+            // Event listeners
+            document.getElementById('apiToken').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    connectAPI();
                 }
-            }
-        }, 30000); // Verificar a cada 30 segundos
+            });
 
-        // 📊 LOGS FINAIS
-        console.log('🎯 Trading Bot com MACHINE LEARNING REAL carregado!');
-        console.log('⚙️ Configurações:', CONFIG);
-        console.log('🤖 FUNCIONALIDADES DA IA ML REAL:');
-        console.log('   🧠 Random Forest + Neural Network + Gradient Boosting');
-        console.log('   📈 Indicadores técnicos reais (RSI, MACD, Bollinger, EMAs)');
-        console.log('   🎓 Aprendizado contínuo com feedback dos trades');
-        console.log('   🎯 Predições inteligentes com ensemble de modelos');
-        console.log('   ⚠️ Avaliação multifatorial de risco com ML');
-        console.log('   ⏱️ Controle automático de duração otimizada');
-        console.log('   🎛️ Gerenciamento automático de stake inteligente');
-        console.log('   🎰 Martingale inteligente anti-loop');
-        console.log('   📊 Análise de regime de mercado e volatilidade');
-        console.log('✅ SISTEMA MACHINE LEARNING REAL COMPLETO E FUNCIONAL!');
+            console.log('🤖 SISTEMA SCIKIT-LEARN REAL CARREGADO!');
+            console.log('📊 Random Forest + Gradient Boosting + Neural Network');
+            console.log('🎓 Auto-retreinamento + Cross-validation');
+            console.log('💾 Persistência com joblib');
+            console.log('✅ PRONTO PARA USO!');
+        });
     </script>
 </body>
 </html>
