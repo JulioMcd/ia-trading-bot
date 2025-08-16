@@ -1,23 +1,14 @@
-# 🤖 TRADING BOT - MACHINE LEARNING REAL
-# Dependencies para Scikit-Learn e ML Real no Render
 
 # Flask básico
 Flask==2.3.3
 Flask-CORS==4.0.0
 gunicorn==21.2.0
 Werkzeug==2.3.7
-
-# 🤖 MACHINE LEARNING REAL - Versões estáveis para Render
 numpy==1.24.4
 pandas==2.0.3
 scikit-learn==1.3.2
 joblib==1.3.2
-
-# Utilitários
 requests==2.31.0
-
-# 📊 Análise numérica adicional
 scipy==1.11.4
-
-# 🔧 Suporte adicional
 threadpoolctl==3.2.0
+
