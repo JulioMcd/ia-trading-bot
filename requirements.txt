@@ -1,5 +1,5 @@
-# 🚀 TRADING BOT - ULTRA LIMPO E ESTÁVEL
-# Apenas dependências essenciais que NUNCA falham no Render
+# 🤖 TRADING BOT - MACHINE LEARNING REAL
+# Dependencies para ML real com scikit-learn
 
 # Flask básico
 Flask==2.3.3
@@ -7,8 +7,39 @@ Flask-CORS==4.0.0
 gunicorn==21.2.0
 Werkzeug==2.3.7
 
-# Utilitários básicos
+# 🤖 MACHINE LEARNING REAL
+scikit-learn==1.3.0
+numpy==1.24.3
+pandas==2.0.3
+joblib==1.3.2
+
+# 📊 Utilitários científicos
+scipy==1.11.1
+
+# 🌐 Requests básico
 requests==2.31.0
 
-# NENHUMA dependência de ML que possa causar problemas
-# Sistema funciona 100% com IA simulada avançada
+# 📝 Warnings control
+warnings
+
+# 🔢 Math e estatísticas
+statistics
+
+# 📅 Datetime
+datetime
+
+# 🎯 JSON e pickle para persistência
+pickle-mixin==1.0.2
+
+# ⚡ Performance
+threadpoolctl==3.2.0
+
+# SISTEMA COMPLETO DE MACHINE LEARNING:
+# - Random Forest Classifier (Ensemble)
+# - Gradient Boosting Classifier (Boosting)  
+# - Multi-layer Perceptron (Neural Network)
+# - Standard Scaler (Normalização)
+# - Cross-validation (Validação cruzada)
+# - Feature importance (Importância das features)
+# - Model persistence (Persistência com joblib)
+# - Auto-retraining (Retreinamento automático)
