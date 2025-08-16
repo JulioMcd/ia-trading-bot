@@ -1,29 +1,4 @@
-# 🚀 TRADING BOT - ML REAL OTIMIZADO PARA RENDER
-# Flask e Web
 Flask==2.3.3
 Flask-CORS==4.0.0
 gunicorn==21.2.0
 Werkzeug==2.3.7
-
-# 🤖 MACHINE LEARNING REAL - CORE
-scikit-learn==1.3.2
-pandas==2.1.4
-numpy==1.24.3
-scipy==1.11.4
-
-# 🔧 UTILITÁRIOS ESSENCIAIS
-requests==2.31.0
-python-dateutil==2.8.2
-joblib==1.3.2
-
-# 📊 ANÁLISE DE DADOS (LEVES)
-# TA-Lib removido - usar indicadores implementados manualmente
-# matplotlib removido - não necessário no backend
-# seaborn removido - não necessário no backend
-# statsmodels removido - usar scipy
-
-# 📈 PERFORMANCE BÁSICA
-# numba removido - pode causar problemas no Render
-# Cython removido - compilação complexa
-
-# 🎯 FOCO EM SIMPLICIDADE E EFICIÊNCIA
