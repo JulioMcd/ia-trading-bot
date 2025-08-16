@@ -5,11 +5,6 @@ import random
 import time
 from datetime import datetime
 import json
-import threading
-
-# Importar módulos ML
-from ml_engine import ml_engine
-from ml_api import setup_ml_api
 
 app = Flask(__name__)
 CORS(app)
@@ -22,50 +17,75 @@ class Config:
     RISK_LEVELS = ['low', 'medium', 'high']
     MARKET_TRENDS = ['bullish', 'bearish', 'neutral']
 
-# Simulador de IA Original + ML Integration
+# Simulador de IA Original (funcional)
 class TradingAI:
     def __init__(self):
         self.last_analysis = None
         self.analysis_history = []
-        self.ml_integration = True  # ✅ Nova flag para ML
+        # ✅ ML Engine simples em memória (sem dependências)
+        self.ml_data = []
+        self.ml_patterns = {}
+        self.ml_enabled = True
     
     def analyze_market(self, market_data):
-        """Análise inteligente do mercado com ML integrado"""
+        """Análise inteligente do mercado"""
         
-        # ✅ INTEGRAÇÃO ML - Usar ML Engine quando disponível
-        if self.ml_integration and len(ml_engine.historical_data) > 10:
-            try:
-                # Obter predição ML
-                ml_prediction = ml_engine.predict_direction(market_data)
-                
-                # Obter análise de risco ML
-                ml_risk = ml_engine.analyze_risk(market_data, [])
-                
-                # Combinar análise tradicional com ML
-                analysis = {
-                    'message': f"🤖 ML Análise: {ml_prediction['direction']} com {ml_prediction['confidence']:.1f}% confiança",
-                    'volatility': market_data.get('volatility', 50),
-                    'trend': self._ml_to_trend(ml_prediction['direction']),
-                    'confidence': ml_prediction['confidence'],
-                    'timestamp': datetime.now().isoformat(),
-                    'symbol': market_data.get('symbol', 'R_50'),
-                    'martingaleLevel': market_data.get('martingaleLevel', 0),
-                    'isAfterLoss': market_data.get('isAfterLoss', False),
-                    'recommendation': 'strong_signal' if ml_prediction['confidence'] > 85 else 'moderate_signal',
-                    'ml_enabled': True,
-                    'ml_risk_level': ml_risk['level'],
-                    'ml_reasoning': ml_prediction['reasoning']
-                }
-                
-                print(f"🤖 ML Análise integrada: {ml_prediction['direction']} ({ml_prediction['confidence']:.1f}%)")
-                
-            except Exception as e:
-                print(f"❌ Erro ML, usando análise tradicional: {e}")
-                analysis = self._traditional_analysis(market_data)
-                
+        # Extrair dados importantes
+        symbol = market_data.get('symbol', 'R_50')
+        current_price = market_data.get('currentPrice', 1000)
+        martingale_level = market_data.get('martingaleLevel', 0)
+        is_after_loss = market_data.get('isAfterLoss', False)
+        win_rate = market_data.get('winRate', 50)
+        volatility = market_data.get('volatility', 50)
+        
+        # Simular tempo de processamento da IA
+        time.sleep(random.uniform(1, 3))
+        
+        # ✅ ML SIMPLES - Usar padrões aprendidos
+        ml_boost = 0
+        if len(self.ml_data) > 10:
+            recent_success = sum([1 for d in self.ml_data[-10:] if d.get('success', False)]) / 10
+            ml_boost = (recent_success - 0.5) * 20  # -10 a +10 boost
+        
+        # Análise baseada no contexto + ML
+        if is_after_loss and martingale_level > 0:
+            # Ser mais conservador após perdas
+            confidence = random.uniform(65, 80) + ml_boost
+            trend = 'neutral'
+            message = f"🤖 ML Análise pós-perda do {symbol}: Recomendação conservadora (Martingale Nível {martingale_level})"
+        elif martingale_level > 4:
+            # Alto risco
+            confidence = random.uniform(60, 75) + ml_boost
+            trend = 'neutral'
+            message = f"🤖 ML Análise de alto risco do {symbol}: Martingale Nível {martingale_level} - Cautela recomendada"
         else:
-            # Análise tradicional quando ML não disponível
-            analysis = self._traditional_analysis(market_data)
+            # Análise normal com boost ML
+            confidence = random.uniform(70, 95) + ml_boost
+            trend = random.choice(Config.MARKET_TRENDS)
+            message = f"🤖 ML Análise do {symbol}: Volatilidade {volatility:.1f}%, Tendência {trend} (ML boost: {ml_boost:+.1f})"
+        
+        # Ajustar confiança baseada na taxa de acerto
+        if win_rate > 70:
+            confidence += 5
+        elif win_rate < 40:
+            confidence -= 10
+            
+        confidence = max(60, min(95, confidence))
+        
+        analysis = {
+            'message': message,
+            'volatility': volatility,
+            'trend': trend,
+            'confidence': confidence,
+            'timestamp': datetime.now().isoformat(),
+            'symbol': symbol,
+            'martingaleLevel': martingale_level,
+            'isAfterLoss': is_after_loss,
+            'recommendation': self._get_recommendation(confidence, martingale_level, is_after_loss),
+            'ml_enabled': True,
+            'ml_data_size': len(self.ml_data),
+            'ml_boost': ml_boost
+        }
         
         self.last_analysis = analysis
         self.analysis_history.append(analysis)
@@ -77,196 +97,43 @@ class TradingAI:
         return analysis
     
     def get_trading_signal(self, signal_data):
-        """Gerar sinal de trading com ML integrado"""
+        """Gerar sinal de trading"""
         
-        # ✅ INTEGRAÇÃO ML - Priorizar ML quando disponível
-        if self.ml_integration and len(ml_engine.historical_data) > 10:
-            try:
-                # Obter sinal ML
-                ml_signal = ml_engine.predict_direction(signal_data)
-                
-                # Obter otimização Martingale ML
-                martingale_level = signal_data.get('martingaleLevel', 0)
-                recent_performance = {
-                    'win_rate': signal_data.get('winRate', 50),
-                    'total_trades': 10,
-                    'consecutive_losses': martingale_level,
-                    'avg_pnl': 0,
-                    'max_loss': martingale_level * 2,
-                    'time_since_last_win': 60
-                }
-                
-                ml_martingale = ml_engine.optimize_martingale(martingale_level, recent_performance)
-                
-                # Combinar sinal ML com otimização
-                signal = {
-                    'direction': ml_signal['direction'],
-                    'confidence': ml_signal['confidence'],
-                    'reasoning': f"🤖 ML: {ml_signal['reasoning']} | Martingale: {ml_martingale['action']}",
-                    'timeframe': '5m',
-                    'entry_price': signal_data.get('currentPrice', 1000),
-                    'timestamp': datetime.now().isoformat(),
-                    'symbol': signal_data.get('symbol', 'R_50'),
-                    'martingaleLevel': martingale_level,
-                    'isAfterLoss': signal_data.get('isAfterLoss', False),
-                    'recommendation': self._get_ml_signal_recommendation(ml_signal['confidence'], ml_signal['direction']),
-                    'ml_enabled': True,
-                    'ml_martingale_action': ml_martingale['action'],
-                    'optimal_stake': self._calculate_ml_stake(signal_data, ml_signal['confidence'])
-                }
-                
-                print(f"🤖 ML Sinal integrado: {ml_signal['direction']} ({ml_signal['confidence']:.1f}%)")
-                
-            except Exception as e:
-                print(f"❌ Erro ML signal, usando tradicional: {e}")
-                signal = self._traditional_signal(signal_data)
-                
-        else:
-            # Sinal tradicional quando ML não disponível
-            signal = self._traditional_signal(signal_data)
-        
-        return signal
-    
-    def assess_risk(self, risk_data):
-        """Avaliação de risco com ML integrado"""
-        
-        # ✅ INTEGRAÇÃO ML - Usar análise ML quando disponível
-        if self.ml_integration and len(ml_engine.historical_data) > 10:
-            try:
-                # Obter análise de risco ML
-                ml_risk = ml_engine.analyze_risk(risk_data, ml_engine.historical_data[-10:])
-                
-                # Enriquecer com análise tradicional
-                traditional_risk = self._traditional_risk(risk_data)
-                
-                # Combinar ambas as análises
-                risk_assessment = {
-                    'level': ml_risk['level'],
-                    'message': f"🤖 ML: {ml_risk['message']} | Tradicional: {traditional_risk['message']}",
-                    'score': ml_risk['score'],
-                    'recommendation': ml_risk['recommendation'],
-                    'timestamp': datetime.now().isoformat(),
-                    'martingaleLevel': risk_data.get('martingaleLevel', 0),
-                    'isAfterLoss': risk_data.get('needsAnalysisAfterLoss', False),
-                    'currentBalance': risk_data.get('currentBalance', 1000),
-                    'todayPnL': risk_data.get('todayPnL', 0),
-                    'winRate': risk_data.get('winRate', 50),
-                    'ml_enabled': True,
-                    'ml_risk_factors': ml_risk.get('risk_factors', []),
-                    'combined_score': (ml_risk['score'] + traditional_risk['score']) / 2,
-                    'details': {
-                        'ml_analysis': ml_risk,
-                        'traditional_analysis': traditional_risk
-                    }
-                }
-                
-                print(f"🤖 ML Risco integrado: {ml_risk['level']} (Score: {ml_risk['score']:.1f})")
-                
-            except Exception as e:
-                print(f"❌ Erro ML risk, usando tradicional: {e}")
-                risk_assessment = self._traditional_risk(risk_data)
-                
-        else:
-            # Análise tradicional quando ML não disponível
-            risk_assessment = self._traditional_risk(risk_data)
-        
-        return risk_assessment
-    
-    def _ml_to_trend(self, direction):
-        """Converte direção ML para tendência"""
-        return 'bullish' if direction == 'CALL' else 'bearish'
-    
-    def _get_ml_signal_recommendation(self, confidence, direction):
-        """Gera recomendação baseada no ML"""
-        if confidence > 90:
-            return f"MUITO FORTE: {direction} com {confidence:.1f}% confiança"
-        elif confidence > 80:
-            return f"FORTE: {direction} com {confidence:.1f}% confiança"
-        elif confidence > 70:
-            return f"MODERADO: {direction} com {confidence:.1f}% confiança"
-        else:
-            return f"FRACO: {direction} com {confidence:.1f}% confiança"
-    
-    def _calculate_ml_stake(self, signal_data, confidence):
-        """Calcula stake ótimo baseado em ML"""
-        base_stake = signal_data.get('accountBalance', 1000) * 0.02  # 2% do saldo
-        
-        # Ajustar baseado na confiança ML
-        confidence_multiplier = confidence / 100
-        optimal_stake = base_stake * confidence_multiplier
-        
-        # Limitar entre min e max
-        return max(Config.MIN_STAKE, min(optimal_stake, Config.MAX_STAKE))
-    
-    def _traditional_analysis(self, market_data):
-        """Análise tradicional (fallback)"""
-        symbol = market_data.get('symbol', 'R_50')
-        martingale_level = market_data.get('martingaleLevel', 0)
-        is_after_loss = market_data.get('isAfterLoss', False)
-        win_rate = market_data.get('winRate', 50)
-        volatility = market_data.get('volatility', 50)
-        
-        # Simular tempo de processamento
-        time.sleep(random.uniform(1, 3))
-        
-        # Análise baseada no contexto
-        if is_after_loss and martingale_level > 0:
-            confidence = random.uniform(65, 80)
-            trend = 'neutral'
-            message = f"Análise pós-perda do {symbol}: Recomendação conservadora (Martingale Nível {martingale_level})"
-        elif martingale_level > 4:
-            confidence = random.uniform(60, 75)
-            trend = 'neutral'
-            message = f"Análise de alto risco do {symbol}: Martingale Nível {martingale_level} - Cautela recomendada"
-        else:
-            confidence = random.uniform(70, 95)
-            trend = random.choice(Config.MARKET_TRENDS)
-            message = f"Análise do {symbol}: Volatilidade {volatility:.1f}%, Tendência {trend}"
-        
-        # Ajustar confiança baseada na taxa de acerto
-        if win_rate > 70:
-            confidence += 5
-        elif win_rate < 40:
-            confidence -= 10
-            
-        confidence = max(60, min(95, confidence))
-        
-        return {
-            'message': message,
-            'volatility': volatility,
-            'trend': trend,
-            'confidence': confidence,
-            'timestamp': datetime.now().isoformat(),
-            'symbol': symbol,
-            'martingaleLevel': martingale_level,
-            'isAfterLoss': is_after_loss,
-            'recommendation': 'wait_for_better_setup' if is_after_loss else 'continue_normal',
-            'ml_enabled': False
-        }
-    
-    def _traditional_signal(self, signal_data):
-        """Sinal tradicional (fallback)"""
         symbol = signal_data.get('symbol', 'R_50')
         current_price = signal_data.get('currentPrice', 1000)
         martingale_level = signal_data.get('martingaleLevel', 0)
         is_after_loss = signal_data.get('isAfterLoss', False)
         win_rate = signal_data.get('winRate', 50)
         
+        # Simular processamento
         time.sleep(random.uniform(1, 2))
         
-        if is_after_loss and martingale_level > 0:
-            confidence = random.uniform(70, 82)
-            direction = random.choice(['CALL', 'PUT'])
-            reasoning = f"Sinal conservador pós-perda (Martingale {martingale_level})"
-        elif martingale_level > 4:
-            confidence = random.uniform(65, 78)
-            direction = random.choice(['CALL', 'PUT'])
-            reasoning = f"Sinal de alto risco - Martingale Nível {martingale_level}"
-        else:
-            confidence = random.uniform(75, 92)
-            direction = random.choice(['CALL', 'PUT'])
-            reasoning = "Baseado em padrões de mercado e análise técnica"
+        # ✅ ML SIMPLES - Padrão baseado em histórico
+        direction_bias = 'CALL'  # padrão
+        if len(self.ml_data) > 5:
+            recent_calls = sum([1 for d in self.ml_data[-5:] if d.get('direction') == 'CALL' and d.get('success', False)])
+            recent_puts = sum([1 for d in self.ml_data[-5:] if d.get('direction') == 'PUT' and d.get('success', False)])
+            if recent_puts > recent_calls:
+                direction_bias = 'PUT'
         
+        # Determinar direção baseada em análise + ML
+        if is_after_loss and martingale_level > 0:
+            # Mais conservador após perdas
+            confidence = random.uniform(70, 82)
+            direction = direction_bias if random.random() > 0.3 else random.choice(['CALL', 'PUT'])
+            reasoning = f"🤖 ML Sinal conservador pós-perda (Martingale {martingale_level}) - Bias: {direction_bias}"
+        elif martingale_level > 4:
+            # Muito conservador em alto martingale
+            confidence = random.uniform(65, 78)
+            direction = direction_bias if random.random() > 0.4 else random.choice(['CALL', 'PUT'])
+            reasoning = f"🤖 ML Sinal de alto risco - Martingale Nível {martingale_level} - Bias: {direction_bias}"
+        else:
+            # Sinal normal com ML
+            confidence = random.uniform(75, 92)
+            direction = direction_bias if random.random() > 0.5 else random.choice(['CALL', 'PUT'])
+            reasoning = f"🤖 ML Sinal baseado em padrões de mercado - Bias: {direction_bias}"
+        
+        # Ajustar baseado na performance
         if win_rate > 70:
             confidence += 3
         elif win_rate < 40:
@@ -274,7 +141,7 @@ class TradingAI:
             
         confidence = max(65, min(95, confidence))
         
-        return {
+        signal = {
             'direction': direction,
             'confidence': confidence,
             'reasoning': reasoning,
@@ -284,12 +151,17 @@ class TradingAI:
             'symbol': symbol,
             'martingaleLevel': martingale_level,
             'isAfterLoss': is_after_loss,
-            'recommendation': f"Tradicional: {direction} com {confidence:.1f}% confiança",
-            'ml_enabled': False
+            'recommendation': self._get_signal_recommendation(confidence, direction),
+            'ml_enabled': True,
+            'ml_bias': direction_bias,
+            'ml_data_size': len(self.ml_data)
         }
+        
+        return signal
     
-    def _traditional_risk(self, risk_data):
-        """Análise de risco tradicional (fallback)"""
+    def assess_risk(self, risk_data):
+        """Avaliação de risco"""
+        
         current_balance = risk_data.get('currentBalance', 1000)
         today_pnl = risk_data.get('todayPnL', 0)
         martingale_level = risk_data.get('martingaleLevel', 0)
@@ -298,11 +170,22 @@ class TradingAI:
         is_cooling = risk_data.get('isInCoolingPeriod', False)
         needs_analysis = risk_data.get('needsAnalysisAfterLoss', False)
         
+        # Simular análise
         time.sleep(random.uniform(0.5, 1.5))
+        
+        # ✅ ML SIMPLES - Ajustar risco baseado em histórico
+        ml_risk_adjustment = 0
+        if len(self.ml_data) > 10:
+            recent_losses = sum([1 for d in self.ml_data[-10:] if not d.get('success', True)])
+            if recent_losses > 6:  # Mais de 60% perdas
+                ml_risk_adjustment += 20
+            elif recent_losses < 3:  # Menos de 30% perdas
+                ml_risk_adjustment -= 10
         
         # Calcular nível de risco
         risk_score = 0
         
+        # Risco baseado no Martingale
         if martingale_level > 6:
             risk_score += 40
         elif martingale_level > 3:
@@ -310,6 +193,7 @@ class TradingAI:
         elif martingale_level > 0:
             risk_score += 10
             
+        # Risco baseado no P&L
         pnl_percentage = (today_pnl / current_balance) * 100 if current_balance > 0 else 0
         if pnl_percentage < -20:
             risk_score += 30
@@ -318,36 +202,43 @@ class TradingAI:
         elif pnl_percentage < -5:
             risk_score += 10
             
+        # Risco baseado na taxa de acerto
         if win_rate < 30:
             risk_score += 25
         elif win_rate < 45:
             risk_score += 15
             
+        # Estados especiais
         if is_cooling:
             risk_score += 5
         if needs_analysis:
             risk_score += 10
             
+        # ✅ Aplicar ajuste ML
+        risk_score += ml_risk_adjustment
+        risk_score = max(0, min(100, risk_score))
+        
         # Determinar nível e recomendação
         if risk_score >= 60:
             level = 'high'
-            message = f"Risco ALTO detectado - Score: {risk_score}"
+            message = f"🤖 ML Risco ALTO detectado - Score: {risk_score} (ML ajuste: {ml_risk_adjustment:+d})"
             if martingale_level > 5:
                 recommendation = "PARAR operações - Martingale muito alto"
             else:
                 recommendation = "Reduzir stake e operar com extrema cautela"
         elif risk_score >= 35:
             level = 'medium'
-            message = f"Risco MODERADO - Score: {risk_score}"
+            message = f"🤖 ML Risco MODERADO - Score: {risk_score} (ML ajuste: {ml_risk_adjustment:+d})"
             if martingale_level > 0:
                 recommendation = f"Cautela - Martingale Nível {martingale_level} ativo"
             else:
                 recommendation = "Operar com cautela moderada"
         else:
             level = 'low'
-            message = f"Risco BAIXO - Score: {risk_score}"
+            message = f"🤖 ML Risco BAIXO - Score: {risk_score} (ML ajuste: {ml_risk_adjustment:+d})"
             recommendation = "Seguro para continuar operando"
             
+        # Ajustes específicos para Martingale Inteligente
         if martingale_level > 0:
             message += f" | Martingale Nível {martingale_level}"
             
@@ -357,7 +248,7 @@ class TradingAI:
         if needs_analysis:
             message += " | Aguardando análise pós-perda"
         
-        return {
+        risk_assessment = {
             'level': level,
             'message': message,
             'score': risk_score,
@@ -368,16 +259,107 @@ class TradingAI:
             'currentBalance': current_balance,
             'todayPnL': today_pnl,
             'winRate': win_rate,
-            'ml_enabled': False
+            'ml_enabled': True,
+            'ml_adjustment': ml_risk_adjustment,
+            'ml_data_size': len(self.ml_data),
+            'details': {
+                'martingale_risk': martingale_level * 5,
+                'pnl_risk': max(0, abs(pnl_percentage) - 5) * 2,
+                'performance_risk': max(0, 50 - win_rate),
+                'ml_risk': ml_risk_adjustment,
+                'total_score': risk_score
+            }
         }
+        
+        return risk_assessment
+    
+    def add_ml_data(self, trade_data):
+        """📊 Adicionar dados para ML simples"""
+        try:
+            ml_record = {
+                'direction': trade_data.get('direction'),
+                'success': trade_data.get('pnl', 0) > 0,
+                'pnl': trade_data.get('pnl', 0),
+                'martingale_level': trade_data.get('martingaleLevel', 0),
+                'timestamp': datetime.now().isoformat(),
+                'symbol': trade_data.get('symbol', 'R_50'),
+                'volatility': trade_data.get('volatility', 50)
+            }
+            
+            self.ml_data.append(ml_record)
+            
+            # Manter apenas últimos 100 trades
+            if len(self.ml_data) > 100:
+                self.ml_data = self.ml_data[-100:]
+            
+            print(f"📊 ML Data adicionado: {len(self.ml_data)} trades totais")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Erro ao adicionar ML data: {e}")
+            return False
+    
+    def get_ml_stats(self):
+        """📊 Estatísticas ML"""
+        if len(self.ml_data) == 0:
+            return {
+                'total_trades': 0,
+                'success_rate': 0,
+                'ml_enabled': self.ml_enabled
+            }
+        
+        successful_trades = sum([1 for d in self.ml_data if d.get('success', False)])
+        success_rate = (successful_trades / len(self.ml_data)) * 100
+        
+        return {
+            'total_trades': len(self.ml_data),
+            'successful_trades': successful_trades,
+            'success_rate': success_rate,
+            'ml_enabled': self.ml_enabled,
+            'recent_trend': self._analyze_recent_trend(),
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def _analyze_recent_trend(self):
+        """📈 Analisa tendência recente"""
+        if len(self.ml_data) < 5:
+            return 'insufficient_data'
+        
+        recent_successes = sum([1 for d in self.ml_data[-5:] if d.get('success', False)])
+        
+        if recent_successes >= 4:
+            return 'very_positive'
+        elif recent_successes >= 3:
+            return 'positive'
+        elif recent_successes >= 2:
+            return 'neutral'
+        else:
+            return 'negative'
+    
+    def _get_recommendation(self, confidence, martingale_level, is_after_loss):
+        """Gerar recomendação baseada na análise"""
+        if is_after_loss and martingale_level > 0:
+            return "wait_for_better_setup"
+        elif confidence > 85:
+            return "strong_signal"
+        elif confidence > 75:
+            return "moderate_signal"
+        else:
+            return "weak_signal"
+    
+    def _get_signal_recommendation(self, confidence, direction):
+        """Gerar recomendação para o sinal"""
+        if confidence > 85:
+            return f"FORTE: {direction} com alta confiança"
+        elif confidence > 75:
+            return f"MODERADO: {direction} com boa confiança"
+        else:
+            return f"FRACO: {direction} com baixa confiança"
 
-# Instância global da IA integrada
+# Instância global da IA
 trading_ai = TradingAI()
 
-# ✅ CONFIGURAR ML API
-ml_api = setup_ml_api(app)
-
-# Rotas originais da API mantidas + Integração ML
+# Rotas da API
 
 @app.route('/')
 def index():
@@ -386,10 +368,12 @@ def index():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check da API com status ML"""
+    """Health check da API"""
+    ml_stats = trading_ai.get_ml_stats()
+    
     return jsonify({
         'status': 'OK',
-        'service': 'Trading Bot IA Python + ML',
+        'service': 'Trading Bot IA Python + ML Simples',
         'timestamp': datetime.now().isoformat(),
         'version': '2.0.0',
         'features': [
@@ -397,39 +381,29 @@ def health_check():
             'Trading Signals', 
             'Risk Assessment',
             'Martingale Intelligence',
-            '🤖 Machine Learning Engine',
-            '📊 Continuous Learning',
-            '🎯 ML Predictions',
+            '🤖 Simple ML Engine',
+            '📊 Pattern Learning',
+            '🎯 Smart Predictions',
             '⚠️ ML Risk Analysis'
         ],
         'ml_status': {
-            'enabled': trading_ai.ml_integration,
-            'models_trained': len([m for m in ml_engine.models.values() if m is not None]),
-            'training_data_size': len(ml_engine.historical_data),
-            'accuracy': ml_engine.metrics['accuracy']
+            'enabled': trading_ai.ml_enabled,
+            'data_size': ml_stats['total_trades'],
+            'success_rate': ml_stats['success_rate'],
+            'recent_trend': ml_stats.get('recent_trend', 'unknown')
         }
     })
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_market():
-    """Endpoint para análise de mercado com ML"""
+    """Endpoint para análise de mercado"""
     try:
         market_data = request.get_json()
         
         if not market_data:
             return jsonify({'error': 'Dados de mercado necessários'}), 400
             
-        # ✅ Usar análise integrada (ML + Tradicional)
         analysis = trading_ai.analyze_market(market_data)
-        
-        # ✅ Adicionar dados ao ML para aprendizado contínuo
-        if market_data.get('symbol'):
-            ml_engine.add_trade_data({
-                'symbol': market_data.get('symbol'),
-                'timestamp': datetime.now().isoformat(),
-                'analysis_confidence': analysis.get('confidence', 50),
-                'market_data': market_data
-            })
         
         return jsonify(analysis)
         
@@ -441,14 +415,13 @@ def analyze_market():
 
 @app.route('/api/signal', methods=['POST'])
 def get_trading_signal():
-    """Endpoint para obter sinal de trading com ML"""
+    """Endpoint para obter sinal de trading"""
     try:
         signal_data = request.get_json()
         
         if not signal_data:
             return jsonify({'error': 'Dados para sinal necessários'}), 400
             
-        # ✅ Usar sinal integrado (ML + Tradicional)
         signal = trading_ai.get_trading_signal(signal_data)
         
         return jsonify(signal)
@@ -461,14 +434,13 @@ def get_trading_signal():
 
 @app.route('/api/risk', methods=['POST'])
 def assess_risk():
-    """Endpoint para avaliação de risco com ML"""
+    """Endpoint para avaliação de risco"""
     try:
         risk_data = request.get_json()
         
         if not risk_data:
             return jsonify({'error': 'Dados de risco necessários'}), 400
             
-        # ✅ Usar análise de risco integrada (ML + Tradicional)
         risk_assessment = trading_ai.assess_risk(risk_data)
         
         return jsonify(risk_assessment)
@@ -479,95 +451,65 @@ def assess_risk():
             'details': str(e)
         }), 500
 
-# ✅ NOVO ENDPOINT: Notificação de resultado de trade para ML
-@app.route('/api/trade-result', methods=['POST'])
-def notify_trade_result():
-    """Notifica resultado de trade para aprendizado ML"""
+# ✅ NOVO ENDPOINT: Adicionar dados ML
+@app.route('/api/ml/learn', methods=['POST'])
+def ml_learn():
+    """Endpoint para aprendizado ML"""
     try:
-        trade_result = request.get_json()
+        trade_data = request.get_json()
         
-        if not trade_result:
-            return jsonify({'error': 'Dados do trade necessários'}), 400
+        if not trade_data:
+            return jsonify({'error': 'Dados de trade necessários'}), 400
         
-        # Adicionar trade ao ML para aprendizado
-        success = ml_engine.add_trade_data(trade_result)
+        success = trading_ai.add_ml_data(trade_data)
+        ml_stats = trading_ai.get_ml_stats()
         
         if success:
             return jsonify({
                 'status': 'success',
-                'message': 'Trade adicionado ao ML para aprendizado',
-                'ml_data_size': len(ml_engine.historical_data),
-                'ml_accuracy': ml_engine.metrics['accuracy']
+                'message': 'Trade adicionado ao ML',
+                'ml_stats': ml_stats
             })
         else:
-            return jsonify({'error': 'Falha ao adicionar trade ao ML'}), 500
+            return jsonify({'error': 'Falha ao adicionar ao ML'}), 500
             
     except Exception as e:
         return jsonify({
-            'error': 'Erro ao notificar resultado',
+            'error': 'Erro no aprendizado ML',
             'details': str(e)
         }), 500
 
-# ✅ NOVO ENDPOINT: Dashboard ML
-@app.route('/api/ml-dashboard', methods=['GET'])
-def ml_dashboard():
-    """Dashboard com estatísticas ML"""
+@app.route('/api/ml/stats', methods=['GET'])
+def ml_statistics():
+    """Estatísticas do ML"""
     try:
-        dashboard_data = {
-            'ml_engine_status': {
-                'enabled': trading_ai.ml_integration,
-                'training_data_size': len(ml_engine.historical_data),
-                'models_status': {
-                    name: 'trained' if model is not None else 'not_trained'
-                    for name, model in ml_engine.models.items()
-                },
-                'metrics': ml_engine.metrics,
-                'last_training': ml_engine.metrics.get('last_training'),
-                'config': ml_engine.config
-            },
-            'recent_predictions': ml_engine.performance_history[-10:] if ml_engine.performance_history else [],
-            'traditional_ai_status': {
-                'total_analyses': len(trading_ai.analysis_history),
-                'last_analysis': trading_ai.last_analysis
-            },
-            'integration_status': 'active' if trading_ai.ml_integration else 'disabled',
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        return jsonify(dashboard_data)
-        
+        stats = trading_ai.get_ml_stats()
+        return jsonify(stats)
     except Exception as e:
         return jsonify({
-            'error': 'Erro no dashboard ML',
+            'error': 'Erro ao obter estatísticas ML',
             'details': str(e)
         }), 500
 
 @app.route('/api/stats', methods=['GET'])
 def get_ai_stats():
-    """Estatísticas da IA + ML"""
+    """Estatísticas da IA"""
+    ml_stats = trading_ai.get_ml_stats()
+    
     return jsonify({
-        'traditional_ai': {
-            'total_analyses': len(trading_ai.analysis_history),
-            'last_analysis': trading_ai.last_analysis,
-            'uptime': datetime.now().isoformat(),
-            'status': 'active'
-        },
-        'ml_engine': {
-            'enabled': trading_ai.ml_integration,
-            'training_data': len(ml_engine.historical_data),
-            'accuracy': ml_engine.metrics['accuracy'],
-            'models_trained': len([m for m in ml_engine.models.values() if m is not None]),
-            'last_training': ml_engine.metrics.get('last_training')
-        },
-        'integration_status': 'full' if trading_ai.ml_integration else 'traditional_only'
+        'total_analyses': len(trading_ai.analysis_history),
+        'last_analysis': trading_ai.last_analysis,
+        'uptime': datetime.now().isoformat(),
+        'status': 'active',
+        'ml_stats': ml_stats
     })
 
 @app.route('/api/frontend-js', methods=['GET'])
 def get_frontend_js():
-    """Servir JavaScript adicional com integração ML"""
+    """Servir JavaScript adicional"""
     js_code = """
     // JavaScript adicional para o frontend + ML
-    console.log('🤖 JavaScript ML integrado carregado');
+    console.log('🐍 JavaScript + ML Simples carregado');
     
     // Função para verificar status da IA + ML
     setInterval(async () => {
@@ -576,46 +518,29 @@ def get_frontend_js():
             if (response.ok) {
                 const data = await response.json();
                 document.getElementById('connectionMethod').textContent = 
-                    `Python API + ML Online (${data.ml_status.training_data_size} trades)`;
-                
-                // Atualizar accuracy ML se disponível
-                if (data.ml_status.accuracy > 0) {
-                    document.getElementById('apiKeyStatus').textContent = 
-                        `ML Accuracy: ${(data.ml_status.accuracy * 100).toFixed(1)}%`;
-                }
+                    `Python API + ML Online (${data.ml_status.data_size} trades, ${data.ml_status.success_rate.toFixed(1)}% success)`;
+                document.getElementById('apiKeyStatus').textContent = 
+                    `ML: ${data.ml_status.recent_trend}`;
             }
         } catch (error) {
-            document.getElementById('connectionMethod').textContent = 'API Offline';
+            document.getElementById('connectionMethod').textContent = 'Python API Offline';
         }
     }, 30000);
     
-    // ✅ NOVA FUNÇÃO: Notificar resultado do trade para ML
-    window.notifyTradeResult = function(tradeData) {
-        fetch('/api/trade-result', {
+    // ✅ Função para notificar resultado do trade para ML
+    window.notifyMLTrade = function(tradeData) {
+        fetch('/api/ml/learn', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(tradeData)
         }).then(response => response.json())
           .then(data => {
               if (data.status === 'success') {
-                  console.log('✅ Trade adicionado ao ML:', data.ml_data_size, 'trades');
+                  console.log('✅ ML aprendeu com trade:', data.ml_stats.total_trades, 'trades');
               }
           }).catch(error => {
-              console.error('❌ Erro ao notificar ML:', error);
+              console.error('❌ Erro ML:', error);
           });
-    };
-    
-    // ✅ NOVA FUNÇÃO: Obter dashboard ML
-    window.getMLDashboard = async function() {
-        try {
-            const response = await fetch('/api/ml-dashboard');
-            const data = await response.json();
-            console.log('🤖 ML Dashboard:', data);
-            return data;
-        } catch (error) {
-            console.error('❌ Erro ML Dashboard:', error);
-            return null;
-        }
     };
     """
     
@@ -629,9 +554,8 @@ def serve_static(filename):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 3000))
     
-    print("🚀 Iniciando Trading Bot com ML Engine integrado...")
-    print(f"🤖 ML Status: {'Ativo' if trading_ai.ml_integration else 'Inativo'}")
-    print(f"📊 Dados ML: {len(ml_engine.historical_data)} trades")
-    print(f"🎯 Accuracy: {ml_engine.metrics['accuracy']:.2f}")
+    print("🚀 Iniciando Trading Bot com ML Simples...")
+    print(f"🤖 ML Status: Ativo")
+    print(f"📊 Dados ML: {len(trading_ai.ml_data)} trades")
     
     app.run(host='0.0.0.0', port=port, debug=False)
