@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: trading-ml-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 8000
+      - key: ML_MODEL_PATH
+        value: ./models
+      - key: DATABASE_PATH
+        value: ./data/trading_data.db
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MAX_TRADES_MEMORY
+        value: 10000
+      - key: AUTO_RETRAIN_INTERVAL
+        value: 50
+      - key: MIN_CONFIDENCE_THRESHOLD
+        value: 0.6
+    
+  # Banco de dados persistente (opcional - plano pago)
+  # - type: pserv
+  #   name: trading-ml-db
+  #   env: docker
+  #   repo: https://github.com/your-repo/trading-ml-bot.git
+  #   dockerfilePath: ./Dockerfile.postgres
