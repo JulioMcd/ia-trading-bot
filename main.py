@@ -1,68 +1,40 @@
 #!/usr/bin/env python3
 """
-Aplicação Principal - ML Trading Bot
-Sistema de Machine Learning para Trading Bot com FastAPI
+API Principal do ML Trading Bot
+FastAPI + Scikit-learn para predições em tempo real
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import os
+import json
+import sqlite3
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler
 import joblib
-import sqlite3
-import json
-import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any
-import asyncio
-import os
-import time
-import gc
-import psutil
-from contextlib import asynccontextmanager
-from pathlib import Path
 
-# Importar módulos locais
-try:
-    from config import config, get_config
-    from monitoring import monitor, log_ml_training_result, log_trading_session, MLMetrics, TradingMetrics
-except ImportError as e:
-    print(f"Aviso: Não foi possível importar alguns módulos: {e}")
-    config = None
-    monitor = None
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+import uvicorn
 
-# Configuração de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("MLTradingMain")
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Sistema de autenticação
-security = HTTPBearer(auto_error=False)
+# ===== MODELS PYDANTIC =====
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
-    """Verifica API key se a segurança estiver habilitada"""
-    if config and hasattr(config, 'security') and config.security.api_key_required:
-        if not credentials or credentials.credentials != config.security.api_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="API key inválida",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    return credentials
-
-# Modelos Pydantic
 class TradeData(BaseModel):
     id: str
     timestamp: str
@@ -73,90 +45,70 @@ class TradeData(BaseModel):
     entry_price: float
     exit_price: Optional[float] = None
     outcome: Optional[str] = None
-    market_context: Dict[str, Any]
-    martingale_level: int
-    volatility: float
-    trend: str
+    market_context: Optional[Dict] = None
+    martingale_level: int = 0
+    volatility: float = 0.0
+    trend: str = "neutral"
 
-class MarketAnalysisRequest(BaseModel):
+class PredictionRequest(BaseModel):
+    symbol: str
+    current_price: float
+    direction: str
+    stake: float
+    duration: str
+    trend: str = "neutral"
+    volatility: float = 0.0
+    martingale_level: int = 0
+    recent_wins: int = 0
+    recent_losses: int = 0
+    recent_win_rate: float = 0.5
+
+class AnalysisRequest(BaseModel):
     symbol: str
     current_price: float
     timestamp: str
-    trades: List[Dict]
-    balance: float
-    win_rate: float
-    volatility: float
-    market_condition: str
-    martingale_level: int
-    is_after_loss: bool
-    ml_patterns: Optional[int] = 0
-    ml_accuracy: Optional[float] = 0.0
+    trades: List[Dict] = []
+    balance: float = 1000.0
+    win_rate: float = 0.0
+    volatility: float = 0.0
+    market_condition: str = "neutral"
+    martingale_level: int = 0
+    is_after_loss: bool = False
+    ml_patterns: int = 0
+    ml_accuracy: float = 0.0
 
-class TradingSignalRequest(BaseModel):
-    symbol: str
-    current_price: float
-    account_balance: float
-    win_rate: float
-    recent_trades: List[Dict]
-    timestamp: str
-    volatility: float
-    market_condition: str
-    martingale_level: int
-    is_after_loss: bool
-    ml_data: Optional[Dict] = None
+# ===== ML TRADING SYSTEM =====
 
-class RiskAssessmentRequest(BaseModel):
-    current_balance: float
-    today_pnl: float
-    martingale_level: int
-    recent_trades: List[Dict]
-    win_rate: float
-    total_trades: int
-    timestamp: str
-    is_in_cooling_period: bool
-    needs_analysis_after_loss: bool
-    ml_risk: Optional[Dict] = None
-
-# Sistema ML Principal
 class MLTradingSystem:
-    def __init__(self):
+    """Sistema de Machine Learning para Trading"""
+    
+    def __init__(self, db_path: str = "data/trading_data.db"):
+        self.db_path = db_path
         self.models = {}
         self.scalers = {}
-        self.feature_columns = []
+        self.is_trained = False
+        self.last_training = None
+        self.feature_columns = [
+            'current_price', 'volatility', 'martingale_level', 
+            'recent_win_rate', 'stake', 'duration_numeric'
+        ]
         
-        # Configurações
-        if config and hasattr(config, 'database'):
-            self.db_path = config.database.path
-        else:
-            self.db_path = "data/trading_data.db"
-            
-        if config and hasattr(config, 'ml'):
-            self.min_trades_for_training = config.ml.min_trades_for_training
-            self.pattern_confidence_threshold = config.ml.pattern_confidence_threshold
-            self.models_to_train = config.ml.models_to_train
-        else:
-            self.min_trades_for_training = 50
-            self.pattern_confidence_threshold = 0.7
-            self.models_to_train = ["random_forest", "gradient_boosting", "logistic_regression"]
-            
-        # Estatísticas
-        self.training_stats = {}
-        self.prediction_stats = {
-            "total_predictions": 0,
-            "correct_predictions": 0,
-            "last_accuracy": 0.0
-        }
+        # Criar diretórios
+        Path("data").mkdir(exist_ok=True)
+        Path("models").mkdir(exist_ok=True)
         
-        self.initialize_database()
+        # Inicializar banco
+        self.init_database()
+        
+        # Carregar modelos se existirem
         self.load_models()
         
-        logger.info("Sistema ML inicializado")
-        
-    def initialize_database(self):
-        """Inicializa o banco de dados SQLite"""
-        # Criar diretório se não existir
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        
+        # Treinar se necessário
+        if not self.is_trained:
+            self.train_initial_models()
+    
+    def init_database(self):
+        """Inicializa o banco de dados"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -164,574 +116,642 @@ class MLTradingSystem:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trades (
                 id TEXT PRIMARY KEY,
-                timestamp TEXT,
-                symbol TEXT,
-                direction TEXT,
-                stake REAL,
-                duration TEXT,
-                entry_price REAL,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                stake REAL NOT NULL,
+                duration TEXT NOT NULL,
+                entry_price REAL NOT NULL,
                 exit_price REAL,
                 outcome TEXT,
                 market_context TEXT,
-                martingale_level INTEGER,
-                volatility REAL,
-                trend TEXT,
+                martingale_level INTEGER DEFAULT 0,
+                volatility REAL DEFAULT 0,
+                trend TEXT DEFAULT 'neutral',
                 features TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Tabela de padrões ML
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS ml_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_type TEXT,
-                pattern_data TEXT,
-                confidence REAL,
-                occurrences INTEGER,
-                success_rate REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Tabela de métricas de performance
+        # Tabela de métricas ML
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ml_metrics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_type TEXT,
-                accuracy REAL,
-                precision_call REAL,
-                precision_put REAL,
-                recall_call REAL,
-                recall_put REAL,
-                total_predictions INTEGER,
-                correct_predictions INTEGER,
-                training_data_size INTEGER,
+                timestamp TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                accuracy REAL NOT NULL,
+                total_predictions INTEGER DEFAULT 0,
+                correct_predictions INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
         conn.commit()
         conn.close()
-        logger.info("Base de dados inicializada")
         
-    def save_trade_data(self, trade_data: TradeData):
-        """Salva dados de trade no banco"""
+        logger.info("✅ Banco de dados inicializado")
+    
+    def create_features(self, data: Dict) -> np.ndarray:
+        """Cria features para o modelo ML"""
+        try:
+            # Extrair duration numérico
+            duration_str = str(data.get('duration', '5'))
+            duration_numeric = float(duration_str.replace('t', '').replace('ticks', ''))
+            
+            features = [
+                float(data.get('current_price', 0)),
+                float(data.get('volatility', 50)),  # Default médio
+                int(data.get('martingale_level', 0)),
+                float(data.get('recent_win_rate', 0.5)),
+                float(data.get('stake', 1)),
+                duration_numeric
+            ]
+            
+            return np.array(features).reshape(1, -1)
+            
+        except Exception as e:
+            logger.error(f"Erro ao criar features: {e}")
+            # Features padrão em caso de erro
+            return np.array([1000, 50, 0, 0.5, 1, 5]).reshape(1, -1)
+    
+    def get_trade_data(self) -> pd.DataFrame:
+        """Busca dados de trades do banco"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
         
-        features = self.extract_features(trade_data)
+        try:
+            df = pd.read_sql_query('''
+                SELECT * FROM trades 
+                WHERE outcome IS NOT NULL 
+                ORDER BY timestamp DESC 
+                LIMIT 1000
+            ''', conn)
+            
+            if len(df) == 0:
+                # Criar dados sintéticos para treinamento inicial
+                logger.info("Criando dados sintéticos para treinamento inicial...")
+                df = self.create_synthetic_data()
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Erro ao buscar trades: {e}")
+            return self.create_synthetic_data()
+        finally:
+            conn.close()
+    
+    def create_synthetic_data(self) -> pd.DataFrame:
+        """Cria dados sintéticos para treinamento inicial"""
+        np.random.seed(42)
+        n_samples = 200
         
-        cursor.execute('''
-            INSERT OR REPLACE INTO trades 
-            (id, timestamp, symbol, direction, stake, duration, entry_price, exit_price, 
-             outcome, market_context, martingale_level, volatility, trend, features)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            trade_data.id, trade_data.timestamp, trade_data.symbol, trade_data.direction,
-            trade_data.stake, trade_data.duration, trade_data.entry_price, trade_data.exit_price,
-            trade_data.outcome, json.dumps(trade_data.market_context), trade_data.martingale_level,
-            trade_data.volatility, trade_data.trend, json.dumps(features)
-        ))
-        
-        conn.commit()
-        conn.close()
-        logger.info(f"Trade {trade_data.id} salvo no banco")
-        
-    def extract_features(self, trade_data: TradeData) -> Dict:
-        """Extrai features para ML a partir dos dados de trade"""
-        features = {
-            'hour_of_day': datetime.fromisoformat(trade_data.timestamp.replace('Z', '+00:00')).hour,
-            'volatility': trade_data.volatility,
-            'martingale_level': trade_data.martingale_level,
-            'stake_normalized': min(trade_data.stake / 10.0, 1.0),
-            'symbol_encoded': hash(trade_data.symbol) % 100,
-            'direction_encoded': 1 if trade_data.direction == 'CALL' else 0,
-            'trend_encoded': {'bullish': 1, 'bearish': -1, 'neutral': 0}.get(trade_data.trend, 0),
-            'duration_minutes': self.parse_duration_to_minutes(trade_data.duration),
-            'entry_price_normalized': trade_data.entry_price / 1000.0,
+        data = {
+            'id': [f'synthetic_{i}' for i in range(n_samples)],
+            'current_price': np.random.uniform(800, 1200, n_samples),
+            'volatility': np.random.uniform(20, 80, n_samples),
+            'martingale_level': np.random.choice([0, 1, 2], n_samples),
+            'recent_win_rate': np.random.uniform(0.3, 0.7, n_samples),
+            'stake': np.random.uniform(1, 10, n_samples),
+            'duration': np.random.choice([5, 7, 10], n_samples),
+            'direction': np.random.choice(['CALL', 'PUT'], n_samples)
         }
         
-        # Features do contexto de mercado
-        if 'recent_results' in trade_data.market_context:
-            recent_results = trade_data.market_context['recent_results']
-            features['recent_wins'] = recent_results.count('won')
-            features['recent_losses'] = recent_results.count('lost')
-            features['recent_win_rate'] = features['recent_wins'] / max(len(recent_results), 1)
+        # Criar outcomes baseados em lógica simples
+        outcomes = []
+        for i in range(n_samples):
+            # Lógica sintética: win_rate alta = mais chance de win
+            win_prob = data['recent_win_rate'][i] * 0.8 + np.random.uniform(0, 0.4)
+            outcome = 'won' if win_prob > 0.5 else 'lost'
+            outcomes.append(outcome)
         
-        return features
+        data['outcome'] = outcomes
         
-    def parse_duration_to_minutes(self, duration: str) -> float:
-        """Converte duration para minutos"""
-        if 't' in duration:
-            return float(duration.replace('t', '')) * 0.1
-        elif 'm' in duration:
-            return float(duration.replace('m', ''))
-        return 1.0
+        return pd.DataFrame(data)
+    
+    def prepare_training_data(self, df: pd.DataFrame) -> tuple:
+        """Prepara dados para treinamento"""
+        if len(df) < 10:
+            raise ValueError("Dados insuficientes para treinamento")
         
-    def get_training_data(self) -> pd.DataFrame:
-        """Obtém dados de treino do banco"""
-        conn = sqlite3.connect(self.db_path)
-        
-        query = '''
-            SELECT * FROM trades 
-            WHERE outcome IS NOT NULL 
-            AND outcome IN ('won', 'lost')
-            ORDER BY timestamp DESC
-            LIMIT 10000
-        '''
-        
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        
-        if len(df) == 0:
-            return pd.DataFrame()
-            
-        # Processar features
+        # Features
         features_list = []
-        labels = []
-        
         for _, row in df.iterrows():
-            try:
-                features = json.loads(row['features'])
-                features_list.append(features)
-                labels.append(1 if row['outcome'] == 'won' else 0)
-            except (json.JSONDecodeError, KeyError):
-                continue
-                
-        if not features_list:
-            return pd.DataFrame()
+            duration_numeric = float(str(row.get('duration', 5)).replace('t', '').replace('ticks', ''))
             
-        features_df = pd.DataFrame(features_list)
-        features_df['label'] = labels
+            features = [
+                float(row.get('current_price', 1000)),
+                float(row.get('volatility', 50)),
+                int(row.get('martingale_level', 0)),
+                float(row.get('recent_win_rate', 0.5)),
+                float(row.get('stake', 1)),
+                duration_numeric
+            ]
+            features_list.append(features)
         
-        return features_df
+        X = np.array(features_list)
         
-    def train_models(self) -> bool:
-        """Treina os modelos ML"""
-        df = self.get_training_data()
+        # Target: converter outcome para binário
+        y = (df['outcome'] == 'won').astype(int)
         
-        if len(df) < self.min_trades_for_training:
-            logger.warning(f"Dados insuficientes para treino: {len(df)} < {self.min_trades_for_training}")
-            return False
+        return X, y
+    
+    def train_models(self) -> Dict:
+        """Treina todos os modelos ML"""
+        logger.info("🎓 Iniciando treinamento dos modelos ML...")
+        
+        try:
+            # Buscar dados
+            df = self.get_trade_data()
+            X, y = self.prepare_training_data(df)
             
-        # Preparar dados
-        X = df.drop(['label'], axis=1)
-        y = df['label']
-        
-        # Garantir que todas as colunas são numéricas
-        X = X.select_dtypes(include=[np.number])
-        self.feature_columns = X.columns.tolist()
-        
-        if len(X.columns) == 0:
-            logger.error("Nenhuma feature numérica encontrada")
-            return False
+            logger.info(f"📊 Dados de treinamento: {len(df)} trades")
             
-        # Split dos dados
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
-        
-        # Treinar modelos
-        model_configs = {
-            'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
-            'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
-            'logistic_regression': LogisticRegression(random_state=42, max_iter=1000)
-        }
-        
-        trained_models = 0
-        
-        for model_name in self.models_to_train:
-            if model_name in model_configs:
+            # Split dos dados
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+            
+            # Normalizar features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Salvar scaler
+            self.scalers['main'] = scaler
+            
+            # Modelos para treinar
+            models_config = {
+                'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
+                'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
+                'logistic_regression': LogisticRegression(random_state=42),
+                'svm': SVC(probability=True, random_state=42),
+                'neural_network': MLPClassifier(hidden_layer_sizes=(50, 25), random_state=42, max_iter=500)
+            }
+            
+            results = {}
+            
+            # Treinar cada modelo
+            for name, model in models_config.items():
                 try:
-                    logger.info(f"Treinando modelo: {model_name}")
+                    logger.info(f"Treinando {name}...")
                     
-                    model = model_configs[model_name]
-                    
-                    # Aplicar scaling para regressão logística
-                    if model_name == 'logistic_regression':
-                        scaler = StandardScaler()
-                        X_train_scaled = scaler.fit_transform(X_train)
-                        X_test_scaled = scaler.transform(X_test)
-                        self.scalers[model_name] = scaler
-                        
+                    # Treinar
+                    if name in ['svm', 'logistic_regression', 'neural_network']:
                         model.fit(X_train_scaled, y_train)
                         y_pred = model.predict(X_test_scaled)
                     else:
                         model.fit(X_train, y_train)
                         y_pred = model.predict(X_test)
                     
-                    # Calcular métricas
+                    # Avaliar
                     accuracy = accuracy_score(y_test, y_pred)
                     
                     # Salvar modelo
-                    self.models[model_name] = model
+                    self.models[name] = {
+                        'model': model,
+                        'accuracy': accuracy,
+                        'trained_at': datetime.now().isoformat(),
+                        'samples': len(X_train)
+                    }
                     
-                    logger.info(f"Modelo {model_name}: Accuracy = {accuracy:.3f}")
-                    trained_models += 1
+                    results[name] = {
+                        'accuracy': accuracy,
+                        'samples': len(X_train)
+                    }
+                    
+                    logger.info(f"✅ {name}: {accuracy:.3f} accuracy")
                     
                 except Exception as e:
-                    logger.error(f"Erro ao treinar modelo {model_name}: {e}")
+                    logger.error(f"❌ Erro treinando {name}: {e}")
                     continue
-        
-        if trained_models > 0:
+            
+            # Salvar modelos
             self.save_models()
-            logger.info(f"Treinamento concluído: {trained_models} modelos treinados")
-            return True
-        else:
-            logger.error("Nenhum modelo foi treinado com sucesso")
-            return False
-        
+            
+            self.is_trained = True
+            self.last_training = {
+                'timestamp': datetime.now().isoformat(),
+                'models_trained': len(results),
+                'best_accuracy': max([r['accuracy'] for r in results.values()]) if results else 0
+            }
+            
+            logger.info(f"✅ Treinamento concluído: {len(results)} modelos")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no treinamento: {e}")
+            return {}
+    
+    def train_initial_models(self):
+        """Treina modelos iniciais com dados sintéticos"""
+        logger.info("🎯 Treinamento inicial com dados sintéticos...")
+        self.train_models()
+    
     def save_models(self):
         """Salva modelos treinados"""
-        models_dir = Path('models')
-        models_dir.mkdir(exist_ok=True)
-        
-        for name, model in self.models.items():
-            joblib.dump(model, f'models/{name}.pkl')
+        try:
+            for name, model_data in self.models.items():
+                model_path = f"models/{name}_model.joblib"
+                joblib.dump(model_data, model_path)
             
-        for name, scaler in self.scalers.items():
-            joblib.dump(scaler, f'models/scaler_{name}.pkl')
+            # Salvar scalers
+            for name, scaler in self.scalers.items():
+                scaler_path = f"models/{name}_scaler.joblib"
+                joblib.dump(scaler, scaler_path)
             
-        # Salvar feature columns
-        with open('models/feature_columns.json', 'w') as f:
-            json.dump(self.feature_columns, f)
+            logger.info("💾 Modelos salvos")
             
-        logger.info("Modelos salvos")
-        
+        except Exception as e:
+            logger.error(f"❌ Erro salvando modelos: {e}")
+    
     def load_models(self):
         """Carrega modelos salvos"""
         try:
-            models_dir = Path('models')
+            models_dir = Path("models")
             if not models_dir.exists():
-                logger.info("Diretório de modelos não encontrado")
                 return
-                
-            model_files = list(models_dir.glob('*.pkl'))
             
-            for model_file in model_files:
-                if model_file.name.startswith('scaler_'):
-                    scaler_name = model_file.name.replace('scaler_', '').replace('.pkl', '')
-                    self.scalers[scaler_name] = joblib.load(model_file)
-                elif not model_file.name.startswith('scaler_'):
-                    model_name = model_file.name.replace('.pkl', '')
-                    self.models[model_name] = joblib.load(model_file)
-                    
-            # Carregar feature columns
-            features_path = models_dir / 'feature_columns.json'
-            if features_path.exists():
-                with open(features_path, 'r') as f:
-                    self.feature_columns = json.load(f)
-                    
+            # Carregar modelos
+            for model_file in models_dir.glob("*_model.joblib"):
+                name = model_file.stem.replace("_model", "")
+                try:
+                    model_data = joblib.load(model_file)
+                    self.models[name] = model_data
+                    logger.info(f"📂 Modelo {name} carregado")
+                except Exception as e:
+                    logger.error(f"❌ Erro carregando {name}: {e}")
+            
+            # Carregar scalers
+            for scaler_file in models_dir.glob("*_scaler.joblib"):
+                name = scaler_file.stem.replace("_scaler", "")
+                try:
+                    scaler = joblib.load(scaler_file)
+                    self.scalers[name] = scaler
+                except Exception as e:
+                    logger.error(f"❌ Erro carregando scaler {name}: {e}")
+            
             if self.models:
-                logger.info(f"Modelos carregados: {list(self.models.keys())}")
-            else:
-                logger.info("Nenhum modelo salvo encontrado")
-                
+                self.is_trained = True
+                logger.info(f"✅ {len(self.models)} modelos carregados")
+            
         except Exception as e:
-            logger.error(f"Erro ao carregar modelos: {e}")
-            
-    def predict_trade_outcome(self, features: Dict) -> Dict:
-        """Faz predição do resultado do trade"""
-        if not self.models or not self.feature_columns:
-            return {
-                'prediction': 'neutral',
-                'confidence': 0.5,
-                'model_used': 'none',
-                'reason': 'Modelos não treinados'
-            }
-            
+            logger.error(f"❌ Erro carregando modelos: {e}")
+    
+    def predict(self, request_data: Dict) -> Dict:
+        """Faz predição ML"""
         try:
-            # Preparar features
-            feature_vector = []
-            for col in self.feature_columns:
-                feature_vector.append(features.get(col, 0))
-                
-            X = np.array(feature_vector).reshape(1, -1)
+            if not self.models:
+                return {
+                    "prediction": "neutral",
+                    "confidence": 0.5,
+                    "model_used": "none",
+                    "reason": "Nenhum modelo treinado disponível"
+                }
             
-            # Usar ensemble de modelos
-            predictions = []
-            confidences = []
+            # Criar features
+            features = self.create_features(request_data)
             
-            for name, model in self.models.items():
-                if name == 'logistic_regression' and name in self.scalers:
-                    X_scaled = self.scalers[name].transform(X)
-                    pred_proba = model.predict_proba(X_scaled)[0]
-                else:
-                    pred_proba = model.predict_proba(X)[0]
-                    
-                predictions.append(pred_proba[1])  # Probabilidade de WIN
-                confidences.append(max(pred_proba))
-                
-            # Média das predições
-            avg_win_prob = np.mean(predictions)
-            avg_confidence = np.mean(confidences)
+            # Usar o melhor modelo disponível
+            best_model_name = max(self.models.keys(), 
+                                key=lambda x: self.models[x]['accuracy'])
             
-            # Decisão final
-            if avg_win_prob > 0.6:
-                prediction = 'favor'
-            elif avg_win_prob < 0.4:
-                prediction = 'avoid'
+            model_data = self.models[best_model_name]
+            model = model_data['model']
+            
+            # Aplicar normalização se necessário
+            if best_model_name in ['svm', 'logistic_regression', 'neural_network']:
+                if 'main' in self.scalers:
+                    features = self.scalers['main'].transform(features)
+            
+            # Predição
+            prediction_proba = model.predict_proba(features)[0]
+            prediction_binary = model.predict(features)[0]
+            
+            # Interpretar resultado
+            confidence = max(prediction_proba)
+            
+            if prediction_binary == 1 and confidence > 0.6:
+                prediction = "favor"
+                reason = f"ML recomenda este trade com {confidence:.1%} confiança"
+            elif prediction_binary == 0 and confidence > 0.6:
+                prediction = "avoid"
+                reason = f"ML recomenda evitar este trade ({confidence:.1%} confiança de perda)"
             else:
-                prediction = 'neutral'
-                
+                prediction = "neutral"
+                reason = f"ML neutro - confiança baixa ({confidence:.1%})"
+            
             return {
-                'prediction': prediction,
-                'confidence': avg_confidence,
-                'win_probability': avg_win_prob,
-                'model_used': 'ensemble',
-                'models_count': len(self.models),
-                'reason': f'Ensemble de {len(self.models)} modelos'
+                "prediction": prediction,
+                "confidence": float(confidence),
+                "win_probability": float(prediction_proba[1]),
+                "model_used": best_model_name,
+                "reason": reason,
+                "model_accuracy": model_data['accuracy']
             }
             
         except Exception as e:
-            logger.error(f"Erro na predição: {e}")
+            logger.error(f"❌ Erro na predição: {e}")
             return {
-                'prediction': 'neutral',
-                'confidence': 0.5,
-                'model_used': 'error',
-                'reason': str(e)
+                "prediction": "neutral",
+                "confidence": 0.5,
+                "model_used": "error",
+                "reason": f"Erro na predição: {str(e)}"
+            }
+    
+    def save_trade(self, trade_data: TradeData) -> bool:
+        """Salva trade no banco de dados"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO trades 
+                (id, timestamp, symbol, direction, stake, duration, entry_price, 
+                 exit_price, outcome, market_context, martingale_level, volatility, trend)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                trade_data.id,
+                trade_data.timestamp,
+                trade_data.symbol,
+                trade_data.direction,
+                trade_data.stake,
+                trade_data.duration,
+                trade_data.entry_price,
+                trade_data.exit_price,
+                trade_data.outcome,
+                json.dumps(trade_data.market_context) if trade_data.market_context else None,
+                trade_data.martingale_level,
+                trade_data.volatility,
+                trade_data.trend
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"💾 Trade {trade_data.id} salvo")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro salvando trade: {e}")
+            return False
+    
+    def get_stats(self) -> Dict:
+        """Retorna estatísticas do sistema ML"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Estatísticas básicas
+            cursor.execute("SELECT COUNT(*) FROM trades")
+            total_trades = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM trades WHERE outcome = 'won'")
+            total_wins = cursor.fetchone()[0]
+            
+            win_rate = total_wins / total_trades if total_trades > 0 else 0
+            
+            # Padrões simples
+            patterns = self.analyze_patterns()
+            
+            conn.close()
+            
+            return {
+                "ml_stats": {
+                    "total_trades": total_trades,
+                    "total_wins": total_wins,
+                    "overall_win_rate": win_rate,
+                    "models_loaded": len(self.models),
+                    "last_training": self.last_training
+                },
+                "models_available": list(self.models.keys()),
+                "patterns": {
+                    "patterns": patterns,
+                    "patterns_count": len(patterns)
+                }
             }
             
-    def analyze_patterns(self) -> Dict:
-        """Analisa padrões nos dados"""
-        df = self.get_training_data()
-        
-        if len(df) < 10:
-            return {'patterns': [], 'total_trades': len(df)}
+        except Exception as e:
+            logger.error(f"❌ Erro nas estatísticas: {e}")
+            return {
+                "ml_stats": {
+                    "total_trades": 0,
+                    "total_wins": 0,
+                    "overall_win_rate": 0,
+                    "models_loaded": len(self.models),
+                    "last_training": None
+                },
+                "models_available": [],
+                "patterns": {"patterns": [], "patterns_count": 0}
+            }
+    
+    def analyze_patterns(self) -> List[Dict]:
+        """Analisa padrões simples nos dados"""
+        try:
+            df = self.get_trade_data()
+            if len(df) < 10:
+                return []
             
-        patterns = []
-        
-        # Análise básica de padrões
-        conn = sqlite3.connect(self.db_path)
-        
-        # Padrão 1: Performance por símbolo
-        symbol_performance = pd.read_sql_query('''
-            SELECT symbol, 
-                   COUNT(*) as total_trades,
-                   SUM(CASE WHEN outcome = 'won' THEN 1 ELSE 0 END) as wins,
-                   AVG(CASE WHEN outcome = 'won' THEN 1.0 ELSE 0.0 END) as win_rate
-            FROM trades 
-            WHERE outcome IS NOT NULL
-            GROUP BY symbol
-            HAVING COUNT(*) >= 5
-            ORDER BY win_rate DESC
-        ''', conn)
-        
-        for _, row in symbol_performance.iterrows():
-            if row['win_rate'] > 0.7:
-                patterns.append({
-                    'type': 'symbol_success',
-                    'description': f"Alto sucesso em {row['symbol']}",
-                    'confidence': row['win_rate'],
-                    'data': {'symbol': row['symbol'], 'trades': int(row['total_trades'])}
-                })
+            patterns = []
+            
+            # Padrão 1: Performance por símbolo
+            if 'symbol' in df.columns and 'outcome' in df.columns:
+                symbol_stats = df.groupby('symbol')['outcome'].apply(
+                    lambda x: (x == 'won').mean()
+                ).to_dict()
                 
-        conn.close()
-        
-        return {
-            'patterns': patterns,
-            'total_trades': len(df),
-            'analysis_timestamp': datetime.now().isoformat()
-        }
-        
-    def get_ml_stats(self) -> Dict:
-        """Retorna estatísticas do ML"""
-        conn = sqlite3.connect(self.db_path)
-        
-        # Estatísticas básicas
-        basic_stats = pd.read_sql_query('''
-            SELECT 
-                COUNT(*) as total_trades,
-                SUM(CASE WHEN outcome = 'won' THEN 1 ELSE 0 END) as total_wins,
-                AVG(CASE WHEN outcome = 'won' THEN 1.0 ELSE 0.0 END) as overall_win_rate
-            FROM trades 
-            WHERE outcome IS NOT NULL
-        ''', conn)
-        
-        conn.close()
-        
-        stats = {
-            'total_trades': int(basic_stats.iloc[0]['total_trades']) if len(basic_stats) > 0 else 0,
-            'total_wins': int(basic_stats.iloc[0]['total_wins']) if len(basic_stats) > 0 else 0,
-            'overall_win_rate': float(basic_stats.iloc[0]['overall_win_rate']) if len(basic_stats) > 0 else 0.0,
-            'models_loaded': len(self.models),
-            'feature_count': len(self.feature_columns)
-        }
-        
-        return stats
+                for symbol, win_rate in symbol_stats.items():
+                    if win_rate > 0.6:
+                        patterns.append({
+                            "type": "symbol_performance",
+                            "description": f"Símbolo {symbol} tem alta taxa de vitória",
+                            "confidence": win_rate,
+                            "data": {"symbol": symbol, "win_rate": win_rate}
+                        })
+            
+            # Padrão 2: Performance por direção
+            if 'direction' in df.columns:
+                direction_stats = df.groupby('direction')['outcome'].apply(
+                    lambda x: (x == 'won').mean()
+                ).to_dict()
+                
+                for direction, win_rate in direction_stats.items():
+                    if win_rate > 0.6:
+                        patterns.append({
+                            "type": "direction_bias",
+                            "description": f"Direção {direction} tem melhor performance",
+                            "confidence": win_rate,
+                            "data": {"direction": direction, "win_rate": win_rate}
+                        })
+            
+            return patterns[:10]  # Máximo 10 padrões
+            
+        except Exception as e:
+            logger.error(f"❌ Erro analisando padrões: {e}")
+            return []
 
-# Instância global do sistema ML
+# ===== INSTÂNCIA GLOBAL =====
 ml_system = MLTradingSystem()
 
-# Inicialização do FastAPI
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Iniciando sistema ML...")
-    
-    # Carregar modelos existentes
-    ml_system.load_models()
-    
-    # Treinar modelos se houver dados suficientes
-    try:
-        df = ml_system.get_training_data()
-        if len(df) >= ml_system.min_trades_for_training:
-            logger.info("Retreinando modelos com dados existentes...")
-            ml_system.train_models()
-    except Exception as e:
-        logger.warning(f"Erro no treino inicial: {e}")
-    
-    yield
-    
-    # Shutdown
-    logger.info("Finalizando sistema ML...")
+# ===== FASTAPI APP =====
 
 app = FastAPI(
-    title="ML Trading API",
-    description="API de Machine Learning para Trading Bot",
-    version="2.0.0",
-    lifespan=lifespan
+    title="ML Trading Bot API",
+    description="API de Machine Learning para Trading Bot com Scikit-learn",
+    version="1.0.0"
 )
 
-# CORS
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Em produção, especificar domínios
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Endpoints da API
+# ===== ENDPOINTS =====
+
 @app.get("/")
 async def root():
+    """Endpoint raiz"""
     return {
-        "message": "🧠 ML Trading API está funcionando!",
-        "version": "2.0.0",
+        "message": "🧠 ML Trading Bot API",
+        "version": "1.0.0",
+        "status": "online",
         "models_loaded": len(ml_system.models),
-        "timestamp": datetime.now().isoformat(),
-        "environment": config.get_environment_summary() if config else "basic"
+        "documentation": "/docs"
     }
 
 @app.get("/health")
 async def health_check():
-    stats = ml_system.get_ml_stats()
+    """Health check da API"""
     return {
         "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
         "models_loaded": len(ml_system.models),
-        "database_connected": True,
-        "ml_stats": stats,
-        "timestamp": datetime.now().isoformat()
+        "is_trained": ml_system.is_trained,
+        "ml_stats": ml_system.get_stats()["ml_stats"]
     }
 
-@app.post("/trade/save")
-async def save_trade(trade_data: TradeData, background_tasks: BackgroundTasks):
-    """Salva dados de trade e retreina modelo se necessário"""
+@app.post("/ml/predict")
+async def predict_trade(request: PredictionRequest):
+    """Endpoint para predições ML"""
     try:
-        ml_system.save_trade_data(trade_data)
+        request_data = request.dict()
+        prediction = ml_system.predict(request_data)
         
-        # Retreinar modelo a cada 50 novos trades
-        def maybe_retrain():
-            df = ml_system.get_training_data()
-            if len(df) % 50 == 0 and len(df) >= ml_system.min_trades_for_training:
-                logger.info("Retreinando modelos...")
-                ml_system.train_models()
-                
-        background_tasks.add_task(maybe_retrain)
-        
-        return {"message": "Trade salvo com sucesso", "trade_id": trade_data.id}
+        return JSONResponse(content=prediction)
         
     except Exception as e:
-        logger.error(f"Erro ao salvar trade: {e}")
+        logger.error(f"❌ Erro na predição: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ml/predict")
-async def predict_trade(request: Dict):
-    """Faz predição ML para um trade"""
+@app.post("/trade/save")
+async def save_trade(trade: TradeData):
+    """Salva dados de trade"""
     try:
-        # Converter request para features
-        features = {
-            'hour_of_day': datetime.now().hour,
-            'volatility': request.get('volatility', 50),
-            'martingale_level': request.get('martingale_level', 0),
-            'stake_normalized': min(request.get('stake', 1) / 10.0, 1.0),
-            'symbol_encoded': hash(request.get('symbol', 'R_50')) % 100,
-            'direction_encoded': 1 if request.get('direction') == 'CALL' else 0,
-            'trend_encoded': {'bullish': 1, 'bearish': -1, 'neutral': 0}.get(request.get('trend', 'neutral'), 0),
-            'duration_minutes': 1.0,
-            'entry_price_normalized': request.get('current_price', 1000) / 1000.0,
-            'recent_wins': request.get('recent_wins', 0),
-            'recent_losses': request.get('recent_losses', 0),
-            'recent_win_rate': request.get('recent_win_rate', 0.5)
-        }
+        success = ml_system.save_trade(trade)
         
-        prediction = ml_system.predict_trade_outcome(features)
-        return prediction
+        if success:
+            return {"message": "Trade salvo com sucesso", "trade_id": trade.id}
+        else:
+            raise HTTPException(status_code=500, detail="Erro ao salvar trade")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro salvando trade: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/ml/stats")
+async def get_ml_stats():
+    """Retorna estatísticas ML"""
+    try:
+        stats = ml_system.get_stats()
+        return JSONResponse(content=stats)
         
     except Exception as e:
-        logger.error(f"Erro na predição: {e}")
+        logger.error(f"❌ Erro nas estatísticas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ml/train")
 async def train_models(background_tasks: BackgroundTasks):
-    """Força retreinamento dos modelos"""
-    def train():
-        success = ml_system.train_models()
-        logger.info(f"Retreinamento {'bem-sucedido' if success else 'falhou'}")
-        
-    background_tasks.add_task(train)
-    
-    return {"message": "Retreinamento iniciado em background"}
-
-@app.get("/ml/stats")
-async def get_ml_statistics():
-    """Retorna estatísticas do sistema ML"""
+    """Retreina modelos ML em background"""
     try:
-        stats = ml_system.get_ml_stats()
-        patterns = ml_system.analyze_patterns()
+        def train_in_background():
+            logger.info("🎓 Iniciando treinamento em background...")
+            ml_system.train_models()
+            logger.info("✅ Treinamento concluído")
+        
+        background_tasks.add_task(train_in_background)
         
         return {
-            "ml_stats": stats,
-            "patterns": patterns,
-            "models_available": list(ml_system.models.keys()),
-            "feature_count": len(ml_system.feature_columns),
-            "database_size": stats["total_trades"]
+            "message": "Treinamento iniciado em background",
+            "status": "started"
         }
         
     except Exception as e:
-        logger.error(f"Erro ao obter estatísticas: {e}")
+        logger.error(f"❌ Erro iniciando treinamento: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ml/analyze")
+async def analyze_market(request: AnalysisRequest):
+    """Análise de mercado ML"""
+    try:
+        # Análise simples baseada nos dados
+        analysis = {
+            "message": "Análise de mercado concluída",
+            "recommendation": "neutral",
+            "confidence": 0.7,
+            "factors": [
+                f"Win rate atual: {request.win_rate:.1f}%",
+                f"Volatilidade: {request.volatility:.1f}",
+                f"Condição do mercado: {request.market_condition}"
+            ]
+        }
+        
+        # Lógica simples de recomendação
+        if request.win_rate > 60 and request.volatility < 50:
+            analysis["recommendation"] = "favorable"
+            analysis["message"] = "Condições favoráveis para trading"
+        elif request.win_rate < 40 or request.volatility > 80:
+            analysis["recommendation"] = "cautious"
+            analysis["message"] = "Condições requerem cautela"
+        
+        return JSONResponse(content=analysis)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro na análise: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/ml/patterns")
 async def get_patterns():
-    """Retorna padrões identificados pelo ML"""
+    """Retorna padrões identificados"""
     try:
         patterns = ml_system.analyze_patterns()
-        return patterns
+        
+        return {
+            "patterns": patterns,
+            "total": len(patterns),
+            "generated_at": datetime.now().isoformat()
+        }
         
     except Exception as e:
-        logger.error(f"Erro ao obter padrões: {e}")
+        logger.error(f"❌ Erro nos padrões: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ===== MAIN =====
+
 if __name__ == "__main__":
-    import uvicorn
+    # Configurações
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", 8000))
     
-    # Configurações do servidor
-    host = config.api.host if config and hasattr(config, 'api') else "0.0.0.0"
-    port = config.api.port if config and hasattr(config, 'api') else 8000
-    debug = config.api.debug if config and hasattr(config, 'api') else False
-    
-    logger.info(f"🚀 Iniciando ML Trading API em {host}:{port}")
-    logger.info(f"🧠 Modelos ML carregados: {len(ml_system.models)}")
-    logger.info(f"📊 Monitoramento: {'Ativo' if monitor else 'Inativo'}")
+    logger.info(f"🚀 Iniciando ML Trading Bot API em {host}:{port}")
+    logger.info(f"📊 Modelos carregados: {len(ml_system.models)}")
+    logger.info(f"🎯 Treinamento: {'OK' if ml_system.is_trained else 'Pendente'}")
     
     uvicorn.run(
-        app, 
-        host=host, 
-        port=port, 
-        debug=debug,
-        access_log=True,
+        "main:app",
+        host=host,
+        port=port,
+        reload=False,
         log_level="info"
     )
