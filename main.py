@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-API Principal do ML Trading Bot - ANÁLISES REAIS
-FastAPI + Scikit-learn para predições em tempo real com logs detalhados
+API Principal do ML Trading Bot
+FastAPI + Scikit-learn para predições em tempo real
 """
 
 import os
@@ -23,17 +23,14 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.preprocessing import StandardScaler
 import joblib
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-# Configurar logging detalhado
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ===== MODELS PYDANTIC =====
@@ -83,7 +80,7 @@ class AnalysisRequest(BaseModel):
 # ===== ML TRADING SYSTEM =====
 
 class MLTradingSystem:
-    """Sistema de Machine Learning para Trading com Análises Reais"""
+    """Sistema de Machine Learning para Trading"""
     
     def __init__(self, db_path: str = "data/trading_data.db"):
         self.db_path = db_path
@@ -91,21 +88,10 @@ class MLTradingSystem:
         self.scalers = {}
         self.is_trained = False
         self.last_training = None
-        self.prediction_count = 0
-        self.analysis_count = 0
         self.feature_columns = [
             'current_price', 'volatility', 'martingale_level', 
             'recent_win_rate', 'stake', 'duration_numeric'
         ]
-        
-        # Estatísticas em tempo real
-        self.stats = {
-            'total_predictions': 0,
-            'total_analysis': 0,
-            'total_trades_learned': 0,
-            'models_accuracy': {},
-            'patterns_found': []
-        }
         
         # Criar diretórios
         Path("data").mkdir(exist_ok=True)
@@ -120,8 +106,6 @@ class MLTradingSystem:
         # Treinar se necessário
         if not self.is_trained:
             self.train_initial_models()
-        
-        logger.info("🧠 Sistema ML Trading REAL inicializado com sucesso")
     
     def init_database(self):
         """Inicializa o banco de dados"""
@@ -162,45 +146,10 @@ class MLTradingSystem:
             )
         ''')
         
-        # Tabela de atividade frontend
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS frontend_activity (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                endpoint TEXT NOT NULL,
-                request_data TEXT,
-                response_data TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ip_address TEXT,
-                user_agent TEXT
-            )
-        ''')
-        
         conn.commit()
         conn.close()
         
-        logger.info("✅ Banco de dados inicializado com tabelas ML")
-    
-    def log_frontend_activity(self, endpoint: str, request_data: dict, response_data: dict, ip: str = None):
-        """Log da atividade do frontend"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO frontend_activity (endpoint, request_data, response_data, ip_address)
-                VALUES (?, ?, ?, ?)
-            ''', (
-                endpoint,
-                json.dumps(request_data),
-                json.dumps(response_data),
-                ip or 'unknown'
-            ))
-            
-            conn.commit()
-            conn.close()
-            logger.info(f"📝 Atividade frontend registrada: {endpoint}")
-        except Exception as e:
-            logger.error(f"Erro ao registrar atividade: {e}")
+        logger.info("✅ Banco de dados inicializado")
     
     def create_features(self, data: Dict) -> np.ndarray:
         """Cria features para o modelo ML"""
@@ -210,19 +159,19 @@ class MLTradingSystem:
             duration_numeric = float(duration_str.replace('t', '').replace('ticks', ''))
             
             features = [
-                float(data.get('current_price', 1000)),
-                float(data.get('volatility', 50)),
+                float(data.get('current_price', 0)),
+                float(data.get('volatility', 50)),  # Default médio
                 int(data.get('martingale_level', 0)),
                 float(data.get('recent_win_rate', 0.5)),
                 float(data.get('stake', 1)),
                 duration_numeric
             ]
             
-            logger.info(f"🔢 Features criadas: {features}")
             return np.array(features).reshape(1, -1)
             
         except Exception as e:
             logger.error(f"Erro ao criar features: {e}")
+            # Features padrão em caso de erro
             return np.array([1000, 50, 0, 0.5, 1, 5]).reshape(1, -1)
     
     def get_trade_data(self) -> pd.DataFrame:
@@ -238,10 +187,9 @@ class MLTradingSystem:
             ''', conn)
             
             if len(df) == 0:
+                # Criar dados sintéticos para treinamento inicial
                 logger.info("Criando dados sintéticos para treinamento inicial...")
                 df = self.create_synthetic_data()
-            else:
-                logger.info(f"📊 {len(df)} trades reais carregados do banco")
             
             return df
             
@@ -270,6 +218,7 @@ class MLTradingSystem:
         # Criar outcomes baseados em lógica simples
         outcomes = []
         for i in range(n_samples):
+            # Lógica sintética: win_rate alta = mais chance de win
             win_prob = data['recent_win_rate'][i] * 0.8 + np.random.uniform(0, 0.4)
             outcome = 'won' if win_prob > 0.5 else 'lost'
             outcomes.append(outcome)
@@ -283,6 +232,7 @@ class MLTradingSystem:
         if len(df) < 10:
             raise ValueError("Dados insuficientes para treinamento")
         
+        # Features
         features_list = []
         for _, row in df.iterrows():
             duration_numeric = float(str(row.get('duration', 5)).replace('t', '').replace('ticks', ''))
@@ -298,6 +248,8 @@ class MLTradingSystem:
             features_list.append(features)
         
         X = np.array(features_list)
+        
+        # Target: converter outcome para binário
         y = (df['outcome'] == 'won').astype(int)
         
         return X, y
@@ -307,21 +259,26 @@ class MLTradingSystem:
         logger.info("🎓 Iniciando treinamento dos modelos ML...")
         
         try:
+            # Buscar dados
             df = self.get_trade_data()
             X, y = self.prepare_training_data(df)
             
             logger.info(f"📊 Dados de treinamento: {len(df)} trades")
             
+            # Split dos dados
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
             )
             
+            # Normalizar features
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
             
+            # Salvar scaler
             self.scalers['main'] = scaler
             
+            # Modelos para treinar
             models_config = {
                 'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
                 'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42),
@@ -332,10 +289,12 @@ class MLTradingSystem:
             
             results = {}
             
+            # Treinar cada modelo
             for name, model in models_config.items():
                 try:
                     logger.info(f"Treinando {name}...")
                     
+                    # Treinar
                     if name in ['svm', 'logistic_regression', 'neural_network']:
                         model.fit(X_train_scaled, y_train)
                         y_pred = model.predict(X_test_scaled)
@@ -343,17 +302,16 @@ class MLTradingSystem:
                         model.fit(X_train, y_train)
                         y_pred = model.predict(X_test)
                     
+                    # Avaliar
                     accuracy = accuracy_score(y_test, y_pred)
                     
+                    # Salvar modelo
                     self.models[name] = {
                         'model': model,
                         'accuracy': accuracy,
                         'trained_at': datetime.now().isoformat(),
                         'samples': len(X_train)
                     }
-                    
-                    # Atualizar estatísticas
-                    self.stats['models_accuracy'][name] = accuracy
                     
                     results[name] = {
                         'accuracy': accuracy,
@@ -366,6 +324,7 @@ class MLTradingSystem:
                     logger.error(f"❌ Erro treinando {name}: {e}")
                     continue
             
+            # Salvar modelos
             self.save_models()
             
             self.is_trained = True
@@ -394,6 +353,7 @@ class MLTradingSystem:
                 model_path = f"models/{name}_model.joblib"
                 joblib.dump(model_data, model_path)
             
+            # Salvar scalers
             for name, scaler in self.scalers.items():
                 scaler_path = f"models/{name}_scaler.joblib"
                 joblib.dump(scaler, scaler_path)
@@ -410,6 +370,7 @@ class MLTradingSystem:
             if not models_dir.exists():
                 return
             
+            # Carregar modelos
             for model_file in models_dir.glob("*_model.joblib"):
                 name = model_file.stem.replace("_model", "")
                 try:
@@ -419,6 +380,7 @@ class MLTradingSystem:
                 except Exception as e:
                     logger.error(f"❌ Erro carregando {name}: {e}")
             
+            # Carregar scalers
             for scaler_file in models_dir.glob("*_scaler.joblib"):
                 name = scaler_file.stem.replace("_scaler", "")
                 try:
@@ -435,167 +397,68 @@ class MLTradingSystem:
             logger.error(f"❌ Erro carregando modelos: {e}")
     
     def predict(self, request_data: Dict) -> Dict:
-        """Faz predição ML REAL"""
-        logger.info(f"🧠 Nova solicitação de predição ML: {request_data}")
-        
+        """Faz predição ML"""
         try:
             if not self.models:
-                logger.warning("⚠️ Nenhum modelo disponível para predição")
                 return {
                     "prediction": "neutral",
                     "confidence": 0.5,
                     "model_used": "none",
-                    "reason": "Nenhum modelo treinado disponível",
-                    "analysis_real": True
+                    "reason": "Nenhum modelo treinado disponível"
                 }
             
+            # Criar features
             features = self.create_features(request_data)
             
+            # Usar o melhor modelo disponível
             best_model_name = max(self.models.keys(), 
                                 key=lambda x: self.models[x]['accuracy'])
             
             model_data = self.models[best_model_name]
             model = model_data['model']
             
+            # Aplicar normalização se necessário
             if best_model_name in ['svm', 'logistic_regression', 'neural_network']:
                 if 'main' in self.scalers:
                     features = self.scalers['main'].transform(features)
             
+            # Predição
             prediction_proba = model.predict_proba(features)[0]
             prediction_binary = model.predict(features)[0]
             
+            # Interpretar resultado
             confidence = max(prediction_proba)
             
             if prediction_binary == 1 and confidence > 0.6:
                 prediction = "favor"
-                reason = f"ML recomenda CALL/RISE com {confidence:.1%} confiança"
+                reason = f"ML recomenda este trade com {confidence:.1%} confiança"
             elif prediction_binary == 0 and confidence > 0.6:
                 prediction = "avoid"
-                reason = f"ML recomenda PUT/FALL com {confidence:.1%} confiança"
+                reason = f"ML recomenda evitar este trade ({confidence:.1%} confiança de perda)"
             else:
                 prediction = "neutral"
                 reason = f"ML neutro - confiança baixa ({confidence:.1%})"
             
-            # Atualizar estatísticas
-            self.stats['total_predictions'] += 1
-            self.prediction_count += 1
-            
-            result = {
+            return {
                 "prediction": prediction,
                 "confidence": float(confidence),
                 "win_probability": float(prediction_proba[1]),
                 "model_used": best_model_name,
                 "reason": reason,
-                "model_accuracy": model_data['accuracy'],
-                "analysis_real": True,
-                "prediction_id": self.prediction_count,
-                "timestamp": datetime.now().isoformat()
+                "model_accuracy": model_data['accuracy']
             }
             
-            logger.info(f"✅ Predição ML concluída: {prediction} ({confidence:.1%})")
-            return result
-            
         except Exception as e:
-            logger.error(f"❌ Erro na predição ML: {e}")
+            logger.error(f"❌ Erro na predição: {e}")
             return {
                 "prediction": "neutral",
                 "confidence": 0.5,
                 "model_used": "error",
-                "reason": f"Erro na predição: {str(e)}",
-                "analysis_real": False
-            }
-    
-    def analyze_market(self, analysis_data: Dict) -> Dict:
-        """Análise de mercado ML REAL"""
-        logger.info(f"📊 Nova solicitação de análise ML: {analysis_data}")
-        
-        try:
-            self.analysis_count += 1
-            self.stats['total_analysis'] += 1
-            
-            # Análise real baseada nos dados
-            symbol = analysis_data.get('symbol', 'Unknown')
-            win_rate = analysis_data.get('win_rate', 0)
-            volatility = analysis_data.get('volatility', 50)
-            martingale_level = analysis_data.get('martingale_level', 0)
-            market_condition = analysis_data.get('market_condition', 'neutral')
-            
-            # Lógica de análise real
-            score = 0.5  # Base neutra
-            
-            # Ajustar score baseado em win rate
-            if win_rate > 60:
-                score += 0.2
-            elif win_rate < 40:
-                score -= 0.2
-            
-            # Ajustar score baseado em volatilidade
-            if 30 <= volatility <= 70:  # Volatilidade ideal
-                score += 0.1
-            elif volatility > 80:  # Muito volátil
-                score -= 0.15
-            
-            # Penalizar martingale alto
-            if martingale_level > 2:
-                score -= 0.1 * martingale_level
-            
-            # Ajustar baseado em condição de mercado
-            if market_condition == 'favorable':
-                score += 0.15
-            elif market_condition == 'unfavorable':
-                score -= 0.15
-            
-            score = max(0.1, min(0.9, score))  # Limitar entre 0.1 e 0.9
-            
-            # Determinar recomendação
-            if score > 0.7:
-                recommendation = "favorable"
-                message = f"📈 Condições FAVORÁVEIS para trading (Score: {score:.2f})"
-            elif score < 0.4:
-                recommendation = "cautious"
-                message = f"⚠️ Condições requerem CAUTELA (Score: {score:.2f})"
-            else:
-                recommendation = "neutral"
-                message = f"📊 Condições NEUTRAS - análise cuidadosa (Score: {score:.2f})"
-            
-            analysis = {
-                "message": message,
-                "recommendation": recommendation,
-                "confidence": score,
-                "analysis_real": True,
-                "analysis_id": self.analysis_count,
-                "timestamp": datetime.now().isoformat(),
-                "factors": [
-                    f"Win rate: {win_rate:.1f}%",
-                    f"Volatilidade: {volatility:.1f}",
-                    f"Condição: {market_condition}",
-                    f"Martingale: Nível {martingale_level}",
-                    f"Símbolo: {symbol}"
-                ],
-                "score_breakdown": {
-                    "base_score": 0.5,
-                    "win_rate_adjustment": (win_rate - 50) / 100,
-                    "volatility_adjustment": 0.1 if 30 <= volatility <= 70 else -0.15,
-                    "martingale_penalty": -0.1 * martingale_level if martingale_level > 2 else 0,
-                    "market_condition_adjustment": 0.15 if market_condition == 'favorable' else -0.15 if market_condition == 'unfavorable' else 0,
-                    "final_score": score
-                }
-            }
-            
-            logger.info(f"✅ Análise ML concluída: {recommendation} (Score: {score:.2f})")
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"❌ Erro na análise ML: {e}")
-            return {
-                "message": f"Erro na análise: {str(e)}",
-                "recommendation": "error",
-                "confidence": 0.5,
-                "analysis_real": False
+                "reason": f"Erro na predição: {str(e)}"
             }
     
     def save_trade(self, trade_data: TradeData) -> bool:
-        """Salva trade no banco de dados para aprendizado"""
+        """Salva trade no banco de dados"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -624,9 +487,7 @@ class MLTradingSystem:
             conn.commit()
             conn.close()
             
-            self.stats['total_trades_learned'] += 1
-            
-            logger.info(f"💾 Trade {trade_data.id} salvo para aprendizado ML")
+            logger.info(f"💾 Trade {trade_data.id} salvo")
             return True
             
         except Exception as e:
@@ -634,11 +495,12 @@ class MLTradingSystem:
             return False
     
     def get_stats(self) -> Dict:
-        """Retorna estatísticas do sistema ML em tempo real"""
+        """Retorna estatísticas do sistema ML"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Estatísticas básicas
             cursor.execute("SELECT COUNT(*) FROM trades")
             total_trades = cursor.fetchone()[0]
             
@@ -647,6 +509,7 @@ class MLTradingSystem:
             
             win_rate = total_wins / total_trades if total_trades > 0 else 0
             
+            # Padrões simples
             patterns = self.analyze_patterns()
             
             conn.close()
@@ -657,19 +520,13 @@ class MLTradingSystem:
                     "total_wins": total_wins,
                     "overall_win_rate": win_rate,
                     "models_loaded": len(self.models),
-                    "last_training": self.last_training,
-                    "predictions_made": self.stats['total_predictions'],
-                    "analysis_made": self.stats['total_analysis'],
-                    "trades_learned": self.stats['total_trades_learned']
+                    "last_training": self.last_training
                 },
                 "models_available": list(self.models.keys()),
-                "models_accuracy": self.stats['models_accuracy'],
                 "patterns": {
                     "patterns": patterns,
                     "patterns_count": len(patterns)
-                },
-                "system_status": "active_learning",
-                "last_update": datetime.now().isoformat()
+                }
             }
             
         except Exception as e:
@@ -680,18 +537,14 @@ class MLTradingSystem:
                     "total_wins": 0,
                     "overall_win_rate": 0,
                     "models_loaded": len(self.models),
-                    "last_training": None,
-                    "predictions_made": self.stats['total_predictions'],
-                    "analysis_made": self.stats['total_analysis'],
-                    "trades_learned": self.stats['total_trades_learned']
+                    "last_training": None
                 },
                 "models_available": [],
-                "patterns": {"patterns": [], "patterns_count": 0},
-                "system_status": "error"
+                "patterns": {"patterns": [], "patterns_count": 0}
             }
     
     def analyze_patterns(self) -> List[Dict]:
-        """Analisa padrões ML reais nos dados"""
+        """Analisa padrões simples nos dados"""
         try:
             df = self.get_trade_data()
             if len(df) < 10:
@@ -709,7 +562,7 @@ class MLTradingSystem:
                     if win_rate > 0.6:
                         patterns.append({
                             "type": "symbol_performance",
-                            "description": f"Símbolo {symbol} tem alta taxa de vitória ({win_rate:.1%})",
+                            "description": f"Símbolo {symbol} tem alta taxa de vitória",
                             "confidence": win_rate,
                             "data": {"symbol": symbol, "win_rate": win_rate}
                         })
@@ -724,29 +577,12 @@ class MLTradingSystem:
                     if win_rate > 0.6:
                         patterns.append({
                             "type": "direction_bias",
-                            "description": f"Direção {direction} tem melhor performance ({win_rate:.1%})",
+                            "description": f"Direção {direction} tem melhor performance",
                             "confidence": win_rate,
                             "data": {"direction": direction, "win_rate": win_rate}
                         })
             
-            # Padrão 3: Performance por nível Martingale
-            if 'martingale_level' in df.columns:
-                martingale_stats = df.groupby('martingale_level')['outcome'].apply(
-                    lambda x: (x == 'won').mean()
-                ).to_dict()
-                
-                for level, win_rate in martingale_stats.items():
-                    if level > 0 and win_rate > 0.5:
-                        patterns.append({
-                            "type": "martingale_recovery",
-                            "description": f"Martingale nível {level} tem {win_rate:.1%} de recuperação",
-                            "confidence": win_rate,
-                            "data": {"martingale_level": level, "win_rate": win_rate}
-                        })
-            
-            self.stats['patterns_found'] = patterns
-            logger.info(f"🔍 {len(patterns)} padrões ML identificados")
-            return patterns[:10]
+            return patterns[:10]  # Máximo 10 padrões
             
         except Exception as e:
             logger.error(f"❌ Erro analisando padrões: {e}")
@@ -758,165 +594,65 @@ ml_system = MLTradingSystem()
 # ===== FASTAPI APP =====
 
 app = FastAPI(
-    title="ML Trading Bot API - ANÁLISES REAIS",
-    description="API de Machine Learning para Trading Bot com Análises Reais e Logs Detalhados",
-    version="2.0.0"
+    title="ML Trading Bot API",
+    description="API de Machine Learning para Trading Bot com Scikit-learn",
+    version="1.0.0"
 )
 
-# ===== CONFIGURAR CORS DETALHADO =====
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Em produção, especificar domínios
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ===== MIDDLEWARE DE LOG =====
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = datetime.now()
-    
-    # Log da requisição
-    logger.info(f"🌐 Requisição: {request.method} {request.url.path} de {request.client.host}")
-    
-    response = await call_next(request)
-    
-    # Log da resposta
-    process_time = (datetime.now() - start_time).total_seconds()
-    logger.info(f"✅ Resposta: {response.status_code} em {process_time:.3f}s")
-    
-    return response
 
 # ===== ENDPOINTS =====
 
 @app.get("/")
 async def root():
-    """Endpoint raiz com informações detalhadas"""
-    logger.info("🏠 Endpoint raiz acessado")
+    """Endpoint raiz"""
     return {
-        "message": "🧠 ML Trading Bot API - ANÁLISES REAIS",
-        "version": "2.0.0",
-        "status": "online_ml_real",
+        "message": "🧠 ML Trading Bot API",
+        "version": "1.0.0",
+        "status": "online",
         "models_loaded": len(ml_system.models),
-        "predictions_made": ml_system.stats['total_predictions'],
-        "analysis_made": ml_system.stats['total_analysis'],
-        "documentation": "/docs",
-        "health_check": "/health",
-        "timestamp": datetime.now().isoformat(),
-        "ml_features": [
-            "Predições ML Reais",
-            "Análise de Mercado ML",
-            "Aprendizado Contínuo",
-            "Padrões ML",
-            "Estatísticas em Tempo Real"
-        ]
+        "documentation": "/docs"
     }
 
 @app.get("/health")
-async def health_check(request: Request):
-    """Health check detalhado da API"""
-    logger.info(f"🏥 Health check acessado de {request.client.host}")
-    
-    health_data = {
+async def health_check():
+    """Health check da API"""
+    return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "models_loaded": len(ml_system.models),
         "is_trained": ml_system.is_trained,
-        "ml_stats": ml_system.get_stats()["ml_stats"],
-        "models_available": list(ml_system.models.keys()),
-        "predictions_today": ml_system.stats['total_predictions'],
-        "analysis_today": ml_system.stats['total_analysis'],
-        "last_training": ml_system.last_training,
-        "system_info": {
-            "environment": os.getenv("ENVIRONMENT", "production"),
-            "port": os.getenv("PORT", "10000"),
-            "memory_usage": "optimized",
-            "ml_ready": True
-        }
+        "ml_stats": ml_system.get_stats()["ml_stats"]
     }
-    
-    logger.info("✅ Health check respondido com sucesso")
-    return health_data
 
 @app.post("/ml/predict")
-async def predict_trade(request: PredictionRequest, req: Request):
-    """Endpoint para predições ML REAIS"""
-    logger.info(f"🎯 Predição ML solicitada de {req.client.host}")
-    
+async def predict_trade(request: PredictionRequest):
+    """Endpoint para predições ML"""
     try:
         request_data = request.dict()
-        logger.info(f"📥 Dados recebidos: {request_data}")
-        
-        # Fazer predição real
         prediction = ml_system.predict(request_data)
-        
-        # Log da atividade
-        ml_system.log_frontend_activity("predict", request_data, prediction, req.client.host)
-        
-        logger.info(f"📤 Predição enviada: {prediction['prediction']} ({prediction['confidence']:.1%})")
         
         return JSONResponse(content=prediction)
         
     except Exception as e:
         logger.error(f"❌ Erro na predição: {e}")
-        error_response = {
-            "error": f"Erro na predição: {str(e)}",
-            "prediction": "neutral",
-            "confidence": 0.5,
-            "analysis_real": False
-        }
-        return JSONResponse(content=error_response, status_code=500)
-
-@app.post("/ml/analyze")
-async def analyze_market(request: AnalysisRequest, req: Request):
-    """Análise de mercado ML REAL"""
-    logger.info(f"📊 Análise ML solicitada de {req.client.host}")
-    
-    try:
-        request_data = request.dict()
-        logger.info(f"📥 Dados de análise: {request_data}")
-        
-        # Fazer análise real
-        analysis = ml_system.analyze_market(request_data)
-        
-        # Log da atividade
-        ml_system.log_frontend_activity("analyze", request_data, analysis, req.client.host)
-        
-        logger.info(f"📤 Análise enviada: {analysis['recommendation']} (Score: {analysis['confidence']:.2f})")
-        
-        return JSONResponse(content=analysis)
-        
-    except Exception as e:
-        logger.error(f"❌ Erro na análise: {e}")
-        error_response = {
-            "error": f"Erro na análise: {str(e)}",
-            "recommendation": "error",
-            "confidence": 0.5,
-            "analysis_real": False
-        }
-        return JSONResponse(content=error_response, status_code=500)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/trade/save")
-async def save_trade(trade: TradeData, req: Request):
-    """Salva dados de trade para aprendizado ML"""
-    logger.info(f"💾 Trade para salvar recebido de {req.client.host}")
-    
+async def save_trade(trade: TradeData):
+    """Salva dados de trade"""
     try:
-        trade_data = trade.dict()
-        logger.info(f"📥 Dados do trade: {trade_data}")
-        
         success = ml_system.save_trade(trade)
         
         if success:
-            response = {
-                "message": "Trade salvo com sucesso para aprendizado ML",
-                "trade_id": trade.id,
-                "learned": True,
-                "total_trades_learned": ml_system.stats['total_trades_learned']
-            }
-            logger.info(f"✅ Trade salvo: {trade.id}")
-            return response
+            return {"message": "Trade salvo com sucesso", "trade_id": trade.id}
         else:
             raise HTTPException(status_code=500, detail="Erro ao salvar trade")
             
@@ -925,13 +661,10 @@ async def save_trade(trade: TradeData, req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/ml/stats")
-async def get_ml_stats(req: Request):
-    """Retorna estatísticas ML em tempo real"""
-    logger.info(f"📊 Estatísticas ML solicitadas de {req.client.host}")
-    
+async def get_ml_stats():
+    """Retorna estatísticas ML"""
     try:
         stats = ml_system.get_stats()
-        logger.info(f"📤 Estatísticas enviadas: {stats['ml_stats']['total_trades']} trades")
         return JSONResponse(content=stats)
         
     except Exception as e:
@@ -939,96 +672,81 @@ async def get_ml_stats(req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ml/train")
-async def train_models(background_tasks: BackgroundTasks, req: Request):
+async def train_models(background_tasks: BackgroundTasks):
     """Retreina modelos ML em background"""
-    logger.info(f"🎓 Treinamento ML solicitado de {req.client.host}")
-    
     try:
         def train_in_background():
             logger.info("🎓 Iniciando treinamento em background...")
-            results = ml_system.train_models()
-            logger.info(f"✅ Treinamento concluído: {len(results)} modelos")
+            ml_system.train_models()
+            logger.info("✅ Treinamento concluído")
         
         background_tasks.add_task(train_in_background)
         
         return {
-            "message": "Treinamento ML iniciado em background",
-            "status": "started",
-            "current_models": len(ml_system.models),
-            "timestamp": datetime.now().isoformat()
+            "message": "Treinamento iniciado em background",
+            "status": "started"
         }
         
     except Exception as e:
         logger.error(f"❌ Erro iniciando treinamento: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/ml/analyze")
+async def analyze_market(request: AnalysisRequest):
+    """Análise de mercado ML"""
+    try:
+        # Análise simples baseada nos dados
+        analysis = {
+            "message": "Análise de mercado concluída",
+            "recommendation": "neutral",
+            "confidence": 0.7,
+            "factors": [
+                f"Win rate atual: {request.win_rate:.1f}%",
+                f"Volatilidade: {request.volatility:.1f}",
+                f"Condição do mercado: {request.market_condition}"
+            ]
+        }
+        
+        # Lógica simples de recomendação
+        if request.win_rate > 60 and request.volatility < 50:
+            analysis["recommendation"] = "favorable"
+            analysis["message"] = "Condições favoráveis para trading"
+        elif request.win_rate < 40 or request.volatility > 80:
+            analysis["recommendation"] = "cautious"
+            analysis["message"] = "Condições requerem cautela"
+        
+        return JSONResponse(content=analysis)
+        
+    except Exception as e:
+        logger.error(f"❌ Erro na análise: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/ml/patterns")
-async def get_patterns(req: Request):
-    """Retorna padrões ML identificados"""
-    logger.info(f"🔍 Padrões ML solicitados de {req.client.host}")
-    
+async def get_patterns():
+    """Retorna padrões identificados"""
     try:
         patterns = ml_system.analyze_patterns()
         
-        response = {
+        return {
             "patterns": patterns,
             "total": len(patterns),
-            "generated_at": datetime.now().isoformat(),
-            "analysis_real": True
+            "generated_at": datetime.now().isoformat()
         }
-        
-        logger.info(f"📤 Padrões enviados: {len(patterns)} identificados")
-        return response
         
     except Exception as e:
         logger.error(f"❌ Erro nos padrões: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ===== ENDPOINT DE DEBUG =====
-@app.get("/debug/activity")
-async def get_frontend_activity():
-    """Debug: últimas atividades do frontend"""
-    try:
-        conn = sqlite3.connect(ml_system.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT * FROM frontend_activity 
-            ORDER BY timestamp DESC 
-            LIMIT 10
-        ''')
-        
-        activities = []
-        for row in cursor.fetchall():
-            activities.append({
-                "id": row[0],
-                "endpoint": row[1],
-                "timestamp": row[4],
-                "ip": row[5]
-            })
-        
-        conn.close()
-        
-        return {
-            "recent_activities": activities,
-            "total_predictions": ml_system.stats['total_predictions'],
-            "total_analysis": ml_system.stats['total_analysis']
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
-
 # ===== MAIN =====
 
 if __name__ == "__main__":
+    # Configurações
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("PORT", 8000))
     
-    logger.info(f"🚀 Iniciando ML Trading Bot API REAL em {host}:{port}")
+    logger.info(f"🚀 Iniciando ML Trading Bot API em {host}:{port}")
     logger.info(f"📊 Modelos carregados: {len(ml_system.models)}")
     logger.info(f"🎯 Treinamento: {'OK' if ml_system.is_trained else 'Pendente'}")
-    logger.info(f"🔗 URL: http://{host}:{port}")
-    logger.info("🧠 SISTEMA ML REAL ATIVO - AGUARDANDO CONEXÕES FRONTEND")
     
     uvicorn.run(
         "main:app",
