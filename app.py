@@ -1,901 +1,682 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+import os
+import json
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import pickle
-import os
-import requests
 import yfinance as yf
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+import requests
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import sqlite3
+import logging
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, mean_squared_error
-import ta
-import joblib
-import logging
-from typing import Dict, List, Any
-import json
-import asyncio
-import aiohttp
-import threading
-import time
+import talib
+import warnings
+warnings.filterwarnings('ignore')
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+# Configuração do Flask
 app = Flask(__name__)
 CORS(app)
 
-# URL da API de dados (segunda API que criaremos)
-DATA_API_URL = os.environ.get('DATA_API_URL', 'https://sua-api-dados.onrender.com')
-API_KEY = os.environ.get('API_KEY', 'rnd_qpdTVwAeWzIItVbxHPPCc34uirv9')
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class TradingMLEngine:
+# Configurações
+API_PORT = int(os.environ.get('PORT', 5000))
+DATABASE_URL = 'trading_stats.db'
+
+class TradingAI:
     def __init__(self):
-        self.model = None
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
         self.scaler = StandardScaler()
-        self.feature_columns = []
         self.is_trained = False
-        self.performance_history = []
-        self.model_path = 'trading_model.pkl'
-        self.scaler_path = 'scaler.pkl'
-        self.load_model()
+        self.init_database()
         
-    def load_model(self):
-        """Carrega modelo treinado se existir"""
-        try:
-            if os.path.exists(self.model_path):
-                self.model = joblib.load(self.model_path)
-                self.scaler = joblib.load(self.scaler_path)
-                self.is_trained = True
-                logger.info("Modelo carregado com sucesso")
-        except Exception as e:
-            logger.error(f"Erro ao carregar modelo: {e}")
-            self.create_default_model()
-    
-    def create_default_model(self):
-        """Cria modelo padrão"""
-        self.model = GradientBoostingRegressor(
-            n_estimators=100,
-            max_depth=6,
-            learning_rate=0.1,
-            random_state=42
-        )
-        logger.info("Modelo padrão criado")
-    
-    def save_model(self):
-        """Salva o modelo treinado"""
-        try:
-            joblib.dump(self.model, self.model_path)
-            joblib.dump(self.scaler, self.scaler_path)
-            logger.info("Modelo salvo com sucesso")
-        except Exception as e:
-            logger.error(f"Erro ao salvar modelo: {e}")
-    
-    async def get_market_data(self, symbol: str) -> pd.DataFrame:
+    def init_database(self):
+        """Inicializa o banco de dados"""
+        conn = sqlite3.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        # Tabela de trades
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                symbol TEXT,
+                direction TEXT,
+                stake REAL,
+                duration TEXT,
+                entry_price REAL,
+                exit_price REAL,
+                result TEXT,
+                pnl REAL,
+                martingale_level INTEGER,
+                market_conditions TEXT,
+                features TEXT
+            )
+        ''')
+        
+        # Tabela de estatísticas
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS statistics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date DATE,
+                total_trades INTEGER,
+                wins INTEGER,
+                losses INTEGER,
+                win_rate REAL,
+                total_pnl REAL,
+                best_streak INTEGER,
+                worst_streak INTEGER,
+                martingale_usage TEXT
+            )
+        ''')
+        
+        # Tabela de market data
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS market_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                symbol TEXT,
+                price REAL,
+                volume REAL,
+                rsi REAL,
+                macd REAL,
+                bb_upper REAL,
+                bb_lower REAL,
+                volatility REAL
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        
+    def get_market_data(self, symbol):
         """Obtém dados de mercado em tempo real"""
         try:
-            # Para índices sintéticos da Deriv, simulamos dados baseados em padrões reais
+            # Para índices sintéticos, usar dados simulados baseados em padrões reais
             if symbol.startswith('R_') or symbol.startswith('1HZ'):
-                return self.simulate_synthetic_data(symbol)
-            else:
-                # Para outros símbolos, usar yfinance
-                ticker = yf.Ticker(symbol)
-                data = ticker.history(period="1d", interval="1m")
-                return data
+                return self.get_synthetic_data(symbol)
+            
+            # Para outros símbolos, tentar yfinance
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="5d", interval="1m")
+            
+            if data.empty:
+                return self.get_synthetic_data(symbol)
+                
+            return self.process_market_data(data, symbol)
+            
         except Exception as e:
-            logger.error(f"Erro ao obter dados de mercado: {e}")
-            return self.simulate_synthetic_data(symbol)
+            logger.error(f"Erro ao obter dados do mercado: {e}")
+            return self.get_synthetic_data(symbol)
     
-    def simulate_synthetic_data(self, symbol: str) -> pd.DataFrame:
-        """Simula dados para índices sintéticos"""
-        try:
-            # Obter dados históricos da API de dados
-            response = requests.get(f"{DATA_API_URL}/market-data/{symbol}")
-            if response.status_code == 200:
-                data = response.json()
-                df = pd.DataFrame(data['prices'])
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df.set_index('timestamp', inplace=True)
-                return df
-        except:
-            pass
+    def get_synthetic_data(self, symbol):
+        """Gera dados sintéticos baseados em padrões de mercado reais"""
+        np.random.seed(int(datetime.now().timestamp()) % 1000)
         
-        # Fallback: gerar dados sintéticos
+        # Simular preços baseados no tipo de volatilidade
+        volatility_map = {
+            'R_10': 0.1, 'R_25': 0.25, 'R_50': 0.5, 'R_75': 0.75, 'R_100': 1.0,
+            '1HZ10V': 0.1, '1HZ25V': 0.25, '1HZ50V': 0.5, '1HZ75V': 0.75, '1HZ100V': 1.0
+        }
+        
+        volatility = volatility_map.get(symbol, 0.5)
+        base_price = 1000 + np.random.normal(0, 50)
+        
+        # Gerar série temporal com tendências realistas
         periods = 100
-        base_price = 1000
-        volatility = 0.02 if 'R_10' in symbol else 0.05
+        prices = [base_price]
         
-        timestamps = [datetime.now() - timedelta(minutes=i) for i in range(periods, 0, -1)]
-        prices = []
-        
-        current_price = base_price
-        for _ in range(periods):
-            change = np.random.normal(0, volatility) * current_price
-            current_price += change
-            prices.append(current_price)
+        for i in range(periods - 1):
+            # Movimento browniano com drift
+            drift = np.random.normal(0, volatility * 0.01)
+            noise = np.random.normal(0, volatility * 0.1)
+            new_price = prices[-1] * (1 + drift + noise)
+            prices.append(max(0.01, new_price))  # Evitar preços negativos
         
         df = pd.DataFrame({
-            'Open': prices,
-            'High': [p * (1 + abs(np.random.normal(0, 0.001))) for p in prices],
-            'Low': [p * (1 - abs(np.random.normal(0, 0.001))) for p in prices],
             'Close': prices,
-            'Volume': np.random.randint(1000, 10000, periods)
-        }, index=timestamps)
+            'High': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
+            'Low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
+            'Volume': [np.random.randint(1000, 10000) for _ in prices]
+        })
         
-        return df
+        return self.process_market_data(df, symbol)
     
-    def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calcula indicadores técnicos"""
+    def process_market_data(self, data, symbol):
+        """Processa dados de mercado e calcula indicadores técnicos"""
         try:
-            # RSI
-            df['rsi'] = ta.momentum.RSIIndicator(df['Close']).rsi()
+            close_prices = data['Close'].values
+            high_prices = data['High'].values
+            low_prices = data['Low'].values
+            volume = data['Volume'].values
             
-            # MACD
-            macd = ta.trend.MACD(df['Close'])
-            df['macd'] = macd.macd()
-            df['macd_signal'] = macd.macd_signal()
-            df['macd_diff'] = macd.macd_diff()
+            # Indicadores técnicos
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            macd, macd_signal, macd_hist = talib.MACD(close_prices)
+            bb_upper, bb_middle, bb_lower = talib.BBANDS(close_prices)
             
-            # Bollinger Bands
-            bollinger = ta.volatility.BollingerBands(df['Close'])
-            df['bb_high'] = bollinger.bollinger_hband()
-            df['bb_low'] = bollinger.bollinger_lband()
-            df['bb_mid'] = bollinger.bollinger_mavg()
+            # Volatilidade
+            volatility = talib.ATR(high_prices, low_prices, close_prices, timeperiod=14)
             
-            # Moving Averages
-            df['sma_20'] = ta.trend.SMAIndicator(df['Close'], window=20).sma_indicator()
-            df['ema_12'] = ta.trend.EMAIndicator(df['Close'], window=12).ema_indicator()
-            df['ema_26'] = ta.trend.EMAIndicator(df['Close'], window=26).ema_indicator()
+            current_data = {
+                'symbol': symbol,
+                'price': float(close_prices[-1]),
+                'rsi': float(rsi[-1]) if not np.isnan(rsi[-1]) else 50.0,
+                'macd': float(macd[-1]) if not np.isnan(macd[-1]) else 0.0,
+                'macd_signal': float(macd_signal[-1]) if not np.isnan(macd_signal[-1]) else 0.0,
+                'bb_upper': float(bb_upper[-1]) if not np.isnan(bb_upper[-1]) else float(close_prices[-1]),
+                'bb_lower': float(bb_lower[-1]) if not np.isnan(bb_lower[-1]) else float(close_prices[-1]),
+                'volatility': float(volatility[-1]) if not np.isnan(volatility[-1]) else 1.0,
+                'volume': float(volume[-1]) if len(volume) > 0 else 1000.0,
+                'timestamp': datetime.now().isoformat()
+            }
             
-            # Stochastic
-            stoch = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close'])
-            df['stoch_k'] = stoch.stoch()
-            df['stoch_d'] = stoch.stoch_signal()
+            # Salvar no banco
+            self.save_market_data(current_data)
             
-            # Volume indicators
-            df['volume_sma'] = ta.volume.VolumeSMAIndicator(df['Close'], df['Volume']).volume_sma()
+            return current_data
             
-            # ATR
-            df['atr'] = ta.volatility.AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
-            
-            # Momentum
-            df['momentum'] = df['Close'].pct_change(5)
-            
-            # Price relative to moving averages
-            df['price_vs_sma'] = (df['Close'] - df['sma_20']) / df['sma_20']
-            df['price_vs_ema'] = (df['Close'] - df['ema_12']) / df['ema_12']
-            
-            return df.fillna(method='bfill').fillna(0)
         except Exception as e:
-            logger.error(f"Erro ao calcular indicadores: {e}")
-            return df
+            logger.error(f"Erro no processamento de dados: {e}")
+            return {
+                'symbol': symbol,
+                'price': 1000.0,
+                'rsi': 50.0,
+                'macd': 0.0,
+                'macd_signal': 0.0,
+                'bb_upper': 1010.0,
+                'bb_lower': 990.0,
+                'volatility': 1.0,
+                'volume': 1000.0,
+                'timestamp': datetime.now().isoformat()
+            }
     
-    def extract_features(self, df: pd.DataFrame) -> np.ndarray:
-        """Extrai features para o modelo"""
-        feature_columns = [
-            'rsi', 'macd', 'macd_signal', 'macd_diff',
-            'bb_high', 'bb_low', 'bb_mid',
-            'sma_20', 'ema_12', 'ema_26',
-            'stoch_k', 'stoch_d', 'atr', 'momentum',
-            'price_vs_sma', 'price_vs_ema', 'volume_sma'
-        ]
-        
-        # Adicionar features de tempo
-        df['hour'] = df.index.hour
-        df['day_of_week'] = df.index.dayofweek
-        df['minute'] = df.index.minute
-        
-        feature_columns.extend(['hour', 'day_of_week', 'minute'])
-        
-        # Filtrar apenas colunas que existem
-        available_columns = [col for col in feature_columns if col in df.columns]
-        
-        if not available_columns:
-            logger.warning("Nenhuma feature disponível, usando preços básicos")
-            return df[['Close']].values
-        
-        self.feature_columns = available_columns
-        return df[available_columns].values
-    
-    async def get_historical_performance(self) -> Dict:
-        """Obtém performance histórica da API de dados"""
+    def save_market_data(self, data):
+        """Salva dados de mercado no banco"""
         try:
-            response = requests.get(f"{DATA_API_URL}/performance/history")
-            if response.status_code == 200:
-                return response.json()
+            conn = sqlite3.connect(DATABASE_URL)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO market_data 
+                (timestamp, symbol, price, volume, rsi, macd, bb_upper, bb_lower, volatility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data['timestamp'], data['symbol'], data['price'], data['volume'],
+                data['rsi'], data['macd'], data['bb_upper'], data['bb_lower'], data['volatility']
+            ))
+            
+            conn.commit()
+            conn.close()
+            
         except Exception as e:
-            logger.error(f"Erro ao obter performance histórica: {e}")
-        
-        return {"trades": [], "win_rate": 0, "total_pnl": 0}
+            logger.error(f"Erro ao salvar dados de mercado: {e}")
     
-    def train_with_historical_data(self, performance_data: Dict):
-        """Treina modelo com dados históricos"""
+    def extract_features(self, market_data, trade_history=None):
+        """Extrai features para o modelo de ML"""
+        features = []
+        
+        # Features de mercado
+        features.extend([
+            market_data['rsi'],
+            market_data['macd'],
+            market_data['volatility'],
+            (market_data['price'] - market_data['bb_lower']) / (market_data['bb_upper'] - market_data['bb_lower']) if market_data['bb_upper'] != market_data['bb_lower'] else 0.5
+        ])
+        
+        # Features temporais
+        now = datetime.now()
+        features.extend([
+            now.hour / 24.0,  # Hora do dia normalizada
+            now.weekday() / 6.0,  # Dia da semana normalizado
+            (now.minute % 60) / 60.0  # Minuto normalizado
+        ])
+        
+        # Features de histórico (se disponível)
+        if trade_history:
+            recent_trades = trade_history[-10:]  # Últimos 10 trades
+            if recent_trades:
+                win_rate = sum(1 for t in recent_trades if t.get('result') == 'win') / len(recent_trades)
+                avg_pnl = np.mean([t.get('pnl', 0) for t in recent_trades])
+                features.extend([win_rate, avg_pnl / 100.0])  # Normalizar PnL
+            else:
+                features.extend([0.5, 0.0])
+        else:
+            features.extend([0.5, 0.0])
+        
+        return np.array(features).reshape(1, -1)
+    
+    def train_model(self):
+        """Treina o modelo com dados históricos"""
         try:
-            trades = performance_data.get('trades', [])
-            if len(trades) < 10:
-                logger.warning("Dados insuficientes para treinamento")
-                return
+            conn = sqlite3.connect(DATABASE_URL)
             
-            # Preparar dados de treinamento
-            X_data = []
-            y_data = []
+            # Obter dados de trades
+            trades_df = pd.read_sql_query('''
+                SELECT * FROM trades 
+                WHERE result IN ('win', 'loss')
+                ORDER BY timestamp DESC
+                LIMIT 1000
+            ''', conn)
             
-            for trade in trades:
-                if 'features' in trade and 'result' in trade:
-                    X_data.append(trade['features'])
-                    y_data.append(1 if trade['result'] == 'win' else 0)
+            if len(trades_df) < 50:  # Dados insuficientes
+                logger.info("Dados insuficientes para treinar o modelo")
+                return False
             
-            if len(X_data) < 10:
-                logger.warning("Features insuficientes para treinamento")
-                return
+            # Preparar features e targets
+            X = []
+            y = []
             
-            X = np.array(X_data)
-            y = np.array(y_data)
+            for _, trade in trades_df.iterrows():
+                try:
+                    features = json.loads(trade['features']) if trade['features'] else []
+                    if len(features) == 9:  # Verificar se tem o número correto de features
+                        X.append(features)
+                        y.append(1 if trade['result'] == 'win' else 0)
+                except:
+                    continue
             
-            # Dividir dados
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
+            if len(X) < 50:
+                logger.info("Features insuficientes para treinar o modelo")
+                return False
             
-            # Normalizar features
-            X_train_scaled = self.scaler.fit_transform(X_train)
-            X_test_scaled = self.scaler.transform(X_test)
+            X = np.array(X)
+            y = np.array(y)
             
             # Treinar modelo
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            self.scaler.fit(X_train)
+            X_train_scaled = self.scaler.transform(X_train)
+            X_test_scaled = self.scaler.transform(X_test)
+            
             self.model.fit(X_train_scaled, y_train)
             
-            # Avaliar
-            y_pred = self.model.predict(X_test_scaled)
-            y_pred_binary = (y_pred > 0.5).astype(int)
-            accuracy = accuracy_score(y_test, y_pred_binary)
+            # Avaliar modelo
+            accuracy = self.model.score(X_test_scaled, y_test)
+            logger.info(f"Modelo treinado com acurácia: {accuracy:.2f}")
             
             self.is_trained = True
-            self.save_model()
-            
-            logger.info(f"Modelo treinado com acurácia: {accuracy:.3f}")
+            conn.close()
+            return True
             
         except Exception as e:
-            logger.error(f"Erro no treinamento: {e}")
+            logger.error(f"Erro ao treinar modelo: {e}")
+            return False
     
-    async def analyze_market(self, symbol: str, context: Dict) -> Dict:
-        """Análise principal do mercado"""
+    def predict_direction(self, market_data, trade_history=None):
+        """Prediz a direção do trade usando ML"""
         try:
-            # Obter dados de mercado
-            df = await self.get_market_data(symbol)
+            if not self.is_trained:
+                # Tentar treinar o modelo
+                if not self.train_model():
+                    # Se não conseguir treinar, usar lógica híbrida
+                    return self.hybrid_prediction(market_data)
             
-            if df.empty:
-                return self.get_fallback_analysis(symbol, context)
+            features = self.extract_features(market_data, trade_history)
+            features_scaled = self.scaler.transform(features)
             
-            # Calcular indicadores
-            df_with_indicators = self.calculate_technical_indicators(df)
+            # Predição
+            prediction = self.model.predict(features_scaled)[0]
+            probability = self.model.predict_proba(features_scaled)[0]
             
-            # Análise de tendência
-            trend_analysis = self.analyze_trend(df_with_indicators)
+            confidence = max(probability) * 100
+            direction = 'CALL' if prediction == 1 else 'PUT'
+            
+            return {
+                'direction': direction,
+                'confidence': confidence,
+                'method': 'machine_learning'
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro na predição ML: {e}")
+            return self.hybrid_prediction(market_data)
+    
+    def hybrid_prediction(self, market_data):
+        """Predição híbrida usando análise técnica + padrões"""
+        try:
+            rsi = market_data['rsi']
+            macd = market_data['macd']
+            price = market_data['price']
+            bb_upper = market_data['bb_upper']
+            bb_lower = market_data['bb_lower']
+            volatility = market_data['volatility']
+            
+            signals = []
+            
+            # Análise RSI
+            if rsi < 30:
+                signals.append(('CALL', 0.7))  # Sobrevenda
+            elif rsi > 70:
+                signals.append(('PUT', 0.7))   # Sobrecompra
+            
+            # Análise MACD
+            if macd > 0:
+                signals.append(('CALL', 0.6))
+            else:
+                signals.append(('PUT', 0.6))
+            
+            # Análise Bollinger Bands
+            bb_position = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
+            if bb_position < 0.2:
+                signals.append(('CALL', 0.8))  # Próximo da banda inferior
+            elif bb_position > 0.8:
+                signals.append(('PUT', 0.8))   # Próximo da banda superior
             
             # Análise de volatilidade
-            volatility_analysis = self.analyze_volatility(df_with_indicators)
+            if volatility > 2.0:
+                # Alta volatilidade favorece reversões
+                if rsi > 60:
+                    signals.append(('PUT', 0.5))
+                elif rsi < 40:
+                    signals.append(('CALL', 0.5))
             
-            # Análise de volume
-            volume_analysis = self.analyze_volume(df_with_indicators)
+            # Combinar sinais
+            call_weight = sum(weight for direction, weight in signals if direction == 'CALL')
+            put_weight = sum(weight for direction, weight in signals if direction == 'PUT')
             
-            # Detecção de padrões
-            pattern_analysis = self.detect_patterns(df_with_indicators)
-            
-            # Considerar context do Martingale
-            martingale_adjustment = self.analyze_martingale_context(context)
-            
-            # Análise de horário de mercado
-            time_analysis = self.analyze_market_timing()
-            
-            confidence = self.calculate_confidence([
-                trend_analysis, volatility_analysis, volume_analysis,
-                pattern_analysis, martingale_adjustment, time_analysis
-            ])
-            
-            return {
-                "message": f"Análise do {symbol}: Tendência {trend_analysis['direction']}, Volatilidade {volatility_analysis['level']}%",
-                "trend": trend_analysis,
-                "volatility": volatility_analysis,
-                "volume": volume_analysis,
-                "patterns": pattern_analysis,
-                "martingale_context": martingale_adjustment,
-                "market_timing": time_analysis,
-                "confidence": confidence,
-                "recommendation": self.get_recommendation(confidence, context),
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na análise: {e}")
-            return self.get_fallback_analysis(symbol, context)
-    
-    def analyze_trend(self, df: pd.DataFrame) -> Dict:
-        """Analisa tendência do mercado"""
-        try:
-            latest = df.iloc[-1]
-            prev = df.iloc[-10] if len(df) >= 10 else df.iloc[0]
-            
-            price_change = (latest['Close'] - prev['Close']) / prev['Close'] * 100
-            
-            # Análise de médias móveis
-            sma_trend = "bullish" if latest['Close'] > latest['sma_20'] else "bearish"
-            ema_trend = "bullish" if latest['ema_12'] > latest['ema_26'] else "bearish"
-            
-            # MACD
-            macd_trend = "bullish" if latest['macd'] > latest['macd_signal'] else "bearish"
-            
-            trends = [sma_trend, ema_trend, macd_trend]
-            bullish_count = trends.count("bullish")
-            
-            if bullish_count >= 2:
-                direction = "bullish"
-                strength = bullish_count / len(trends)
+            if call_weight > put_weight:
+                direction = 'CALL'
+                confidence = min(95, (call_weight / (call_weight + put_weight)) * 100)
             else:
-                direction = "bearish"
-                strength = (len(trends) - bullish_count) / len(trends)
+                direction = 'PUT'
+                confidence = min(95, (put_weight / (call_weight + put_weight)) * 100)
+            
+            # Ajustar confiança baseada na volatilidade
+            if volatility > 3.0:
+                confidence *= 0.8  # Reduzir confiança em alta volatilidade
             
             return {
-                "direction": direction,
-                "strength": strength,
-                "price_change": price_change,
-                "sma_trend": sma_trend,
-                "ema_trend": ema_trend,
-                "macd_trend": macd_trend
+                'direction': direction,
+                'confidence': max(60, confidence),  # Mínimo de 60%
+                'method': 'hybrid_analysis'
             }
+            
         except Exception as e:
-            logger.error(f"Erro na análise de tendência: {e}")
-            return {"direction": "neutral", "strength": 0.5, "price_change": 0}
-    
-    def analyze_volatility(self, df: pd.DataFrame) -> Dict:
-        """Analisa volatilidade do mercado"""
-        try:
-            latest = df.iloc[-1]
-            
-            # ATR normalizado
-            atr_pct = (latest['atr'] / latest['Close']) * 100
-            
-            # Bollinger Bands width
-            bb_width = ((latest['bb_high'] - latest['bb_low']) / latest['Close']) * 100
-            
-            # Volatilidade histórica
-            returns = df['Close'].pct_change().dropna()
-            hist_vol = returns.std() * np.sqrt(252) * 100  # Anualizada
-            
-            # Classificar volatilidade
-            if atr_pct > 2:
-                level = "high"
-            elif atr_pct > 1:
-                level = "medium"
-            else:
-                level = "low"
-            
+            logger.error(f"Erro na predição híbrida: {e}")
             return {
-                "level": level,
-                "atr_percentage": atr_pct,
-                "bb_width": bb_width,
-                "historical_volatility": hist_vol,
-                "is_expanding": bb_width > hist_vol
+                'direction': 'CALL' if np.random.random() > 0.5 else 'PUT',
+                'confidence': 65.0,
+                'method': 'fallback'
             }
-        except Exception as e:
-            logger.error(f"Erro na análise de volatilidade: {e}")
-            return {"level": "medium", "atr_percentage": 1.5}
-    
-    def analyze_volume(self, df: pd.DataFrame) -> Dict:
-        """Analisa volume de negociação"""
-        try:
-            latest_vol = df['Volume'].iloc[-1]
-            avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
-            
-            vol_ratio = latest_vol / avg_vol if avg_vol > 0 else 1
-            
-            if vol_ratio > 1.5:
-                analysis = "high"
-            elif vol_ratio > 0.8:
-                analysis = "normal"
-            else:
-                analysis = "low"
-            
-            return {
-                "analysis": analysis,
-                "current_volume": latest_vol,
-                "average_volume": avg_vol,
-                "volume_ratio": vol_ratio
-            }
-        except Exception as e:
-            logger.error(f"Erro na análise de volume: {e}")
-            return {"analysis": "normal", "volume_ratio": 1.0}
-    
-    def detect_patterns(self, df: pd.DataFrame) -> Dict:
-        """Detecta padrões técnicos"""
-        try:
-            latest = df.iloc[-1]
-            patterns = []
-            
-            # RSI Overbought/Oversold
-            if latest['rsi'] > 70:
-                patterns.append({"type": "rsi_overbought", "strength": (latest['rsi'] - 70) / 30})
-            elif latest['rsi'] < 30:
-                patterns.append({"type": "rsi_oversold", "strength": (30 - latest['rsi']) / 30})
-            
-            # Bollinger Bands
-            if latest['Close'] > latest['bb_high']:
-                patterns.append({"type": "bb_upper_break", "strength": 0.8})
-            elif latest['Close'] < latest['bb_low']:
-                patterns.append({"type": "bb_lower_break", "strength": 0.8})
-            
-            # MACD Divergência
-            if latest['macd_diff'] > 0 and df['macd_diff'].iloc[-2] <= 0:
-                patterns.append({"type": "macd_bullish_cross", "strength": 0.7})
-            elif latest['macd_diff'] < 0 and df['macd_diff'].iloc[-2] >= 0:
-                patterns.append({"type": "macd_bearish_cross", "strength": 0.7})
-            
-            return {
-                "detected_patterns": patterns,
-                "pattern_count": len(patterns),
-                "strongest_pattern": max(patterns, key=lambda x: x['strength']) if patterns else None
-            }
-        except Exception as e:
-            logger.error(f"Erro na detecção de padrões: {e}")
-            return {"detected_patterns": [], "pattern_count": 0}
-    
-    def analyze_martingale_context(self, context: Dict) -> Dict:
-        """Analisa contexto do Martingale"""
-        try:
-            martingale_level = context.get('martingaleLevel', 0)
-            is_after_loss = context.get('isAfterLoss', False)
-            win_rate = context.get('winRate', 50)
-            
-            risk_multiplier = 1.0
-            recommendation = "normal"
-            
-            if martingale_level > 0:
-                risk_multiplier = 1 + (martingale_level * 0.2)
-                
-                if martingale_level > 3:
-                    recommendation = "high_caution"
-                elif martingale_level > 1:
-                    recommendation = "moderate_caution"
-            
-            if is_after_loss:
-                recommendation = "wait_for_better_signal"
-                risk_multiplier += 0.3
-            
-            if win_rate < 40:
-                recommendation = "consider_pause"
-                risk_multiplier += 0.5
-            
-            return {
-                "martingale_level": martingale_level,
-                "is_after_loss": is_after_loss,
-                "risk_multiplier": risk_multiplier,
-                "recommendation": recommendation,
-                "should_be_conservative": martingale_level > 2 or is_after_loss or win_rate < 40
-            }
-        except Exception as e:
-            logger.error(f"Erro na análise do Martingale: {e}")
-            return {"recommendation": "normal", "risk_multiplier": 1.0}
-    
-    def analyze_market_timing(self) -> Dict:
-        """Analisa timing do mercado"""
-        try:
-            now = datetime.now()
-            hour = now.hour
-            day_of_week = now.weekday()
-            
-            # Horários de maior volatilidade (UTC)
-            high_volatility_hours = [8, 9, 10, 13, 14, 15, 16, 17, 20, 21]
-            
-            is_high_volatility_time = hour in high_volatility_hours
-            is_weekend = day_of_week >= 5
-            
-            # Análise de sessões de mercado
-            if 7 <= hour <= 16:
-                session = "european"
-                activity_level = "high"
-            elif 13 <= hour <= 22:
-                session = "american"
-                activity_level = "high"
-            elif 22 <= hour <= 7:
-                session = "asian"
-                activity_level = "medium"
-            else:
-                session = "overlap"
-                activity_level = "very_high"
-            
-            return {
-                "session": session,
-                "activity_level": activity_level,
-                "is_high_volatility_time": is_high_volatility_time,
-                "is_weekend": is_weekend,
-                "hour": hour,
-                "optimal_for_trading": is_high_volatility_time and not is_weekend
-            }
-        except Exception as e:
-            logger.error(f"Erro na análise de timing: {e}")
-            return {"session": "unknown", "activity_level": "medium"}
-    
-    def calculate_confidence(self, analyses: List[Dict]) -> float:
-        """Calcula confiança geral da análise"""
-        try:
-            confidence_factors = []
-            
-            for analysis in analyses:
-                if isinstance(analysis, dict):
-                    # Trend confidence
-                    if 'strength' in analysis:
-                        confidence_factors.append(analysis['strength'])
-                    
-                    # Volatility confidence
-                    if 'level' in analysis and analysis['level'] != 'high':
-                        confidence_factors.append(0.8)
-                    elif 'level' in analysis:
-                        confidence_factors.append(0.6)  # High volatility reduces confidence
-                    
-                    # Pattern confidence
-                    if 'pattern_count' in analysis:
-                        pattern_confidence = min(0.9, analysis['pattern_count'] * 0.3)
-                        confidence_factors.append(pattern_confidence)
-                    
-                    # Market timing confidence
-                    if 'optimal_for_trading' in analysis:
-                        timing_confidence = 0.9 if analysis['optimal_for_trading'] else 0.6
-                        confidence_factors.append(timing_confidence)
-                    
-                    # Martingale adjustment
-                    if 'should_be_conservative' in analysis:
-                        martingale_confidence = 0.5 if analysis['should_be_conservative'] else 0.8
-                        confidence_factors.append(martingale_confidence)
-            
-            if not confidence_factors:
-                return 0.6  # Default moderate confidence
-            
-            # Weighted average
-            base_confidence = sum(confidence_factors) / len(confidence_factors)
-            
-            # Normalize to 60-95% range
-            normalized_confidence = 0.6 + (base_confidence * 0.35)
-            
-            return min(0.95, max(0.6, normalized_confidence))
-            
-        except Exception as e:
-            logger.error(f"Erro no cálculo de confiança: {e}")
-            return 0.7
-    
-    def get_recommendation(self, confidence: float, context: Dict) -> str:
-        """Gera recomendação baseada na análise"""
-        try:
-            martingale_level = context.get('martingaleLevel', 0)
-            is_after_loss = context.get('isAfterLoss', False)
-            
-            if confidence < 0.65:
-                return "wait_for_better_setup"
-            
-            if martingale_level > 4:
-                return "high_risk_pause"
-            
-            if is_after_loss and confidence < 0.8:
-                return "conservative_entry"
-            
-            if confidence > 0.85:
-                return "strong_signal"
-            
-            return "moderate_entry"
-            
-        except Exception as e:
-            logger.error(f"Erro na recomendação: {e}")
-            return "moderate_entry"
-    
-    def get_fallback_analysis(self, symbol: str, context: Dict) -> Dict:
-        """Análise de fallback quando dados não estão disponíveis"""
-        return {
-            "message": f"Análise básica do {symbol}: Dados limitados, usando análise conservadora",
-            "trend": {"direction": "neutral", "strength": 0.5},
-            "volatility": {"level": "medium", "atr_percentage": 1.5},
-            "confidence": 0.6,
-            "recommendation": "conservative_entry",
-            "fallback": True,
-            "timestamp": datetime.now().isoformat()
-        }
 
-# Instância global do engine
-ml_engine = TradingMLEngine()
+# Instância global da IA
+trading_ai = TradingAI()
 
+# Rotas da API
 @app.route('/', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
     return jsonify({
-        "status": "online",
-        "service": "Trading ML API",
-        "version": "1.0.0",
-        "model_trained": ml_engine.is_trained,
-        "timestamp": datetime.now().isoformat()
+        'status': 'online',
+        'service': 'Trading AI API',
+        'version': '1.0.0',
+        'timestamp': datetime.now().isoformat(),
+        'model_trained': trading_ai.is_trained
     })
 
 @app.route('/analyze', methods=['POST'])
-@app.route('/analysis', methods=['POST'])
-@app.route('/market-analysis', methods=['POST'])
-async def analyze_market():
-    """Endpoint principal de análise de mercado"""
+def analyze_market():
     try:
         data = request.get_json()
-        
         symbol = data.get('symbol', 'R_50')
-        context = {
-            'martingaleLevel': data.get('martingaleLevel', 0),
-            'isAfterLoss': data.get('isAfterLoss', False),
-            'winRate': data.get('winRate', 50),
-            'currentPrice': data.get('currentPrice', 1000),
-            'balance': data.get('balance', 1000),
-            'volatility': data.get('volatility', 50)
+        
+        # Obter dados de mercado
+        market_data = trading_ai.get_market_data(symbol)
+        
+        # Análise detalhada
+        analysis = {
+            'symbol': symbol,
+            'current_price': market_data['price'],
+            'timestamp': market_data['timestamp'],
+            'technical_indicators': {
+                'rsi': market_data['rsi'],
+                'macd': market_data['macd'],
+                'bb_upper': market_data['bb_upper'],
+                'bb_lower': market_data['bb_lower'],
+                'volatility': market_data['volatility']
+            },
+            'market_condition': 'neutral',
+            'volatility_level': 'medium',
+            'trend': 'sideways'
         }
         
-        # Realizar análise
-        analysis = await ml_engine.analyze_market(symbol, context)
+        # Determinar condições de mercado
+        rsi = market_data['rsi']
+        if rsi < 30:
+            analysis['market_condition'] = 'oversold'
+            analysis['trend'] = 'bullish_reversal'
+        elif rsi > 70:
+            analysis['market_condition'] = 'overbought'
+            analysis['trend'] = 'bearish_reversal'
+        elif market_data['macd'] > 0:
+            analysis['trend'] = 'bullish'
+        elif market_data['macd'] < 0:
+            analysis['trend'] = 'bearish'
         
-        # Salvar análise na API de dados
-        try:
-            analysis_data = {
-                'symbol': symbol,
-                'analysis': analysis,
-                'context': context,
-                'timestamp': datetime.now().isoformat()
-            }
-            requests.post(f"{DATA_API_URL}/save-analysis", json=analysis_data)
-        except:
-            pass  # Não falhar se não conseguir salvar
+        # Nível de volatilidade
+        if market_data['volatility'] > 2.0:
+            analysis['volatility_level'] = 'high'
+        elif market_data['volatility'] < 0.5:
+            analysis['volatility_level'] = 'low'
+        
+        analysis['message'] = f"Análise técnica: RSI {rsi:.1f}, Volatilidade {market_data['volatility']:.2f}, Tendência {analysis['trend']}"
         
         return jsonify(analysis)
         
     except Exception as e:
         logger.error(f"Erro na análise: {e}")
-        return jsonify({
-            "error": "Erro na análise",
-            "message": "Usando análise básica",
-            "confidence": 0.6,
-            "trend": "neutral",
-            "fallback": True
-        }), 200
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/signal', methods=['POST'])
-@app.route('/trading-signal', methods=['POST'])
-@app.route('/get-signal', methods=['POST'])
-async def get_trading_signal():
-    """Endpoint para sinais de trading"""
+def get_trading_signal():
     try:
         data = request.get_json()
-        
         symbol = data.get('symbol', 'R_50')
-        context = {
-            'martingaleLevel': data.get('martingaleLevel', 0),
-            'isAfterLoss': data.get('isAfterLoss', False),
-            'winRate': data.get('winRate', 50),
-            'recentTrades': data.get('recentTrades', [])
-        }
+        trade_history = data.get('recentTrades', [])
         
-        # Obter análise do mercado
-        analysis = await ml_engine.analyze_market(symbol, context)
+        # Obter dados de mercado
+        market_data = trading_ai.get_market_data(symbol)
         
-        # Determinar direção baseada na análise
-        direction = "CALL"
-        confidence = analysis.get('confidence', 0.7)
+        # Obter predição
+        prediction = trading_ai.predict_direction(market_data, trade_history)
         
-        # Lógica de direção baseada na tendência
-        trend = analysis.get('trend', {})
-        if trend.get('direction') == 'bearish' and trend.get('strength', 0) > 0.6:
-            direction = "PUT"
-        elif trend.get('direction') == 'bullish' and trend.get('strength', 0) > 0.6:
-            direction = "CALL"
-        else:
-            # Use RSI se tendência não for clara
-            patterns = analysis.get('patterns', {}).get('detected_patterns', [])
-            for pattern in patterns:
-                if pattern['type'] == 'rsi_overbought':
-                    direction = "PUT"
-                elif pattern['type'] == 'rsi_oversold':
-                    direction = "CALL"
-        
-        # Ajustar confiança baseada no contexto Martingale
-        martingale_context = analysis.get('martingale_context', {})
-        if martingale_context.get('should_be_conservative'):
-            confidence *= 0.85
-        
-        # Gerar reasoning
-        reasoning = f"Baseado em análise técnica: tendência {trend.get('direction', 'neutral')}"
-        if context['isAfterLoss']:
-            reasoning += " (análise conservadora pós-perda)"
-        
-        signal_data = {
-            'direction': direction,
-            'confidence': confidence * 100,
-            'reasoning': reasoning,
+        # Enriquecer resposta
+        signal = {
+            'direction': prediction['direction'],
+            'confidence': prediction['confidence'],
+            'method': prediction['method'],
+            'reasoning': f"Análise {prediction['method']} baseada em RSI {market_data['rsi']:.1f}, MACD {market_data['macd']:.3f}",
+            'entry_price': market_data['price'],
+            'timestamp': market_data['timestamp'],
             'timeframe': '5m',
-            'entry_price': data.get('currentPrice', 1000),
-            'analysis': analysis,
-            'martingaleLevel': context['martingaleLevel'],
-            'isAfterLoss': context['isAfterLoss']
+            'risk_level': 'medium'
         }
         
-        # Salvar sinal na API de dados
-        try:
-            requests.post(f"{DATA_API_URL}/save-signal", json={
-                'symbol': symbol,
-                'signal': signal_data,
-                'timestamp': datetime.now().isoformat()
-            })
-        except:
-            pass
+        # Ajustar risco baseado na confiança
+        if prediction['confidence'] > 85:
+            signal['risk_level'] = 'low'
+        elif prediction['confidence'] < 70:
+            signal['risk_level'] = 'high'
         
-        return jsonify(signal_data)
+        return jsonify(signal)
         
     except Exception as e:
         logger.error(f"Erro no sinal: {e}")
-        return jsonify({
-            "direction": "CALL",
-            "confidence": 65,
-            "reasoning": "Sinal básico - análise limitada",
-            "fallback": True
-        }), 200
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/risk', methods=['POST'])
-@app.route('/risk-assessment', methods=['POST'])
-async def assess_risk():
-    """Endpoint para avaliação de risco"""
+def assess_risk():
     try:
         data = request.get_json()
-        
         martingale_level = data.get('martingaleLevel', 0)
-        balance = data.get('currentBalance', 1000)
-        today_pnl = data.get('todayPnL', 0)
-        win_rate = data.get('winRate', 50)
         recent_trades = data.get('recentTrades', [])
+        current_balance = data.get('currentBalance', 1000)
+        win_rate = data.get('winRate', 50)
         
-        # Calcular nível de risco
+        # Calcular score de risco
         risk_score = 0
         risk_factors = []
         
-        # Risco do Martingale
+        # Fator Martingale
         if martingale_level > 4:
             risk_score += 40
-            risk_factors.append(f"Martingale alto (nível {martingale_level})")
+            risk_factors.append(f"Martingale nível {martingale_level} - ALTO RISCO")
         elif martingale_level > 2:
             risk_score += 20
-            risk_factors.append(f"Martingale moderado (nível {martingale_level})")
+            risk_factors.append(f"Martingale nível {martingale_level} - risco elevado")
         
-        # Risco do P&L
-        if today_pnl < -balance * 0.1:
-            risk_score += 30
-            risk_factors.append("Perda diária significativa")
-        elif today_pnl < 0:
-            risk_score += 10
-            risk_factors.append("P&L negativo hoje")
-        
-        # Risco da taxa de acerto
-        if win_rate < 30:
+        # Fator win rate
+        if win_rate < 40:
             risk_score += 25
-            risk_factors.append("Taxa de acerto muito baixa")
-        elif win_rate < 45:
+            risk_factors.append(f"Win rate baixo ({win_rate:.1f}%)")
+        elif win_rate < 50:
             risk_score += 10
-            risk_factors.append("Taxa de acerto baixa")
+            risk_factors.append(f"Win rate abaixo da média ({win_rate:.1f}%)")
         
-        # Risco de trades recentes
+        # Fator trades recentes
         if len(recent_trades) >= 3:
-            recent_losses = sum(1 for t in recent_trades[-3:] if t.get('status') == 'lost')
+            recent_losses = sum(1 for t in recent_trades[-3:] if t.get('result') == 'loss')
             if recent_losses >= 2:
                 risk_score += 15
-                risk_factors.append("Perdas recentes consecutivas")
+                risk_factors.append(f"{recent_losses} perdas nas últimas 3 operações")
         
-        # Determinar nível
+        # Determinar nível de risco
         if risk_score >= 60:
-            level = "high"
-            recommendation = "Pausar operações e revisar estratégia"
-        elif risk_score >= 30:
-            level = "medium"
-            recommendation = "Operar com extrema cautela"
+            level = 'high'
+            recommendation = 'PAUSE imediata - risco extremamente alto'
+        elif risk_score >= 35:
+            level = 'medium'
+            recommendation = 'Operar com extrema cautela - considere reduzir stake'
         else:
-            level = "low"
-            recommendation = "Continuar operando normalmente"
+            level = 'low'
+            recommendation = 'Continuar operando normalmente'
         
-        risk_assessment = {
+        assessment = {
             'level': level,
             'score': risk_score,
-            'message': f"Risco {level} detectado (score: {risk_score})",
+            'message': f"Risco {level.upper()} detectado - Score: {risk_score}/100",
             'recommendation': recommendation,
             'risk_factors': risk_factors,
-            'martingaleLevel': martingale_level,
-            'suggestions': self.get_risk_suggestions(level, risk_factors)
+            'martingale_level': martingale_level,
+            'suggested_action': 'pause' if risk_score >= 60 else 'continue'
         }
         
-        # Salvar avaliação na API de dados
-        try:
-            requests.post(f"{DATA_API_URL}/save-risk-assessment", json={
-                'assessment': risk_assessment,
-                'timestamp': datetime.now().isoformat()
-            })
-        except:
-            pass
-        
-        return jsonify(risk_assessment)
+        return jsonify(assessment)
         
     except Exception as e:
         logger.error(f"Erro na avaliação de risco: {e}")
-        return jsonify({
-            "level": "medium",
-            "score": 50,
-            "message": "Avaliação básica de risco",
-            "recommendation": "Operar com cautela",
-            "fallback": True
-        }), 200
+        return jsonify({'error': str(e)}), 500
 
-def get_risk_suggestions(level: str, risk_factors: List[str]) -> List[str]:
-    """Gera sugestões baseadas no nível de risco"""
-    suggestions = []
-    
-    if level == "high":
-        suggestions.extend([
-            "Pare todas as operações por pelo menos 30 minutos",
-            "Revise sua estratégia de trading",
-            "Considere reduzir o valor base das apostas",
-            "Analise os últimos trades para identificar padrões de erro"
-        ])
-    elif level == "medium":
-        suggestions.extend([
-            "Reduza o valor das próximas apostas",
-            "Aguarde sinais mais fortes antes de operar",
-            "Monitore de perto o nível do Martingale",
-            "Considere fazer uma pausa se o risco aumentar"
-        ])
-    else:
-        suggestions.extend([
-            "Continue operando com sua estratégia atual",
-            "Mantenha disciplina no gerenciamento de risco",
-            "Monitore regularmente as métricas de performance"
-        ])
-    
-    return suggestions
-
-@app.route('/train', methods=['POST'])
-async def train_model():
-    """Endpoint para treinar o modelo com novos dados"""
+@app.route('/save-trade', methods=['POST'])
+def save_trade():
     try:
-        # Obter dados históricos
-        performance_data = await ml_engine.get_historical_performance()
+        data = request.get_json()
         
-        # Treinar modelo
-        ml_engine.train_with_historical_data(performance_data)
+        # Extrair features do mercado no momento do trade
+        market_data = trading_ai.get_market_data(data.get('symbol', 'R_50'))
+        features = trading_ai.extract_features(market_data).tolist()[0]
         
-        return jsonify({
-            "status": "success",
-            "message": "Modelo treinado com sucesso",
-            "trades_used": len(performance_data.get('trades', [])),
-            "model_trained": ml_engine.is_trained
-        })
+        conn = sqlite3.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO trades 
+            (timestamp, symbol, direction, stake, duration, entry_price, exit_price, result, pnl, martingale_level, market_conditions, features)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data.get('timestamp', datetime.now().isoformat()),
+            data.get('symbol'),
+            data.get('direction'),
+            data.get('stake'),
+            data.get('duration'),
+            data.get('entry_price'),
+            data.get('exit_price'),
+            data.get('result'),
+            data.get('pnl'),
+            data.get('martingale_level', 0),
+            json.dumps(data.get('market_conditions', {})),
+            json.dumps(features)
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        # Retreinar modelo periodicamente
+        total_trades = len(pd.read_sql_query('SELECT * FROM trades', sqlite3.connect(DATABASE_URL)))
+        if total_trades % 50 == 0:  # A cada 50 trades
+            trading_ai.train_model()
+        
+        return jsonify({'status': 'success', 'message': 'Trade salvo com sucesso'})
         
     except Exception as e:
-        logger.error(f"Erro no treinamento: {e}")
-        return jsonify({
-            "status": "error",
-            "message": "Erro no treinamento do modelo"
-        }), 500
+        logger.error(f"Erro ao salvar trade: {e}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/model-status', methods=['GET'])
-def model_status():
-    """Status do modelo"""
-    return jsonify({
-        "is_trained": ml_engine.is_trained,
-        "feature_count": len(ml_engine.feature_columns),
-        "model_type": type(ml_engine.model).__name__,
-        "last_updated": datetime.now().isoformat()
-    })
+@app.route('/statistics', methods=['GET'])
+def get_statistics():
+    try:
+        conn = sqlite3.connect(DATABASE_URL)
+        
+        # Estatísticas gerais
+        stats_query = '''
+            SELECT 
+                COUNT(*) as total_trades,
+                SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses,
+                AVG(CASE WHEN result = 'win' THEN 1.0 ELSE 0.0 END) * 100 as win_rate,
+                SUM(pnl) as total_pnl,
+                AVG(pnl) as avg_pnl
+            FROM trades
+            WHERE date(timestamp) = date('now')
+        '''
+        
+        today_stats = pd.read_sql_query(stats_query, conn).iloc[0]
+        
+        # Estatísticas por Martingale
+        martingale_stats = pd.read_sql_query('''
+            SELECT 
+                martingale_level,
+                COUNT(*) as trades,
+                AVG(CASE WHEN result = 'win' THEN 1.0 ELSE 0.0 END) * 100 as win_rate,
+                SUM(pnl) as total_pnl
+            FROM trades
+            WHERE martingale_level IS NOT NULL
+            GROUP BY martingale_level
+            ORDER BY martingale_level
+        ''', conn)
+        
+        conn.close()
+        
+        statistics = {
+            'today': {
+                'total_trades': int(today_stats['total_trades']),
+                'wins': int(today_stats['wins']),
+                'losses': int(today_stats['losses']),
+                'win_rate': float(today_stats['win_rate']) if today_stats['win_rate'] else 0.0,
+                'total_pnl': float(today_stats['total_pnl']) if today_stats['total_pnl'] else 0.0,
+                'avg_pnl': float(today_stats['avg_pnl']) if today_stats['avg_pnl'] else 0.0
+            },
+            'martingale_performance': martingale_stats.to_dict('records'),
+            'model_status': {
+                'is_trained': trading_ai.is_trained,
+                'last_training': datetime.now().isoformat()
+            }
+        }
+        
+        return jsonify(statistics)
+        
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Treinar modelo na inicialização se houver dados
-    try:
-        asyncio.run(ml_engine.get_historical_performance())
-    except:
-        pass
+    # Tentar treinar o modelo na inicialização
+    trading_ai.train_model()
     
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=API_PORT, debug=False)
