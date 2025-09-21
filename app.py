@@ -982,5 +982,7 @@ def analyze_market():
         
         return jsonify(analysis)
         
-    except Exception as e:
-        logger.error(f"❌ Erro na análise
+        except Exception as e:
+        logger.error(f"❌ Erro na análise: {e}")
+        return jsonify({"error": str(e)}), 500
+
