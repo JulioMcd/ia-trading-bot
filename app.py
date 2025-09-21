@@ -9,9 +9,12 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
 import logging
+# MUDANÇA: Modelos que suportam online learning
+from sklearn.linear_model import SGDClassifier, PassiveAggressiveClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Configurações
 API_PORT = int(os.environ.get('PORT', 5000))
-DATABASE_URL = 'trading_stats.db'
+DATABASE_URL = 'trading_stats_online.db'
 
 class TechnicalIndicators:
     """Classe para calcular indicadores técnicos sem dependências externas"""
@@ -90,21 +93,59 @@ class TechnicalIndicators:
         except:
             return 1.0
 
-class TradingAI:
+class OnlineTradingAI:
     def __init__(self):
-        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        # SISTEMA HÍBRIDO: Offline + Online Learning
+        self.offline_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        
+        # MODELOS ONLINE LEARNING
+        self.online_model = SGDClassifier(
+            loss='log_loss', 
+            learning_rate='adaptive',
+            eta0=0.01,
+            random_state=42,
+            max_iter=1000
+        )
+        
+        # Modelo alternativo para comparação
+        self.passive_model = PassiveAggressiveClassifier(
+            C=1.0,
+            random_state=42,
+            max_iter=1000
+        )
+        
         self.scaler = StandardScaler()
-        self.is_trained = False
+        self.online_scaler = StandardScaler()
+        
+        # CONTROLES DE ESTADO
+        self.offline_trained = False
+        self.online_initialized = False
+        self.passive_initialized = False
+        
+        # BUFFERS PARA INICIALIZAÇÃO ONLINE
+        self.feature_buffer = []
+        self.target_buffer = []
+        self.min_samples_init = 20
+        
+        # MÉTRICAS EM TEMPO REAL
+        self.online_metrics = {
+            'total_predictions': 0,
+            'correct_predictions': 0,
+            'recent_accuracy': [],
+            'last_10_trades': [],
+            'learning_updates': 0
+        }
+        
         self.indicators = TechnicalIndicators()
         self.init_database()
         
     def init_database(self):
-        """Inicializa o banco de dados"""
+        """Inicializa o banco de dados com colunas para online learning"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             cursor = conn.cursor()
             
-            # Tabela de trades
+            # Tabela de trades com campos para online learning
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,11 +160,30 @@ class TradingAI:
                     pnl REAL,
                     martingale_level INTEGER,
                     market_conditions TEXT,
-                    features TEXT
+                    features TEXT,
+                    online_updated BOOLEAN DEFAULT 0,
+                    prediction_confidence REAL,
+                    model_used TEXT,
+                    learning_iteration INTEGER,
+                    data_type TEXT DEFAULT 'real',
+                    market_scenario TEXT
                 )
             ''')
             
-            # Tabela de estatísticas
+            # Tabela para métricas de online learning
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS online_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME,
+                    model_type TEXT,
+                    accuracy REAL,
+                    total_samples INTEGER,
+                    recent_performance TEXT,
+                    adaptation_rate REAL
+                )
+            ''')
+            
+            # Demais tabelas mantidas...
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS statistics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,11 +195,12 @@ class TradingAI:
                     total_pnl REAL,
                     best_streak INTEGER,
                     worst_streak INTEGER,
-                    martingale_usage TEXT
+                    martingale_usage TEXT,
+                    online_accuracy REAL,
+                    adaptation_score REAL
                 )
             ''')
             
-            # Tabela de market data
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS market_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,43 +212,50 @@ class TradingAI:
                     macd REAL,
                     bb_upper REAL,
                     bb_lower REAL,
-                    volatility REAL
+                    volatility REAL,
+                    data_type TEXT DEFAULT 'real',
+                    market_scenario TEXT,
+                    synthetic_params TEXT
                 )
             ''')
             
             conn.commit()
             conn.close()
-            logger.info("Banco de dados inicializado com sucesso")
+            logger.info("🗄️ Banco de dados de online learning inicializado")
             
         except Exception as e:
             logger.error(f"Erro ao inicializar banco: {e}")
-        
-    def get_market_data(self, symbol):
-        """Obtém dados de mercado em tempo real"""
+    
+    def get_market_data(self, symbol, force_scenario=None):
+        """Obtém dados de mercado em tempo real com laboratório sintético"""
         try:
-            # Para índices sintéticos Deriv, usar dados simulados
+            # Para índices sintéticos Deriv, usar laboratório sintético
             if symbol.startswith(('R_', '1HZ', 'CRASH', 'BOOM', 'JD', 'STEP')):
-                return self.get_synthetic_data(symbol)
+                scenario = force_scenario or self.get_market_scenario(symbol)
+                return self.get_synthetic_data(symbol, scenario)
             
-            # Para outros símbolos, tentar yfinance
+            # Para outros símbolos, tentar yfinance primeiro
             try:
                 ticker = yf.Ticker(symbol)
                 data = ticker.history(period="5d", interval="1m")
                 
                 if not data.empty:
-                    return self.process_market_data(data, symbol)
-            except:
+                    return self.process_market_data(data, symbol, data_type='real')
+            except Exception as e:
+                logger.warning(f"yfinance falhou para {symbol}: {e}")
                 pass
                 
-            # Fallback para dados sintéticos
-            return self.get_synthetic_data(symbol)
+            # Fallback para laboratório sintético
+            scenario = force_scenario or 'normal'
+            logger.info(f"🏭 Usando laboratório sintético para {symbol} (cenário: {scenario})")
+            return self.get_synthetic_data(symbol, scenario)
             
         except Exception as e:
             logger.error(f"Erro ao obter dados do mercado: {e}")
-            return self.get_synthetic_data(symbol)
+            return self.get_fallback_data(symbol, data_type='synthetic', scenario='error_fallback')
     
     def get_synthetic_data(self, symbol):
-        """Gera dados sintéticos baseados em padrões de mercado reais"""
+        """Gera dados sintéticos baseados em padrões de mercado reais (mantido igual)"""
         try:
             np.random.seed(int(datetime.now().timestamp()) % 1000)
             
@@ -229,7 +297,7 @@ class TradingAI:
             logger.error(f"Erro ao gerar dados sintéticos: {e}")
             return self.get_fallback_data(symbol)
     
-    def process_market_data(self, data, symbol):
+    def process_market_data(self, data, symbol, data_type='real', scenario=None, synthetic_params=None):
         """Processa dados de mercado e calcula indicadores técnicos"""
         try:
             close_prices = data['Close'].values
@@ -253,19 +321,33 @@ class TradingAI:
                 'bb_lower': bb['lower'],
                 'volatility': volatility,
                 'volume': float(volume[-1]) if len(volume) > 0 else 1000.0,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                # 🏷️ NOVOS CAMPOS PARA IDENTIFICAÇÃO
+                'data_type': data_type,
+                'market_scenario': scenario,
+                'synthetic_params': json.dumps(synthetic_params) if synthetic_params else None
             }
             
-            # Salvar no banco
+            # Salvar no banco com identificação de tipo
             self.save_market_data(current_data)
+            
+            # Log diferenciado para dados sintéticos
+            if data_type == 'synthetic':
+                logger.info(f"🧪 DADOS SINTÉTICOS {scenario}: {symbol} - "
+                           f"Preço: {current_data['price']:.4f}, "
+                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
+            else:
+                logger.info(f"📈 DADOS REAIS: {symbol} - "
+                           f"Preço: {current_data['price']:.4f}, "
+                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
             
             return current_data
             
         except Exception as e:
             logger.error(f"Erro no processamento de dados: {e}")
-            return self.get_fallback_data(symbol)
+            return self.get_fallback_data(symbol, data_type=data_type, scenario=scenario)
     
-    def get_fallback_data(self, symbol):
+    def get_fallback_data(self, symbol, data_type='synthetic', scenario='fallback'):
         """Dados de fallback em caso de erro"""
         return {
             'symbol': symbol,
@@ -277,22 +359,28 @@ class TradingAI:
             'bb_lower': 980.0,
             'volatility': 1.0 + np.random.normal(0, 0.3),
             'volume': 1000.0,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'data_type': data_type,
+            'market_scenario': scenario,
+            'synthetic_params': json.dumps({'source': 'fallback_emergency'})
         }
     
     def save_market_data(self, data):
-        """Salva dados de mercado no banco"""
+        """Salva dados de mercado no banco com identificação de tipo"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             cursor = conn.cursor()
             
             cursor.execute('''
                 INSERT INTO market_data 
-                (timestamp, symbol, price, volume, rsi, macd, bb_upper, bb_lower, volatility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (timestamp, symbol, price, volume, rsi, macd, bb_upper, bb_lower, volatility,
+                 data_type, market_scenario, synthetic_params)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 data['timestamp'], data['symbol'], data['price'], data['volume'],
-                data['rsi'], data['macd'], data['bb_upper'], data['bb_lower'], data['volatility']
+                data['rsi'], data['macd'], data['bb_upper'], data['bb_lower'], 
+                data['volatility'], data.get('data_type', 'real'), 
+                data.get('market_scenario'), data.get('synthetic_params')
             ))
             
             conn.commit()
@@ -301,8 +389,106 @@ class TradingAI:
         except Exception as e:
             logger.error(f"Erro ao salvar dados de mercado: {e}")
     
+    # ====================================
+    # 🏭 LABORATÓRIO DE MERCADO - FUNÇÕES AUXILIARES
+    # ====================================
+    
+    def get_market_scenario(self, symbol, force_scenario=None):
+        """
+        Determina qual cenário usar baseado em condições ou força um cenário específico
+        """
+        if force_scenario:
+            return force_scenario
+        
+        # Auto-detecção de cenário baseado no histórico recente
+        try:
+            conn = sqlite3.connect(DATABASE_URL)
+            recent_data = pd.read_sql_query('''
+                SELECT price, volatility, timestamp FROM market_data 
+                WHERE symbol = ? AND data_type = 'real'
+                ORDER BY timestamp DESC LIMIT 10
+            ''', conn, params=[symbol])
+            conn.close()
+            
+            if len(recent_data) < 5:
+                return 'normal'
+            
+            # Analisar tendência recente
+            price_change = (recent_data['price'].iloc[0] - recent_data['price'].iloc[-1]) / recent_data['price'].iloc[-1]
+            avg_volatility = recent_data['volatility'].mean()
+            
+            if avg_volatility > 2.0:
+                return 'high_volatility'
+            elif price_change > 0.05:
+                return 'bull_market'
+            elif price_change < -0.05:
+                return 'bear_market'
+            elif avg_volatility < 0.3:
+                return 'low_volatility'
+            else:
+                return 'normal'
+                
+        except Exception as e:
+            logger.error(f"Erro na detecção de cenário: {e}")
+            return 'normal'
+    
+    def generate_training_scenarios(self, symbol, num_scenarios=10):
+        """
+        Gera múltiplos cenários de mercado para treinamento da IA
+        """
+        scenarios = ['normal', 'bull_market', 'bear_market', 'sideways', 
+                    'high_volatility', 'low_volatility', 'crash', 'pump']
+        
+        training_data = []
+        
+        for i in range(num_scenarios):
+            scenario = scenarios[i % len(scenarios)]
+            
+            # Variações nos parâmetros para cada iteração
+            custom_params = {
+                'volatility': np.random.uniform(0.1, 2.0),
+                'trend_strength': np.random.uniform(-0.005, 0.005),
+                'mean_reversion': np.random.uniform(0.001, 0.01)
+            }
+            
+            data = self.get_synthetic_data(symbol, scenario, custom_params)
+            data['scenario_id'] = i
+            training_data.append(data)
+            
+        logger.info(f"🏭 Gerados {num_scenarios} cenários de treinamento para {symbol}")
+        return training_data
+    
+    def validate_synthetic_quality(self, synthetic_data, real_data_sample=None):
+        """
+        Valida qualidade dos dados sintéticos comparando com dados reais
+        """
+        try:
+            metrics = {
+                'price_range': (min(synthetic_data), max(synthetic_data)),
+                'volatility_estimate': np.std(synthetic_data) / np.mean(synthetic_data),
+                'trend_analysis': 'stable',
+                'quality_score': 0.75  # Score padrão
+            }
+            
+            # Se temos dados reais para comparar
+            if real_data_sample and len(real_data_sample) > 10:
+                real_vol = np.std(real_data_sample) / np.mean(real_data_sample)
+                synthetic_vol = metrics['volatility_estimate']
+                
+                vol_similarity = 1 - abs(real_vol - synthetic_vol) / max(real_vol, synthetic_vol)
+                metrics['quality_score'] = vol_similarity
+                
+                logger.info(f"📊 Qualidade sintética: {vol_similarity:.3f} "
+                           f"(vol real: {real_vol:.3f}, sintética: {synthetic_vol:.3f})")
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Erro na validação de qualidade: {e}")
+            return {'quality_score': 0.5, 'error': str(e)}
+    
     def extract_features(self, market_data, trade_history=None):
-        """Extrai features para o modelo de ML"""
+        """Extrai features para o modelo de ML (mantido igual)"""
         try:
             features = []
             
@@ -337,8 +523,251 @@ class TradingAI:
             logger.error(f"Erro ao extrair features: {e}")
             return np.array([50, 0, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0]).reshape(1, -1)
     
-    def train_model(self):
-        """Treina o modelo com dados históricos"""
+    # ====================================
+    # NOVO: SISTEMA DE ONLINE LEARNING
+    # ====================================
+    
+    def initialize_online_model(self):
+        """Inicializa modelo online com dados do buffer"""
+        try:
+            if len(self.feature_buffer) < self.min_samples_init:
+                logger.info(f"🔄 Buffer insuficiente: {len(self.feature_buffer)}/{self.min_samples_init}")
+                return False
+            
+            X = np.array(self.feature_buffer)
+            y = np.array(self.target_buffer)
+            
+            # Inicializar scaler online
+            self.online_scaler.fit(X)
+            X_scaled = self.online_scaler.transform(X)
+            
+            # Inicializar modelos online
+            self.online_model.partial_fit(X_scaled, y, classes=[0, 1])
+            self.passive_model.partial_fit(X_scaled, y, classes=[0, 1])
+            
+            self.online_initialized = True
+            self.passive_initialized = True
+            
+            # Calcular accuracy inicial
+            predictions = self.online_model.predict(X_scaled)
+            initial_accuracy = accuracy_score(y, predictions)
+            
+            logger.info(f"✅ ONLINE LEARNING INICIALIZADO!")
+            logger.info(f"📊 Amostras: {len(X)}, Accuracy inicial: {initial_accuracy:.3f}")
+            
+            # Limpar buffer
+            self.feature_buffer = []
+            self.target_buffer = []
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar online learning: {e}")
+            return False
+    
+    def update_online_model(self, features, target):
+        """Atualização incremental do modelo a cada trade"""
+        try:
+            features_flat = features.flatten()
+            
+            # Se não inicializado, adicionar ao buffer
+            if not self.online_initialized:
+                self.feature_buffer.append(features_flat)
+                self.target_buffer.append(target)
+                
+                logger.info(f"📥 Adicionado ao buffer: {len(self.feature_buffer)}/{self.min_samples_init}")
+                
+                # Tentar inicializar quando buffer estiver cheio
+                if len(self.feature_buffer) >= self.min_samples_init:
+                    self.initialize_online_model()
+                
+                return False
+            
+            # Modelo já inicializado - atualização incremental
+            X_scaled = self.online_scaler.transform([features_flat])
+            
+            # Fazer predição antes da atualização (para métricas)
+            prediction_before = self.online_model.predict(X_scaled)[0]
+            confidence_before = max(self.online_model.predict_proba(X_scaled)[0])
+            
+            # ATUALIZAÇÃO INCREMENTAL
+            self.online_model.partial_fit(X_scaled, [target])
+            self.passive_model.partial_fit(X_scaled, [target])
+            
+            # Atualizar métricas
+            self.online_metrics['total_predictions'] += 1
+            self.online_metrics['learning_updates'] += 1
+            
+            is_correct = (prediction_before == target)
+            if is_correct:
+                self.online_metrics['correct_predictions'] += 1
+            
+            # Manter histórico dos últimos 10 trades
+            self.online_metrics['last_10_trades'].append({
+                'prediction': prediction_before,
+                'actual': target,
+                'correct': is_correct,
+                'confidence': confidence_before
+            })
+            
+            if len(self.online_metrics['last_10_trades']) > 10:
+                self.online_metrics['last_10_trades'].pop(0)
+            
+            # Calcular accuracy dos últimos 10
+            recent_correct = sum(1 for t in self.online_metrics['last_10_trades'] if t['correct'])
+            recent_accuracy = recent_correct / len(self.online_metrics['last_10_trades'])
+            self.online_metrics['recent_accuracy'].append(recent_accuracy)
+            
+            if len(self.online_metrics['recent_accuracy']) > 50:
+                self.online_metrics['recent_accuracy'].pop(0)
+            
+            # Log da atualização
+            overall_accuracy = self.online_metrics['correct_predictions'] / self.online_metrics['total_predictions']
+            
+            result_emoji = "✅" if is_correct else "❌"
+            target_name = "WIN" if target == 1 else "LOSS"
+            
+            logger.info(f"🧠 ONLINE UPDATE #{self.online_metrics['learning_updates']}")
+            logger.info(f"{result_emoji} Predição: {'WIN' if prediction_before == 1 else 'LOSS'}, "
+                       f"Real: {target_name}, Confiança: {confidence_before:.3f}")
+            logger.info(f"📊 Accuracy Geral: {overall_accuracy:.3f}, "
+                       f"Últimos 10: {recent_accuracy:.3f}")
+            
+            # Salvar métricas no banco periodicamente
+            if self.online_metrics['learning_updates'] % 10 == 0:
+                self.save_online_metrics()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na atualização online: {e}")
+            return False
+    
+    def get_best_prediction(self, market_data, trade_history=None):
+        """Combina predições de múltiplos modelos"""
+        try:
+            features = self.extract_features(market_data, trade_history)
+            
+            predictions = {}
+            
+            # 1. Modelo offline (se treinado)
+            if self.offline_trained:
+                try:
+                    features_scaled = self.scaler.transform(features)
+                    offline_pred = self.offline_model.predict(features_scaled)[0]
+                    offline_proba = self.offline_model.predict_proba(features_scaled)[0]
+                    predictions['offline'] = {
+                        'prediction': offline_pred,
+                        'confidence': max(offline_proba)
+                    }
+                except:
+                    pass
+            
+            # 2. Modelo online SGD
+            if self.online_initialized:
+                try:
+                    features_scaled = self.online_scaler.transform(features)
+                    online_pred = self.online_model.predict(features_scaled)[0]
+                    online_proba = self.online_model.predict_proba(features_scaled)[0]
+                    predictions['online_sgd'] = {
+                        'prediction': online_pred,
+                        'confidence': max(online_proba)
+                    }
+                except:
+                    pass
+            
+            # 3. Modelo Passive Aggressive
+            if self.passive_initialized:
+                try:
+                    features_scaled = self.online_scaler.transform(features)
+                    passive_pred = self.passive_model.predict(features_scaled)[0]
+                    # Passive Aggressive não tem predict_proba, usar confidence baseada em decision_function
+                    decision = self.passive_model.decision_function(features_scaled)[0]
+                    passive_confidence = 1 / (1 + np.exp(-abs(decision)))  # Sigmoid do decision
+                    predictions['passive'] = {
+                        'prediction': passive_pred,
+                        'confidence': passive_confidence
+                    }
+                except:
+                    pass
+            
+            # Escolher melhor predição
+            if predictions:
+                # Preferir modelo online se disponível e confiante
+                if 'online_sgd' in predictions and predictions['online_sgd']['confidence'] > 0.6:
+                    best = predictions['online_sgd']
+                    method = 'online_sgd'
+                elif 'passive' in predictions and predictions['passive']['confidence'] > 0.6:
+                    best = predictions['passive']
+                    method = 'passive_aggressive'
+                elif 'offline' in predictions:
+                    best = predictions['offline']
+                    method = 'offline_random_forest'
+                else:
+                    best = list(predictions.values())[0]
+                    method = list(predictions.keys())[0]
+                
+                direction = 'CALL' if best['prediction'] == 1 else 'PUT'
+                confidence = best['confidence'] * 100
+                
+                logger.info(f"🎯 Melhor predição via {method}: {direction} ({confidence:.1f}%)")
+                
+                return {
+                    'direction': direction,
+                    'confidence': confidence,
+                    'method': f'best_of_ensemble_{method}',
+                    'all_predictions': predictions
+                }
+            
+            # Fallback para híbrido
+            return self.hybrid_prediction(market_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na predição ensemble: {e}")
+            return self.hybrid_prediction(market_data)
+    
+    def save_online_metrics(self):
+        """Salva métricas de online learning no banco"""
+        try:
+            conn = sqlite3.connect(DATABASE_URL)
+            cursor = conn.cursor()
+            
+            overall_accuracy = (self.online_metrics['correct_predictions'] / 
+                              self.online_metrics['total_predictions']) if self.online_metrics['total_predictions'] > 0 else 0
+            
+            recent_performance = {
+                'last_10_accuracy': sum(1 for t in self.online_metrics['last_10_trades'] if t['correct']) / max(1, len(self.online_metrics['last_10_trades'])),
+                'avg_confidence': np.mean([t['confidence'] for t in self.online_metrics['last_10_trades']]) if self.online_metrics['last_10_trades'] else 0,
+                'learning_updates': self.online_metrics['learning_updates']
+            }
+            
+            cursor.execute('''
+                INSERT INTO online_metrics 
+                (timestamp, model_type, accuracy, total_samples, recent_performance, adaptation_rate)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                datetime.now().isoformat(),
+                'sgd_online',
+                overall_accuracy,
+                self.online_metrics['total_predictions'],
+                json.dumps(recent_performance),
+                len(self.online_metrics['recent_accuracy']) / 50.0  # Taxa de adaptação
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"💾 Métricas online salvas: {overall_accuracy:.3f} accuracy")
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao salvar métricas: {e}")
+    
+    # ====================================
+    # MODIFICAÇÕES NAS FUNÇÕES EXISTENTES
+    # ====================================
+    
+    def train_offline_model(self):
+        """Treina modelo offline com dados históricos"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             
@@ -351,7 +780,7 @@ class TradingAI:
             ''', conn)
             
             if len(trades_df) < 50:  # Dados insuficientes
-                logger.info("Dados insuficientes para treinar o modelo")
+                logger.info("📊 Dados insuficientes para treinar modelo offline")
                 conn.close()
                 return False
             
@@ -369,65 +798,41 @@ class TradingAI:
                     continue
             
             if len(X) < 50:
-                logger.info("Features insuficientes para treinar o modelo")
+                logger.info("📊 Features insuficientes para treinar modelo offline")
                 conn.close()
                 return False
             
             X = np.array(X)
             y = np.array(y)
             
-            # Treinar modelo
+            # Treinar modelo offline
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             
             self.scaler.fit(X_train)
             X_train_scaled = self.scaler.transform(X_train)
             X_test_scaled = self.scaler.transform(X_test)
             
-            self.model.fit(X_train_scaled, y_train)
+            self.offline_model.fit(X_train_scaled, y_train)
             
             # Avaliar modelo
-            accuracy = self.model.score(X_test_scaled, y_test)
-            logger.info(f"Modelo treinado com acurácia: {accuracy:.2f}")
+            accuracy = self.offline_model.score(X_test_scaled, y_test)
+            logger.info(f"✅ MODELO OFFLINE treinado com acurácia: {accuracy:.3f}")
             
-            self.is_trained = True
+            self.offline_trained = True
             conn.close()
             return True
             
         except Exception as e:
-            logger.error(f"Erro ao treinar modelo: {e}")
+            logger.error(f"❌ Erro ao treinar modelo offline: {e}")
             return False
     
     def predict_direction(self, market_data, trade_history=None):
-        """Prediz a direção do trade usando ML"""
-        try:
-            if not self.is_trained:
-                # Tentar treinar o modelo
-                if not self.train_model():
-                    # Se não conseguir treinar, usar lógica híbrida
-                    return self.hybrid_prediction(market_data)
-            
-            features = self.extract_features(market_data, trade_history)
-            features_scaled = self.scaler.transform(features)
-            
-            # Predição
-            prediction = self.model.predict(features_scaled)[0]
-            probability = self.model.predict_proba(features_scaled)[0]
-            
-            confidence = max(probability) * 100
-            direction = 'CALL' if prediction == 1 else 'PUT'
-            
-            return {
-                'direction': direction,
-                'confidence': confidence,
-                'method': 'machine_learning'
-            }
-            
-        except Exception as e:
-            logger.error(f"Erro na predição ML: {e}")
-            return self.hybrid_prediction(market_data)
+        """Prediz direção usando sistema híbrido online/offline"""
+        # Usar sistema ensemble com online learning
+        return self.get_best_prediction(market_data, trade_history)
     
     def hybrid_prediction(self, market_data):
-        """Predição híbrida usando análise técnica + padrões"""
+        """Predição híbrida usando análise técnica + padrões (mantido igual do original)"""
         try:
             rsi = market_data['rsi']
             macd = market_data['macd']
@@ -483,29 +888,42 @@ class TradingAI:
             return {
                 'direction': direction,
                 'confidence': max(60, confidence),  # Mínimo de 60%
-                'method': 'hybrid_analysis'
+                'method': 'hybrid_technical_analysis'
             }
             
         except Exception as e:
-            logger.error(f"Erro na predição híbrida: {e}")
+            logger.error(f"❌ Erro na predição híbrida: {e}")
             return {
                 'direction': 'CALL' if np.random.random() > 0.5 else 'PUT',
                 'confidence': 65.0,
-                'method': 'fallback'
+                'method': 'fallback_random'
             }
 
-# Instância global da IA
-trading_ai = TradingAI()
+# Instância global da IA com Online Learning
+trading_ai = OnlineTradingAI()
 
-# Rotas da API
+# ====================================
+# ROTAS DA API (MODIFICADAS)
+# ====================================
+
 @app.route('/', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'online',
-        'service': 'Trading AI API',
-        'version': '1.0.0',
+        'service': 'Trading AI API - Online Learning',
+        'version': '2.0.0',
         'timestamp': datetime.now().isoformat(),
-        'model_trained': trading_ai.is_trained,
+        'models': {
+            'offline_trained': trading_ai.offline_trained,
+            'online_initialized': trading_ai.online_initialized,
+            'passive_initialized': trading_ai.passive_initialized
+        },
+        'online_metrics': {
+            'total_predictions': trading_ai.online_metrics['total_predictions'],
+            'accuracy': (trading_ai.online_metrics['correct_predictions'] / 
+                        max(1, trading_ai.online_metrics['total_predictions'])),
+            'learning_updates': trading_ai.online_metrics['learning_updates']
+        },
         'database': 'connected'
     })
 
@@ -518,7 +936,7 @@ def analyze_market():
         # Obter dados de mercado
         market_data = trading_ai.get_market_data(symbol)
         
-        # Análise detalhada
+        # Análise detalhada (mantida igual)
         analysis = {
             'symbol': symbol,
             'current_price': market_data['price'],
@@ -532,10 +950,16 @@ def analyze_market():
             },
             'market_condition': 'neutral',
             'volatility_level': 'medium',
-            'trend': 'sideways'
+            'trend': 'sideways',
+            'online_learning_status': {
+                'initialized': trading_ai.online_initialized,
+                'total_updates': trading_ai.online_metrics['learning_updates'],
+                'recent_accuracy': (sum(1 for t in trading_ai.online_metrics['last_10_trades'] if t['correct']) / 
+                                  max(1, len(trading_ai.online_metrics['last_10_trades']))) if trading_ai.online_metrics['last_10_trades'] else 0
+            }
         }
         
-        # Determinar condições de mercado
+        # Determinar condições de mercado (mantido igual)
         rsi = market_data['rsi']
         if rsi < 30:
             analysis['market_condition'] = 'oversold'
@@ -548,7 +972,7 @@ def analyze_market():
         elif market_data['macd'] < 0:
             analysis['trend'] = 'bearish'
         
-        # Nível de volatilidade
+        # Nível de volatilidade (mantido igual)
         if market_data['volatility'] > 2.0:
             analysis['volatility_level'] = 'high'
         elif market_data['volatility'] < 0.5:
@@ -559,237 +983,4 @@ def analyze_market():
         return jsonify(analysis)
         
     except Exception as e:
-        logger.error(f"Erro na análise: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/signal', methods=['POST'])
-def get_trading_signal():
-    try:
-        data = request.get_json()
-        symbol = data.get('symbol', 'R_50')
-        trade_history = data.get('recentTrades', [])
-        
-        # Obter dados de mercado
-        market_data = trading_ai.get_market_data(symbol)
-        
-        # Obter predição
-        prediction = trading_ai.predict_direction(market_data, trade_history)
-        
-        # Enriquecer resposta
-        signal = {
-            'direction': prediction['direction'],
-            'confidence': prediction['confidence'],
-            'method': prediction['method'],
-            'reasoning': f"Análise {prediction['method']} baseada em RSI {market_data['rsi']:.1f}, MACD {market_data['macd']:.3f}",
-            'entry_price': market_data['price'],
-            'timestamp': market_data['timestamp'],
-            'timeframe': '5m',
-            'risk_level': 'medium'
-        }
-        
-        # Ajustar risco baseado na confiança
-        if prediction['confidence'] > 85:
-            signal['risk_level'] = 'low'
-        elif prediction['confidence'] < 70:
-            signal['risk_level'] = 'high'
-        
-        return jsonify(signal)
-        
-    except Exception as e:
-        logger.error(f"Erro no sinal: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/risk', methods=['POST'])
-def assess_risk():
-    try:
-        data = request.get_json()
-        martingale_level = data.get('martingaleLevel', 0)
-        recent_trades = data.get('recentTrades', [])
-        current_balance = data.get('currentBalance', 1000)
-        win_rate = data.get('winRate', 50)
-        
-        # Calcular score de risco
-        risk_score = 0
-        risk_factors = []
-        
-        # Fator Martingale
-        if martingale_level > 4:
-            risk_score += 40
-            risk_factors.append(f"Martingale nível {martingale_level} - ALTO RISCO")
-        elif martingale_level > 2:
-            risk_score += 20
-            risk_factors.append(f"Martingale nível {martingale_level} - risco elevado")
-        
-        # Fator win rate
-        if win_rate < 40:
-            risk_score += 25
-            risk_factors.append(f"Win rate baixo ({win_rate:.1f}%)")
-        elif win_rate < 50:
-            risk_score += 10
-            risk_factors.append(f"Win rate abaixo da média ({win_rate:.1f}%)")
-        
-        # Fator trades recentes
-        if len(recent_trades) >= 3:
-            recent_losses = sum(1 for t in recent_trades[-3:] if t.get('result') == 'loss')
-            if recent_losses >= 2:
-                risk_score += 15
-                risk_factors.append(f"{recent_losses} perdas nas últimas 3 operações")
-        
-        # Determinar nível de risco
-        if risk_score >= 60:
-            level = 'high'
-            recommendation = 'PAUSE imediata - risco extremamente alto'
-        elif risk_score >= 35:
-            level = 'medium'
-            recommendation = 'Operar com extrema cautela - considere reduzir stake'
-        else:
-            level = 'low'
-            recommendation = 'Continuar operando normalmente'
-        
-        assessment = {
-            'level': level,
-            'score': risk_score,
-            'message': f"Risco {level.upper()} detectado - Score: {risk_score}/100",
-            'recommendation': recommendation,
-            'risk_factors': risk_factors,
-            'martingale_level': martingale_level,
-            'suggested_action': 'pause' if risk_score >= 60 else 'continue'
-        }
-        
-        return jsonify(assessment)
-        
-    except Exception as e:
-        logger.error(f"Erro na avaliação de risco: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/save-trade', methods=['POST'])
-def save_trade():
-    try:
-        data = request.get_json()
-        
-        # Extrair features do mercado no momento do trade
-        market_data = trading_ai.get_market_data(data.get('symbol', 'R_50'))
-        features = trading_ai.extract_features(market_data).tolist()[0]
-        
-        conn = sqlite3.connect(DATABASE_URL)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO trades 
-            (timestamp, symbol, direction, stake, duration, entry_price, exit_price, result, pnl, martingale_level, market_conditions, features)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            data.get('timestamp', datetime.now().isoformat()),
-            data.get('symbol'),
-            data.get('direction'),
-            data.get('stake'),
-            data.get('duration'),
-            data.get('entry_price'),
-            data.get('exit_price'),
-            data.get('result'),
-            data.get('pnl'),
-            data.get('martingale_level', 0),
-            json.dumps(data.get('market_conditions', {})),
-            json.dumps(features)
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        # Retreinar modelo periodicamente
-        try:
-            conn_check = sqlite3.connect(DATABASE_URL)
-            total_trades = pd.read_sql_query('SELECT COUNT(*) as count FROM trades', conn_check).iloc[0]['count']
-            conn_check.close()
-            
-            if total_trades % 50 == 0:  # A cada 50 trades
-                trading_ai.train_model()
-        except:
-            pass
-        
-        return jsonify({'status': 'success', 'message': 'Trade salvo com sucesso'})
-        
-    except Exception as e:
-        logger.error(f"Erro ao salvar trade: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/statistics', methods=['GET'])
-def get_statistics():
-    try:
-        conn = sqlite3.connect(DATABASE_URL)
-        
-        # Estatísticas gerais
-        stats_query = '''
-            SELECT 
-                COUNT(*) as total_trades,
-                SUM(CASE WHEN result = 'win' THEN 1 ELSE 0 END) as wins,
-                SUM(CASE WHEN result = 'loss' THEN 1 ELSE 0 END) as losses,
-                AVG(CASE WHEN result = 'win' THEN 1.0 ELSE 0.0 END) * 100 as win_rate,
-                SUM(pnl) as total_pnl,
-                AVG(pnl) as avg_pnl
-            FROM trades
-            WHERE date(timestamp) = date('now')
-        '''
-        
-        try:
-            today_stats = pd.read_sql_query(stats_query, conn).iloc[0]
-        except:
-            # Se der erro, retornar stats vazias
-            today_stats = {
-                'total_trades': 0,
-                'wins': 0,
-                'losses': 0,
-                'win_rate': 0,
-                'total_pnl': 0,
-                'avg_pnl': 0
-            }
-        
-        # Estatísticas por Martingale
-        try:
-            martingale_stats = pd.read_sql_query('''
-                SELECT 
-                    martingale_level,
-                    COUNT(*) as trades,
-                    AVG(CASE WHEN result = 'win' THEN 1.0 ELSE 0.0 END) * 100 as win_rate,
-                    SUM(pnl) as total_pnl
-                FROM trades
-                WHERE martingale_level IS NOT NULL
-                GROUP BY martingale_level
-                ORDER BY martingale_level
-            ''', conn)
-            martingale_data = martingale_stats.to_dict('records')
-        except:
-            martingale_data = []
-        
-        conn.close()
-        
-        statistics = {
-            'today': {
-                'total_trades': int(today_stats['total_trades']) if today_stats['total_trades'] else 0,
-                'wins': int(today_stats['wins']) if today_stats['wins'] else 0,
-                'losses': int(today_stats['losses']) if today_stats['losses'] else 0,
-                'win_rate': float(today_stats['win_rate']) if today_stats['win_rate'] else 0.0,
-                'total_pnl': float(today_stats['total_pnl']) if today_stats['total_pnl'] else 0.0,
-                'avg_pnl': float(today_stats['avg_pnl']) if today_stats['avg_pnl'] else 0.0
-            },
-            'martingale_performance': martingale_data,
-            'model_status': {
-                'is_trained': trading_ai.is_trained,
-                'last_training': datetime.now().isoformat()
-            }
-        }
-        
-        return jsonify(statistics)
-        
-    except Exception as e:
-        logger.error(f"Erro ao obter estatísticas: {e}")
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    # Tentar treinar o modelo na inicialização
-    try:
-        trading_ai.train_model()
-    except Exception as e:
-        logger.info(f"Modelo não treinado na inicialização: {e}")
-    
-    app.run(host='0.0.0.0', port=API_PORT, debug=False)
+        logger.error(f"❌ Erro na análise
