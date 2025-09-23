@@ -9,7 +9,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
 import logging
-# MUDANÇA: Modelos que suportam online learning
 from sklearn.linear_model import SGDClassifier, PassiveAggressiveClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -30,75 +29,147 @@ logger = logging.getLogger(__name__)
 API_PORT = int(os.environ.get('PORT', 5000))
 DATABASE_URL = 'trading_stats_online.db'
 
-class TechnicalIndicators:
-    """Classe para calcular indicadores técnicos sem dependências externas"""
+class DerivSymbolManager:
+    """Gerenciador específico para símbolos e timeframes do Deriv"""
     
-    @staticmethod
-    def rsi(prices, window=14):
-        """Calcula RSI"""
-        try:
-            prices_series = pd.Series(prices)
-            delta = prices_series.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            return float(rsi.fillna(50).iloc[-1])
-        except:
-            return 50.0
-    
-    @staticmethod
-    def macd(prices, fast=12, slow=26, signal=9):
-        """Calcula MACD"""
-        try:
-            prices_series = pd.Series(prices)
-            ema_fast = prices_series.ewm(span=fast).mean()
-            ema_slow = prices_series.ewm(span=slow).mean()
-            macd_line = ema_fast - ema_slow
-            signal_line = macd_line.ewm(span=signal).mean()
-            
-            return float(macd_line.iloc[-1]) if len(macd_line) > 0 else 0.0
-        except:
-            return 0.0
-    
-    @staticmethod
-    def bollinger_bands(prices, window=20, num_std=2):
-        """Calcula Bollinger Bands"""
-        try:
-            prices_series = pd.Series(prices)
-            rolling_mean = prices_series.rolling(window=window).mean()
-            rolling_std = prices_series.rolling(window=window).std()
-            
-            upper_band = rolling_mean + (rolling_std * num_std)
-            lower_band = rolling_mean - (rolling_std * num_std)
-            
-            return {
-                'upper': float(upper_band.iloc[-1]) if len(upper_band) > 0 else prices[-1] * 1.02,
-                'lower': float(lower_band.iloc[-1]) if len(lower_band) > 0 else prices[-1] * 0.98
-            }
-        except:
-            return {
-                'upper': prices[-1] * 1.02,
-                'lower': prices[-1] * 0.98
-            }
-    
-    @staticmethod
-    def volatility(prices, window=14):
-        """Calcula volatilidade (ATR simplificado)"""
-        try:
-            prices_series = pd.Series(prices)
-            returns = prices_series.pct_change().dropna()
-            volatility = returns.rolling(window=window).std() * np.sqrt(252)  # Anualizada
-            return float(volatility.iloc[-1]) if len(volatility) > 0 else 1.0
-        except:
-            return 1.0
-
-class OnlineTradingAI:
     def __init__(self):
-        # SISTEMA HÍBRIDO: Offline + Online Learning
-        self.offline_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.symbol_configs = {
+            # Volatility Indices
+            'R_10': {'base_price': 1000, 'volatility': 0.10, 'tick_size': 0.001},
+            'R_25': {'base_price': 1000, 'volatility': 0.25, 'tick_size': 0.001},
+            'R_50': {'base_price': 1000, 'volatility': 0.50, 'tick_size': 0.001},
+            'R_75': {'base_price': 1000, 'volatility': 0.75, 'tick_size': 0.001},
+            'R_100': {'base_price': 1000, 'volatility': 1.00, 'tick_size': 0.001},
+            
+            # Volatility Indices (1s)
+            '1HZ10V': {'base_price': 1000, 'volatility': 0.10, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ25V': {'base_price': 1000, 'volatility': 0.25, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ50V': {'base_price': 1000, 'volatility': 0.50, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ75V': {'base_price': 1000, 'volatility': 0.75, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ100V': {'base_price': 1000, 'volatility': 1.00, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ150V': {'base_price': 1000, 'volatility': 1.50, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ200V': {'base_price': 1000, 'volatility': 2.00, 'tick_size': 0.001, 'high_freq': True},
+            '1HZ250V': {'base_price': 1000, 'volatility': 2.50, 'tick_size': 0.001, 'high_freq': True},
+            
+            # Jump Indices
+            'JD10': {'base_price': 1000, 'volatility': 0.10, 'jump_factor': 0.10},
+            'JD25': {'base_price': 1000, 'volatility': 0.25, 'jump_factor': 0.25},
+            'JD50': {'base_price': 1000, 'volatility': 0.50, 'jump_factor': 0.50},
+            'JD75': {'base_price': 1000, 'volatility': 0.75, 'jump_factor': 0.75},
+            'JD100': {'base_price': 1000, 'volatility': 1.00, 'jump_factor': 1.00},
+            
+            # Crash/Boom
+            'CRASH300': {'base_price': 8000, 'volatility': 3.0, 'crash_prob': 0.003},
+            'CRASH500': {'base_price': 8000, 'volatility': 5.0, 'crash_prob': 0.002},
+            'CRASH600': {'base_price': 8000, 'volatility': 6.0, 'crash_prob': 0.00167},
+            'CRASH900': {'base_price': 8000, 'volatility': 9.0, 'crash_prob': 0.00111},
+            'CRASH1000': {'base_price': 8000, 'volatility': 10.0, 'crash_prob': 0.001},
+            'BOOM300': {'base_price': 1000, 'volatility': 3.0, 'boom_prob': 0.003},
+            'BOOM500': {'base_price': 1000, 'volatility': 5.0, 'boom_prob': 0.002},
+            'BOOM600': {'base_price': 1000, 'volatility': 6.0, 'boom_prob': 0.00167},
+            'BOOM900': {'base_price': 1000, 'volatility': 9.0, 'boom_prob': 0.00111},
+            'BOOM1000': {'base_price': 1000, 'volatility': 10.0, 'boom_prob': 0.001},
+            
+            # Step Indices
+            'STPRAN': {'base_price': 1000, 'volatility': 1.0, 'step_size': 0.1},
+            'STPRAN200': {'base_price': 1000, 'volatility': 2.0, 'step_size': 0.2},
+            'STPRAN500': {'base_price': 1000, 'volatility': 5.0, 'step_size': 0.5},
+            
+            # Market Indices
+            'RDBEAR': {'base_price': 5000, 'volatility': 1.5, 'trend_bias': -0.1},
+            'RDBULL': {'base_price': 5000, 'volatility': 1.5, 'trend_bias': 0.1},
+        }
         
-        # MODELOS ONLINE LEARNING
+        # Mapeamento de timeframes do Deriv
+        self.timeframe_mapping = {
+            't': {  # Ticks
+                1: {'seconds': 1, 'description': '1 tick', 'min_confidence': 85},
+                2: {'seconds': 2, 'description': '2 ticks', 'min_confidence': 82},
+                3: {'seconds': 3, 'description': '3 ticks', 'min_confidence': 80},
+                4: {'seconds': 4, 'description': '4 ticks', 'min_confidence': 78},
+                5: {'seconds': 5, 'description': '5 ticks', 'min_confidence': 75},
+                6: {'seconds': 6, 'description': '6 ticks', 'min_confidence': 73},
+                7: {'seconds': 7, 'description': '7 ticks', 'min_confidence': 72},
+                8: {'seconds': 8, 'description': '8 ticks', 'min_confidence': 70},
+                9: {'seconds': 9, 'description': '9 ticks', 'min_confidence': 68},
+                10: {'seconds': 10, 'description': '10 ticks', 'min_confidence': 65}
+            },
+            'm': {  # Minutos
+                1: {'seconds': 60, 'description': '1 min', 'min_confidence': 65},
+                2: {'seconds': 120, 'description': '2 mins', 'min_confidence': 62},
+                3: {'seconds': 180, 'description': '3 mins', 'min_confidence': 60},
+                4: {'seconds': 240, 'description': '4 mins', 'min_confidence': 58},
+                5: {'seconds': 300, 'description': '5 mins', 'min_confidence': 55},
+                10: {'seconds': 600, 'description': '10 mins', 'min_confidence': 50},
+                15: {'seconds': 900, 'description': '15 mins', 'min_confidence': 50},
+                30: {'seconds': 1800, 'description': '30 mins', 'min_confidence': 50},
+                60: {'seconds': 3600, 'description': '1 hora', 'min_confidence': 50}
+            }
+        }
+    
+    def get_symbol_config(self, symbol):
+        """Retorna configuração específica do símbolo"""
+        return self.symbol_configs.get(symbol, {
+            'base_price': 1000,
+            'volatility': 1.0,
+            'tick_size': 0.001
+        })
+    
+    def get_optimal_timeframe(self, symbol, confidence, market_conditions):
+        """Determina timeframe ótimo baseado no símbolo e condições"""
+        config = self.get_symbol_config(symbol)
+        volatility = config.get('volatility', 1.0)
+        
+        # Para símbolos de alta frequência (1s), preferir ticks
+        if config.get('high_freq', False):
+            if confidence >= 80:
+                return {'type': 't', 'duration': 3}
+            elif confidence >= 70:
+                return {'type': 't', 'duration': 5}
+            else:
+                return {'type': 't', 'duration': 7}
+        
+        # Para símbolos de alta volatilidade, usar timeframes maiores
+        elif volatility >= 2.0:
+            if confidence >= 75:
+                return {'type': 'm', 'duration': 2}
+            elif confidence >= 65:
+                return {'type': 'm', 'duration': 3}
+            else:
+                return {'type': 'm', 'duration': 5}
+        
+        # Para volatilidade normal
+        else:
+            if confidence >= 80:
+                return {'type': 't', 'duration': 5}
+            elif confidence >= 70:
+                return {'type': 'm', 'duration': 1}
+            elif confidence >= 60:
+                return {'type': 'm', 'duration': 2}
+            else:
+                return {'type': 'm', 'duration': 3}
+    
+    def validate_timeframe(self, duration_type, duration):
+        """Valida se o timeframe é suportado"""
+        if duration_type not in self.timeframe_mapping:
+            return False
+        return duration in self.timeframe_mapping[duration_type]
+    
+    def get_timeframe_confidence_threshold(self, duration_type, duration):
+        """Retorna threshold de confiança mínima para o timeframe"""
+        if not self.validate_timeframe(duration_type, duration):
+            return 70
+        
+        return self.timeframe_mapping[duration_type][duration]['min_confidence']
+
+
+class EnhancedTradingAI:
+    def __init__(self):
+        # Gerenciador de símbolos Deriv
+        self.deriv_manager = DerivSymbolManager()
+        
+        # Sistema de ML (mantido do código original)
+        self.offline_model = RandomForestClassifier(n_estimators=100, random_state=42)
         self.online_model = SGDClassifier(
             loss='log_loss', 
             learning_rate='adaptive',
@@ -106,8 +177,6 @@ class OnlineTradingAI:
             random_state=42,
             max_iter=1000
         )
-        
-        # Modelo alternativo para comparação
         self.passive_model = PassiveAggressiveClassifier(
             C=1.0,
             random_state=42,
@@ -117,17 +186,17 @@ class OnlineTradingAI:
         self.scaler = StandardScaler()
         self.online_scaler = StandardScaler()
         
-        # CONTROLES DE ESTADO
+        # Estados do sistema
         self.offline_trained = False
         self.online_initialized = False
         self.passive_initialized = False
         
-        # BUFFERS PARA INICIALIZAÇÃO ONLINE
+        # Buffers para inicialização
         self.feature_buffer = []
         self.target_buffer = []
         self.min_samples_init = 20
         
-        # MÉTRICAS EM TEMPO REAL
+        # Métricas e controle
         self.online_metrics = {
             'total_predictions': 0,
             'correct_predictions': 0,
@@ -136,16 +205,27 @@ class OnlineTradingAI:
             'learning_updates': 0
         }
         
-        self.indicators = TechnicalIndicators()
-        self.init_database()
+        # Configurações de IA automatizada
+        self.full_ai_mode = {
+            'active': False,
+            'auto_symbol_selection': False,
+            'auto_timeframe_selection': True,
+            'auto_stake_management': True,
+            'auto_analysis_cycle': 30,  # segundos
+            'min_confidence_threshold': 75,
+            'preferred_symbols': ['R_50', 'R_25', 'R_100'],
+            'risk_level': 'medium'
+        }
         
+        self.init_database()
+    
     def init_database(self):
-        """Inicializa o banco de dados com colunas para online learning"""
+        """Inicializa o banco de dados"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             cursor = conn.cursor()
             
-            # Tabela de trades com campos para online learning
+            # Tabela principal de trades
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,655 +233,307 @@ class OnlineTradingAI:
                     symbol TEXT,
                     direction TEXT,
                     stake REAL,
-                    duration TEXT,
+                    duration_type TEXT,
+                    duration_value INTEGER,
                     entry_price REAL,
                     exit_price REAL,
                     result TEXT,
                     pnl REAL,
-                    martingale_level INTEGER,
-                    market_conditions TEXT,
+                    confidence REAL,
+                    timeframe_used TEXT,
+                    ai_mode TEXT,
                     features TEXT,
-                    online_updated BOOLEAN DEFAULT 0,
-                    prediction_confidence REAL,
-                    model_used TEXT,
-                    learning_iteration INTEGER,
-                    data_type TEXT DEFAULT 'real',
-                    market_scenario TEXT
+                    market_analysis TEXT
                 )
             ''')
             
-            # Tabela para métricas de online learning
+            # Tabela de configurações de sessão
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS online_metrics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME,
-                    model_type TEXT,
-                    accuracy REAL,
-                    total_samples INTEGER,
-                    recent_performance TEXT,
-                    adaptation_rate REAL
-                )
-            ''')
-            
-            # Demais tabelas mantidas...
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS statistics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date DATE,
-                    total_trades INTEGER,
-                    wins INTEGER,
-                    losses INTEGER,
-                    win_rate REAL,
-                    total_pnl REAL,
-                    best_streak INTEGER,
-                    worst_streak INTEGER,
-                    martingale_usage TEXT,
-                    online_accuracy REAL,
-                    adaptation_score REAL
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS market_data (
+                CREATE TABLE IF NOT EXISTS session_configs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME,
                     symbol TEXT,
-                    price REAL,
-                    volume REAL,
-                    rsi REAL,
-                    macd REAL,
-                    bb_upper REAL,
-                    bb_lower REAL,
-                    volatility REAL,
-                    data_type TEXT DEFAULT 'real',
-                    market_scenario TEXT,
-                    synthetic_params TEXT
+                    duration_type TEXT,
+                    duration_value INTEGER,
+                    stake REAL,
+                    ai_mode_active BOOLEAN,
+                    session_id TEXT
                 )
             ''')
             
             conn.commit()
             conn.close()
-            logger.info("Banco de dados de online learning inicializado")
+            logger.info("Banco de dados inicializado com sucesso")
             
         except Exception as e:
             logger.error(f"Erro ao inicializar banco: {e}")
     
-    def get_market_data(self, symbol, force_scenario=None):
-        """Obtém dados de mercado em tempo real com laboratório sintético"""
+    def get_market_data_for_symbol(self, symbol):
+        """Gera dados de mercado específicos para símbolos Deriv"""
         try:
-            # Para índices sintéticos Deriv, usar laboratório sintético
-            if symbol.startswith(('R_', '1HZ', 'CRASH', 'BOOM', 'JD', 'STEP')):
-                scenario = force_scenario or self.get_market_scenario(symbol)
-                return self.get_synthetic_data(symbol, scenario)
+            config = self.deriv_manager.get_symbol_config(symbol)
+            base_price = config['base_price']
+            volatility = config['volatility']
             
-            # Para outros símbolos, tentar yfinance primeiro
-            try:
-                ticker = yf.Ticker(symbol)
-                data = ticker.history(period="5d", interval="1m")
-                
-                if not data.empty:
-                    return self.process_market_data(data, symbol, data_type='real')
-            except Exception as e:
-                logger.warning(f"yfinance falhou para {symbol}: {e}")
-                pass
-                
-            # Fallback para laboratório sintético
-            scenario = force_scenario or 'normal'
-            logger.info(f"Usando laboratório sintético para {symbol} (cenário: {scenario})")
-            return self.get_synthetic_data(symbol, scenario)
-            
-        except Exception as e:
-            logger.error(f"Erro ao obter dados do mercado: {e}")
-            return self.get_fallback_data(symbol, data_type='synthetic', scenario='error_fallback')
-    
-    def get_synthetic_data(self, symbol, scenario='normal'):
-        """Gera dados sintéticos baseados em padrões de mercado reais"""
-        try:
-            np.random.seed(int(datetime.now().timestamp()) % 1000)
-            
-            # Mapear volatilidade por símbolo
-            volatility_map = {
-                'R_10': 0.1, 'R_25': 0.25, 'R_50': 0.5, 'R_75': 0.75, 'R_100': 1.0,
-                '1HZ10V': 0.1, '1HZ25V': 0.25, '1HZ50V': 0.5, '1HZ75V': 0.75, '1HZ100V': 1.0,
-                'CRASH300': 3.0, 'CRASH500': 5.0, 'CRASH1000': 10.0,
-                'BOOM300': 3.0, 'BOOM500': 5.0, 'BOOM1000': 10.0
-            }
-            
-            volatility = volatility_map.get(symbol, 0.5)
-            base_price = 1000 + np.random.normal(0, 50)
-            
-            # Gerar série temporal realística
+            # Simular série temporal realista
             periods = 100
             prices = [base_price]
             
+            # Seed baseado no símbolo para consistência
+            np.random.seed(hash(symbol) % 2**32)
+            
             for i in range(periods - 1):
-                # Movimento browniano com drift e mean reversion
-                drift = np.random.normal(0, volatility * 0.01)
-                mean_reversion = (1000 - prices[-1]) * 0.001  # Leve mean reversion
-                noise = np.random.normal(0, volatility * 0.1)
+                # Movimento base com volatilidade específica
+                drift = np.random.normal(0, volatility * 0.001)
                 
-                new_price = prices[-1] * (1 + drift + mean_reversion + noise)
-                prices.append(max(0.01, new_price))  # Evitar preços negativos
-            
-            # Criar DataFrame simulado
-            df = pd.DataFrame({
-                'Close': prices,
-                'High': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
-                'Low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
-                'Volume': [np.random.randint(1000, 10000) for _ in prices]
-            })
-            
-            return self.process_market_data(df, symbol, data_type='synthetic', scenario=scenario)
-            
-        except Exception as e:
-            logger.error(f"Erro ao gerar dados sintéticos: {e}")
-            return self.get_fallback_data(symbol)
-    
-    def process_market_data(self, data, symbol, data_type='real', scenario=None, synthetic_params=None):
-        """Processa dados de mercado e calcula indicadores técnicos"""
-        try:
-            close_prices = data['Close'].values
-            high_prices = data['High'].values if 'High' in data.columns else close_prices
-            low_prices = data['Low'].values if 'Low' in data.columns else close_prices
-            volume = data['Volume'].values if 'Volume' in data.columns else [1000] * len(close_prices)
+                # Mean reversion para manter preços estáveis
+                mean_reversion = (base_price - prices[-1]) * 0.0001
+                
+                # Ruído específico do ativo
+                noise = np.random.normal(0, volatility * 0.01)
+                
+                # Fatores especiais por tipo de ativo
+                special_factor = 0
+                if 'CRASH' in symbol:
+                    # Simulação de crashes ocasionais
+                    if np.random.random() < config.get('crash_prob', 0.001):
+                        special_factor = -volatility * 0.1
+                elif 'BOOM' in symbol:
+                    # Simulação de booms ocasionais
+                    if np.random.random() < config.get('boom_prob', 0.001):
+                        special_factor = volatility * 0.1
+                elif 'JD' in symbol:
+                    # Jump diffusion
+                    if np.random.random() < 0.01:  # 1% chance de jump
+                        special_factor = np.random.choice([-1, 1]) * config.get('jump_factor', 0.5) * 0.01
+                
+                new_price = prices[-1] * (1 + drift + mean_reversion + noise + special_factor)
+                prices.append(max(0.01, new_price))
             
             # Calcular indicadores técnicos
-            rsi = self.indicators.rsi(close_prices)
-            macd = self.indicators.macd(close_prices)
-            bb = self.indicators.bollinger_bands(close_prices)
-            volatility = self.indicators.volatility(close_prices)
+            close_prices = np.array(prices)
             
-            current_data = {
+            # RSI
+            delta = np.diff(close_prices)
+            gains = np.where(delta > 0, delta, 0)
+            losses = np.where(delta < 0, -delta, 0)
+            avg_gain = np.mean(gains[-14:]) if len(gains) >= 14 else np.mean(gains)
+            avg_loss = np.mean(losses[-14:]) if len(losses) >= 14 else np.mean(losses)
+            rs = avg_gain / avg_loss if avg_loss != 0 else 100
+            rsi = 100 - (100 / (1 + rs))
+            
+            # MACD simplificado
+            ema12 = np.mean(close_prices[-12:])
+            ema26 = np.mean(close_prices[-26:]) if len(close_prices) >= 26 else np.mean(close_prices)
+            macd = ema12 - ema26
+            
+            # Bollinger Bands
+            sma20 = np.mean(close_prices[-20:]) if len(close_prices) >= 20 else np.mean(close_prices)
+            std20 = np.std(close_prices[-20:]) if len(close_prices) >= 20 else np.std(close_prices)
+            bb_upper = sma20 + (2 * std20)
+            bb_lower = sma20 - (2 * std20)
+            
+            # Tendência
+            recent_prices = close_prices[-10:]
+            trend_slope = np.polyfit(range(len(recent_prices)), recent_prices, 1)[0]
+            trend_strength = abs(trend_slope / close_prices[-1]) * 1000  # Normalizado
+            
+            if trend_slope > close_prices[-1] * 0.001:
+                trend = 'bullish'
+            elif trend_slope < -close_prices[-1] * 0.001:
+                trend = 'bearish'
+            else:
+                trend = 'neutral'
+            
+            return {
                 'symbol': symbol,
                 'price': float(close_prices[-1]),
-                'rsi': rsi,
-                'macd': macd,
-                'macd_signal': 0.0,  # Simplificado
-                'bb_upper': bb['upper'],
-                'bb_lower': bb['lower'],
+                'rsi': float(rsi),
+                'macd': float(macd),
+                'bb_upper': float(bb_upper),
+                'bb_lower': float(bb_lower),
                 'volatility': volatility,
-                'volume': float(volume[-1]) if len(volume) > 0 else 1000.0,
+                'trend_strength': float(trend_strength),
+                'trend': trend,
+                'volume': 1000.0,
                 'timestamp': datetime.now().isoformat(),
-                # NOVOS CAMPOS PARA IDENTIFICAÇÃO
-                'data_type': data_type,
-                'market_scenario': scenario,
-                'synthetic_params': json.dumps(synthetic_params) if synthetic_params else None
+                'symbol_type': self.get_symbol_type(symbol),
+                'recommended_timeframes': self.get_recommended_timeframes(symbol, volatility)
             }
             
-            # Salvar no banco com identificação de tipo
-            self.save_market_data(current_data)
-            
-            # Log diferenciado para dados sintéticos
-            if data_type == 'synthetic':
-                logger.info(f"DADOS SINTÉTICOS {scenario}: {symbol} - "
-                           f"Preço: {current_data['price']:.4f}, "
-                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
-            else:
-                logger.info(f"DADOS REAIS: {symbol} - "
-                           f"Preço: {current_data['price']:.4f}, "
-                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
-            
-            return current_data
-            
         except Exception as e:
-            logger.error(f"Erro no processamento de dados: {e}")
-            return self.get_fallback_data(symbol, data_type=data_type, scenario=scenario)
+            logger.error(f"Erro ao gerar dados para {symbol}: {e}")
+            return self.get_fallback_data(symbol)
     
-    def get_fallback_data(self, symbol, data_type='synthetic', scenario='fallback'):
-        """Dados de fallback em caso de erro"""
+    def get_symbol_type(self, symbol):
+        """Identifica o tipo do símbolo"""
+        if symbol.startswith('R_'):
+            return 'volatility_index'
+        elif symbol.startswith('1HZ'):
+            return 'high_frequency_volatility'
+        elif 'CRASH' in symbol or 'BOOM' in symbol:
+            return 'crash_boom'
+        elif symbol.startswith('JD'):
+            return 'jump_diffusion'
+        elif 'STEP' in symbol:
+            return 'step_index'
+        elif symbol in ['RDBEAR', 'RDBULL']:
+            return 'market_index'
+        else:
+            return 'unknown'
+    
+    def get_recommended_timeframes(self, symbol, volatility):
+        """Retorna timeframes recomendados para o símbolo"""
+        symbol_type = self.get_symbol_type(symbol)
+        
+        if symbol_type == 'high_frequency_volatility':
+            return ['3t', '5t', '7t', '1m']
+        elif symbol_type == 'crash_boom':
+            return ['2m', '3m', '5m', '10m']
+        elif volatility <= 0.25:
+            return ['5t', '7t', '1m', '2m']
+        elif volatility <= 0.75:
+            return ['1m', '2m', '3m', '5m']
+        else:
+            return ['2m', '3m', '5m', '10m']
+    
+    def get_fallback_data(self, symbol):
+        """Dados de fallback"""
+        config = self.deriv_manager.get_symbol_config(symbol)
         return {
             'symbol': symbol,
-            'price': 1000.0 + np.random.normal(0, 10),
-            'rsi': 45.0 + np.random.normal(0, 10),
-            'macd': np.random.normal(0, 0.5),
-            'macd_signal': 0.0,
-            'bb_upper': 1020.0,
-            'bb_lower': 980.0,
-            'volatility': 1.0 + np.random.normal(0, 0.3),
+            'price': config['base_price'] + np.random.normal(0, 10),
+            'rsi': 50.0,
+            'macd': 0.0,
+            'bb_upper': config['base_price'] * 1.02,
+            'bb_lower': config['base_price'] * 0.98,
+            'volatility': config['volatility'],
+            'trend_strength': 0.0,
+            'trend': 'neutral',
             'volume': 1000.0,
             'timestamp': datetime.now().isoformat(),
-            'data_type': data_type,
-            'market_scenario': scenario,
-            'synthetic_params': json.dumps({'source': 'fallback_emergency'})
+            'symbol_type': self.get_symbol_type(symbol)
         }
     
-    def save_market_data(self, data):
-        """Salva dados de mercado no banco com identificação de tipo"""
+    def predict_with_user_config(self, symbol, duration_type, duration_value, stake=None, ai_mode=False):
+        """Predição respeitando configurações do usuário"""
         try:
-            conn = sqlite3.connect(DATABASE_URL)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO market_data 
-                (timestamp, symbol, price, volume, rsi, macd, bb_upper, bb_lower, volatility,
-                 data_type, market_scenario, synthetic_params)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                data['timestamp'], data['symbol'], data['price'], data['volume'],
-                data['rsi'], data['macd'], data['bb_upper'], data['bb_lower'], 
-                data['volatility'], data.get('data_type', 'real'), 
-                data.get('market_scenario'), data.get('synthetic_params')
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            logger.error(f"Erro ao salvar dados de mercado: {e}")
-    
-    def get_market_scenario(self, symbol, force_scenario=None):
-        """
-        Determina qual cenário usar baseado em condições ou força um cenário específico
-        """
-        if force_scenario:
-            return force_scenario
-        
-        # Auto-detecção de cenário baseado no histórico recente
-        try:
-            conn = sqlite3.connect(DATABASE_URL)
-            recent_data = pd.read_sql_query('''
-                SELECT price, volatility, timestamp FROM market_data 
-                WHERE symbol = ? AND data_type = 'real'
-                ORDER BY timestamp DESC LIMIT 10
-            ''', conn, params=[symbol])
-            conn.close()
-            
-            if len(recent_data) < 5:
-                return 'normal'
-            
-            # Analisar tendência recente
-            price_change = (recent_data['price'].iloc[0] - recent_data['price'].iloc[-1]) / recent_data['price'].iloc[-1]
-            avg_volatility = recent_data['volatility'].mean()
-            
-            if avg_volatility > 2.0:
-                return 'high_volatility'
-            elif price_change > 0.05:
-                return 'bull_market'
-            elif price_change < -0.05:
-                return 'bear_market'
-            elif avg_volatility < 0.3:
-                return 'low_volatility'
-            else:
-                return 'normal'
-                
-        except Exception as e:
-            logger.error(f"Erro na detecção de cenário: {e}")
-            return 'normal'
-    
-    def extract_features(self, market_data, trade_history=None):
-        """Extrai features para o modelo de ML"""
-        try:
-            features = []
-            
-            # Features de mercado
-            features.extend([
-                market_data['rsi'],
-                market_data['macd'],
-                market_data['volatility'],
-                (market_data['price'] - market_data['bb_lower']) / (market_data['bb_upper'] - market_data['bb_lower']) if market_data['bb_upper'] != market_data['bb_lower'] else 0.5
-            ])
-            
-            # Features temporais
-            now = datetime.now()
-            features.extend([
-                now.hour / 24.0,  # Hora do dia normalizada
-                now.weekday() / 6.0,  # Dia da semana normalizado
-                (now.minute % 60) / 60.0  # Minuto normalizado
-            ])
-            
-            # Features de histórico
-            if trade_history and len(trade_history) > 0:
-                recent_trades = trade_history[-10:]  # Últimos 10 trades
-                win_rate = sum(1 for t in recent_trades if t.get('result') == 'win') / len(recent_trades)
-                avg_pnl = np.mean([t.get('pnl', 0) for t in recent_trades])
-                features.extend([win_rate, avg_pnl / 100.0])  # Normalizar PnL
-            else:
-                features.extend([0.5, 0.0])
-            
-            return np.array(features).reshape(1, -1)
-            
-        except Exception as e:
-            logger.error(f"Erro ao extrair features: {e}")
-            return np.array([50, 0, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0]).reshape(1, -1)
-    
-    def initialize_online_model(self):
-        """Inicializa modelo online com dados do buffer"""
-        try:
-            if len(self.feature_buffer) < self.min_samples_init:
-                logger.info(f"Buffer insuficiente: {len(self.feature_buffer)}/{self.min_samples_init}")
-                return False
-            
-            X = np.array(self.feature_buffer)
-            y = np.array(self.target_buffer)
-            
-            # Inicializar scaler online
-            self.online_scaler.fit(X)
-            X_scaled = self.online_scaler.transform(X)
-            
-            # Inicializar modelos online
-            self.online_model.partial_fit(X_scaled, y, classes=[0, 1])
-            self.passive_model.partial_fit(X_scaled, y, classes=[0, 1])
-            
-            self.online_initialized = True
-            self.passive_initialized = True
-            
-            # Calcular accuracy inicial
-            predictions = self.online_model.predict(X_scaled)
-            initial_accuracy = accuracy_score(y, predictions)
-            
-            logger.info(f"ONLINE LEARNING INICIALIZADO!")
-            logger.info(f"Amostras: {len(X)}, Accuracy inicial: {initial_accuracy:.3f}")
-            
-            # Limpar buffer
-            self.feature_buffer = []
-            self.target_buffer = []
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro ao inicializar online learning: {e}")
-            return False
-    
-    def update_online_model(self, features, target):
-        """Atualização incremental do modelo a cada trade"""
-        try:
-            features_flat = features.flatten()
-            
-            # Se não inicializado, adicionar ao buffer
-            if not self.online_initialized:
-                self.feature_buffer.append(features_flat)
-                self.target_buffer.append(target)
-                
-                logger.info(f"Adicionado ao buffer: {len(self.feature_buffer)}/{self.min_samples_init}")
-                
-                # Tentar inicializar quando buffer estiver cheio
-                if len(self.feature_buffer) >= self.min_samples_init:
-                    self.initialize_online_model()
-                
-                return False
-            
-            # Modelo já inicializado - atualização incremental
-            X_scaled = self.online_scaler.transform([features_flat])
-            
-            # Fazer predição antes da atualização (para métricas)
-            prediction_before = self.online_model.predict(X_scaled)[0]
-            confidence_before = max(self.online_model.predict_proba(X_scaled)[0])
-            
-            # ATUALIZAÇÃO INCREMENTAL
-            self.online_model.partial_fit(X_scaled, [target])
-            self.passive_model.partial_fit(X_scaled, [target])
-            
-            # Atualizar métricas
-            self.online_metrics['total_predictions'] += 1
-            self.online_metrics['learning_updates'] += 1
-            
-            is_correct = (prediction_before == target)
-            if is_correct:
-                self.online_metrics['correct_predictions'] += 1
-            
-            # Manter histórico dos últimos 10 trades
-            self.online_metrics['last_10_trades'].append({
-                'prediction': prediction_before,
-                'actual': target,
-                'correct': is_correct,
-                'confidence': confidence_before
-            })
-            
-            if len(self.online_metrics['last_10_trades']) > 10:
-                self.online_metrics['last_10_trades'].pop(0)
-            
-            # Calcular accuracy dos últimos 10
-            recent_correct = sum(1 for t in self.online_metrics['last_10_trades'] if t['correct'])
-            recent_accuracy = recent_correct / len(self.online_metrics['last_10_trades'])
-            self.online_metrics['recent_accuracy'].append(recent_accuracy)
-            
-            if len(self.online_metrics['recent_accuracy']) > 50:
-                self.online_metrics['recent_accuracy'].pop(0)
-            
-            # Log da atualização
-            overall_accuracy = self.online_metrics['correct_predictions'] / self.online_metrics['total_predictions']
-            
-            result_emoji = "✅" if is_correct else "❌"
-            target_name = "WIN" if target == 1 else "LOSS"
-            
-            logger.info(f"ONLINE UPDATE #{self.online_metrics['learning_updates']}")
-            logger.info(f"{result_emoji} Predição: {'WIN' if prediction_before == 1 else 'LOSS'}, "
-                       f"Real: {target_name}, Confiança: {confidence_before:.3f}")
-            logger.info(f"Accuracy Geral: {overall_accuracy:.3f}, "
-                       f"Últimos 10: {recent_accuracy:.3f}")
-            
-            # Salvar métricas no banco periodicamente
-            if self.online_metrics['learning_updates'] % 10 == 0:
-                self.save_online_metrics()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro na atualização online: {e}")
-            return False
-    
-    def get_best_prediction(self, market_data, trade_history=None):
-        """Combina predições de múltiplos modelos"""
-        try:
-            features = self.extract_features(market_data, trade_history)
-            
-            predictions = {}
-            
-            # 1. Modelo offline (se treinado)
-            if self.offline_trained:
-                try:
-                    features_scaled = self.scaler.transform(features)
-                    offline_pred = self.offline_model.predict(features_scaled)[0]
-                    offline_proba = self.offline_model.predict_proba(features_scaled)[0]
-                    predictions['offline'] = {
-                        'prediction': offline_pred,
-                        'confidence': max(offline_proba)
-                    }
-                except:
-                    pass
-            
-            # 2. Modelo online SGD
-            if self.online_initialized:
-                try:
-                    features_scaled = self.online_scaler.transform(features)
-                    online_pred = self.online_model.predict(features_scaled)[0]
-                    online_proba = self.online_model.predict_proba(features_scaled)[0]
-                    predictions['online_sgd'] = {
-                        'prediction': online_pred,
-                        'confidence': max(online_proba)
-                    }
-                except:
-                    pass
-            
-            # 3. Modelo Passive Aggressive
-            if self.passive_initialized:
-                try:
-                    features_scaled = self.online_scaler.transform(features)
-                    passive_pred = self.passive_model.predict(features_scaled)[0]
-                    # Passive Aggressive não tem predict_proba, usar confidence baseada em decision_function
-                    decision = self.passive_model.decision_function(features_scaled)[0]
-                    passive_confidence = 1 / (1 + np.exp(-abs(decision)))  # Sigmoid do decision
-                    predictions['passive'] = {
-                        'prediction': passive_pred,
-                        'confidence': passive_confidence
-                    }
-                except:
-                    pass
-            
-            # Escolher melhor predição
-            if predictions:
-                # Preferir modelo online se disponível e confiante
-                if 'online_sgd' in predictions and predictions['online_sgd']['confidence'] > 0.6:
-                    best = predictions['online_sgd']
-                    method = 'online_sgd'
-                elif 'passive' in predictions and predictions['passive']['confidence'] > 0.6:
-                    best = predictions['passive']
-                    method = 'passive_aggressive'
-                elif 'offline' in predictions:
-                    best = predictions['offline']
-                    method = 'offline_random_forest'
-                else:
-                    best = list(predictions.values())[0]
-                    method = list(predictions.keys())[0]
-                
-                direction = 'CALL' if best['prediction'] == 1 else 'PUT'
-                confidence = best['confidence'] * 100
-                
-                logger.info(f"Melhor predição via {method}: {direction} ({confidence:.1f}%)")
-                
+            # Validar timeframe
+            if not self.deriv_manager.validate_timeframe(duration_type, duration_value):
                 return {
-                    'direction': direction,
-                    'confidence': confidence,
-                    'method': f'best_of_ensemble_{method}',
-                    'all_predictions': predictions
+                    'error': f'Timeframe inválido: {duration_value}{duration_type}',
+                    'should_trade': False
                 }
             
-            # Fallback para híbrido
-            return self.hybrid_prediction(market_data)
+            # Obter dados de mercado
+            market_data = self.get_market_data_for_symbol(symbol)
             
-        except Exception as e:
-            logger.error(f"Erro na predição ensemble: {e}")
-            return self.hybrid_prediction(market_data)
-    
-    def save_online_metrics(self):
-        """Salva métricas de online learning no banco"""
-        try:
-            conn = sqlite3.connect(DATABASE_URL)
-            cursor = conn.cursor()
+            # Calcular confiança mínima necessária para o timeframe
+            min_confidence = self.deriv_manager.get_timeframe_confidence_threshold(duration_type, duration_value)
             
-            overall_accuracy = (self.online_metrics['correct_predictions'] / 
-                              self.online_metrics['total_predictions']) if self.online_metrics['total_predictions'] > 0 else 0
+            # Fazer análise técnica
+            analysis = self.analyze_market_conditions(market_data)
             
-            recent_performance = {
-                'last_10_accuracy': sum(1 for t in self.online_metrics['last_10_trades'] if t['correct']) / max(1, len(self.online_metrics['last_10_trades'])),
-                'avg_confidence': np.mean([t['confidence'] for t in self.online_metrics['last_10_trades']]) if self.online_metrics['last_10_trades'] else 0,
-                'learning_updates': self.online_metrics['learning_updates']
+            # Calcular confiança final
+            base_confidence = analysis['confidence']
+            
+            # Ajustar confiança baseada no símbolo e timeframe
+            symbol_multiplier = self.get_symbol_confidence_multiplier(symbol)
+            timeframe_multiplier = self.get_timeframe_confidence_multiplier(duration_type, duration_value)
+            
+            final_confidence = base_confidence * symbol_multiplier * timeframe_multiplier
+            final_confidence = max(50, min(95, final_confidence))
+            
+            # Decidir se deve operar
+            should_trade = final_confidence >= min_confidence
+            
+            # Calcular stake se não fornecido
+            if stake is None:
+                stake = self.calculate_optimal_stake(final_confidence, symbol, market_data)
+            
+            # Resultado
+            result = {
+                'should_trade': should_trade,
+                'direction': analysis['direction'],
+                'confidence': final_confidence,
+                'base_confidence': base_confidence,
+                'min_confidence_required': min_confidence,
+                'symbol': symbol,
+                'timeframe': f"{duration_value}{duration_type}",
+                'stake': stake,
+                'market_analysis': analysis,
+                'symbol_type': market_data['symbol_type'],
+                'recommendation': self.get_trading_recommendation(final_confidence, min_confidence),
+                'ai_mode_active': ai_mode,
+                'timestamp': datetime.now().isoformat()
             }
             
-            cursor.execute('''
-                INSERT INTO online_metrics 
-                (timestamp, model_type, accuracy, total_samples, recent_performance, adaptation_rate)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                datetime.now().isoformat(),
-                'sgd_online',
-                overall_accuracy,
-                self.online_metrics['total_predictions'],
-                json.dumps(recent_performance),
-                len(self.online_metrics['recent_accuracy']) / 50.0  # Taxa de adaptação
-            ))
+            # Log detalhado
+            logger.info(f"ANÁLISE: {symbol} {duration_value}{duration_type} | "
+                       f"Direção: {analysis['direction']} | "
+                       f"Confiança: {final_confidence:.1f}% (min: {min_confidence}%) | "
+                       f"Operar: {'SIM' if should_trade else 'NÃO'}")
             
-            conn.commit()
-            conn.close()
-            
-            logger.info(f"Métricas online salvas: {overall_accuracy:.3f} accuracy")
+            return result
             
         except Exception as e:
-            logger.error(f"Erro ao salvar métricas: {e}")
+            logger.error(f"Erro na predição: {e}")
+            return {
+                'error': str(e),
+                'should_trade': False,
+                'symbol': symbol,
+                'timeframe': f"{duration_value}{duration_type}"
+            }
     
-    def train_offline_model(self):
-        """Treina modelo offline com dados históricos"""
-        try:
-            conn = sqlite3.connect(DATABASE_URL)
-            
-            # Obter dados de trades
-            trades_df = pd.read_sql_query('''
-                SELECT * FROM trades 
-                WHERE result IN ('win', 'loss')
-                ORDER BY timestamp DESC
-                LIMIT 1000
-            ''', conn)
-            
-            if len(trades_df) < 50:  # Dados insuficientes
-                logger.info("Dados insuficientes para treinar modelo offline")
-                conn.close()
-                return False
-            
-            # Preparar features e targets
-            X = []
-            y = []
-            
-            for _, trade in trades_df.iterrows():
-                try:
-                    features = json.loads(trade['features']) if trade['features'] else []
-                    if len(features) == 9:  # Verificar se tem o número correto de features
-                        X.append(features)
-                        y.append(1 if trade['result'] == 'win' else 0)
-                except:
-                    continue
-            
-            if len(X) < 50:
-                logger.info("Features insuficientes para treinar modelo offline")
-                conn.close()
-                return False
-            
-            X = np.array(X)
-            y = np.array(y)
-            
-            # Treinar modelo offline
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
-            self.scaler.fit(X_train)
-            X_train_scaled = self.scaler.transform(X_train)
-            X_test_scaled = self.scaler.transform(X_test)
-            
-            self.offline_model.fit(X_train_scaled, y_train)
-            
-            # Avaliar modelo
-            accuracy = self.offline_model.score(X_test_scaled, y_test)
-            logger.info(f"MODELO OFFLINE treinado com acurácia: {accuracy:.3f}")
-            
-            self.offline_trained = True
-            conn.close()
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro ao treinar modelo offline: {e}")
-            return False
-    
-    def predict_direction(self, market_data, trade_history=None):
-        """Prediz direção usando sistema híbrido online/offline"""
-        # Usar sistema ensemble com online learning
-        return self.get_best_prediction(market_data, trade_history)
-    
-    def hybrid_prediction(self, market_data):
-        """Predição híbrida usando análise técnica + padrões"""
+    def analyze_market_conditions(self, market_data):
+        """Análise técnica das condições de mercado"""
         try:
             rsi = market_data['rsi']
             macd = market_data['macd']
             price = market_data['price']
             bb_upper = market_data['bb_upper']
             bb_lower = market_data['bb_lower']
+            trend = market_data['trend']
             volatility = market_data['volatility']
             
+            # Sinais de trading
             signals = []
             
-            # Análise RSI
+            # RSI signals
             if rsi < 30:
-                signals.append(('CALL', 0.7))  # Sobrevenda
+                signals.append(('CALL', 0.9))
+            elif rsi < 40:
+                signals.append(('CALL', 0.7))
             elif rsi > 70:
-                signals.append(('PUT', 0.7))   # Sobrecompra
+                signals.append(('PUT', 0.9))
+            elif rsi > 60:
+                signals.append(('PUT', 0.7))
             
-            # Análise MACD
+            # MACD signals
             if macd > 0:
                 signals.append(('CALL', 0.6))
             else:
                 signals.append(('PUT', 0.6))
             
-            # Análise Bollinger Bands
+            # Bollinger Bands
             bb_position = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
             if bb_position < 0.2:
-                signals.append(('CALL', 0.8))  # Próximo da banda inferior
+                signals.append(('CALL', 0.8))
             elif bb_position > 0.8:
-                signals.append(('PUT', 0.8))   # Próximo da banda superior
+                signals.append(('PUT', 0.8))
             
-            # Análise de volatilidade
+            # Trend signals
+            if trend == 'bullish':
+                signals.append(('CALL', 0.6))
+            elif trend == 'bearish':
+                signals.append(('PUT', 0.6))
+            
+            # Volatility adjustment
+            vol_factor = 1.0
             if volatility > 2.0:
-                # Alta volatilidade favorece reversões
-                if rsi > 60:
-                    signals.append(('PUT', 0.5))
-                elif rsi < 40:
-                    signals.append(('CALL', 0.5))
+                vol_factor = 0.8  # Reduz confiança em alta volatilidade
+            elif volatility < 0.5:
+                vol_factor = 1.1  # Aumenta confiança em baixa volatilidade
             
             # Combinar sinais
             call_weight = sum(weight for direction, weight in signals if direction == 'CALL')
@@ -809,193 +541,365 @@ class OnlineTradingAI:
             
             if call_weight > put_weight:
                 direction = 'CALL'
-                confidence = min(95, (call_weight / (call_weight + put_weight)) * 100) if (call_weight + put_weight) > 0 else 65
+                confidence = (call_weight / (call_weight + put_weight + 0.1)) * 100 * vol_factor
             else:
                 direction = 'PUT'
-                confidence = min(95, (put_weight / (call_weight + put_weight)) * 100) if (call_weight + put_weight) > 0 else 65
-            
-            # Ajustar confiança baseada na volatilidade
-            if volatility > 3.0:
-                confidence *= 0.8  # Reduzir confiança em alta volatilidade
+                confidence = (put_weight / (call_weight + put_weight + 0.1)) * 100 * vol_factor
             
             return {
                 'direction': direction,
-                'confidence': max(60, confidence),  # Mínimo de 60%
-                'method': 'hybrid_technical_analysis'
+                'confidence': max(60, min(90, confidence)),
+                'rsi_signal': 'oversold' if rsi < 30 else 'overbought' if rsi > 70 else 'neutral',
+                'trend_signal': trend,
+                'bb_position': bb_position,
+                'volatility_factor': vol_factor,
+                'signal_strength': len(signals)
             }
             
         except Exception as e:
-            logger.error(f"Erro na predição híbrida: {e}")
+            logger.error(f"Erro na análise: {e}")
             return {
                 'direction': 'CALL' if np.random.random() > 0.5 else 'PUT',
                 'confidence': 65.0,
-                'method': 'fallback_random'
+                'error': str(e)
             }
+    
+    def get_symbol_confidence_multiplier(self, symbol):
+        """Multiplicador de confiança baseado no símbolo"""
+        symbol_type = self.get_symbol_type(symbol)
+        config = self.deriv_manager.get_symbol_config(symbol)
+        volatility = config.get('volatility', 1.0)
+        
+        if symbol_type == 'high_frequency_volatility':
+            return 0.9  # Ligeiramente mais difícil
+        elif symbol_type == 'crash_boom':
+            return 0.8  # Mais difícil devido aos eventos especiais
+        elif volatility <= 0.25:
+            return 1.1  # Mais fácil em baixa volatilidade
+        elif volatility >= 1.5:
+            return 0.85  # Mais difícil em alta volatilidade
+        else:
+            return 1.0
+    
+    def get_timeframe_confidence_multiplier(self, duration_type, duration_value):
+        """Multiplicador de confiança baseado no timeframe"""
+        if duration_type == 't':
+            # Ticks são mais difíceis
+            if duration_value <= 3:
+                return 0.8
+            elif duration_value <= 5:
+                return 0.9
+            else:
+                return 0.95
+        else:
+            # Minutos são mais previsíveis
+            if duration_value == 1:
+                return 1.0
+            elif duration_value <= 3:
+                return 1.05
+            else:
+                return 1.1
+    
+    def calculate_optimal_stake(self, confidence, symbol, market_data):
+        """Calcula stake ótimo baseado na confiança e condições"""
+        base_stake = 1.0
+        
+        # Ajustar por confiança
+        if confidence >= 85:
+            stake_multiplier = 2.0
+        elif confidence >= 75:
+            stake_multiplier = 1.5
+        elif confidence >= 65:
+            stake_multiplier = 1.0
+        else:
+            stake_multiplier = 0.5
+        
+        # Ajustar por volatilidade
+        volatility = market_data.get('volatility', 1.0)
+        if volatility > 2.0:
+            stake_multiplier *= 0.7
+        elif volatility < 0.5:
+            stake_multiplier *= 1.2
+        
+        stake = base_stake * stake_multiplier
+        return round(max(0.35, min(50.0, stake)), 2)
+    
+    def get_trading_recommendation(self, confidence, min_confidence):
+        """Gera recomendação de trading"""
+        if confidence >= min_confidence + 10:
+            return "Sinal forte - Recomendado operar"
+        elif confidence >= min_confidence:
+            return "Sinal moderado - Pode operar"
+        elif confidence >= min_confidence - 5:
+            return "Sinal fraco - Aguardar melhor momento"
+        else:
+            return "Sinal insuficiente - Não operar"
+    
+    def full_ai_analysis(self, preferred_symbols=None):
+        """Análise completa automatizada da IA"""
+        try:
+            symbols_to_analyze = preferred_symbols or self.full_ai_mode['preferred_symbols']
+            
+            best_opportunity = None
+            best_confidence = 0
+            
+            analyses = []
+            
+            # Analisar cada símbolo
+            for symbol in symbols_to_analyze:
+                # Obter dados de mercado
+                market_data = self.get_market_data_for_symbol(symbol)
+                
+                # Selecionar timeframe ótimo
+                optimal_tf = self.deriv_manager.get_optimal_timeframe(
+                    symbol, 75, market_data
+                )
+                
+                # Fazer análise
+                analysis = self.predict_with_user_config(
+                    symbol, 
+                    optimal_tf['type'], 
+                    optimal_tf['duration'],
+                    ai_mode=True
+                )
+                
+                analysis['symbol'] = symbol
+                analysis['market_data'] = market_data
+                analyses.append(analysis)
+                
+                # Verificar se é a melhor oportunidade
+                if (analysis.get('should_trade', False) and 
+                    analysis.get('confidence', 0) > best_confidence):
+                    best_opportunity = analysis
+                    best_confidence = analysis['confidence']
+            
+            # Resultado da análise completa
+            result = {
+                'full_ai_active': True,
+                'timestamp': datetime.now().isoformat(),
+                'symbols_analyzed': len(symbols_to_analyze),
+                'best_opportunity': best_opportunity,
+                'all_analyses': analyses,
+                'recommendation': self.get_full_ai_recommendation(best_opportunity, analyses),
+                'market_overview': self.generate_market_overview(analyses)
+            }
+            
+            logger.info(f"IA COMPLETA: Analisou {len(symbols_to_analyze)} símbolos. "
+                       f"Melhor: {best_opportunity['symbol'] if best_opportunity else 'Nenhum'} "
+                       f"({best_confidence:.1f}%)")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Erro na análise completa: {e}")
+            return {
+                'error': str(e),
+                'full_ai_active': False
+            }
+    
+    def get_full_ai_recommendation(self, best_opportunity, all_analyses):
+        """Gera recomendação da IA completa"""
+        if not best_opportunity:
+            return {
+                'action': 'wait',
+                'reason': 'Nenhuma oportunidade com confiança suficiente encontrada',
+                'next_analysis_in': 30
+            }
+        
+        confidence = best_opportunity.get('confidence', 0)
+        
+        if confidence >= 85:
+            return {
+                'action': 'trade_strong',
+                'reason': f"Oportunidade excelente detectada em {best_opportunity['symbol']}",
+                'confidence': confidence,
+                'trade_config': best_opportunity
+            }
+        elif confidence >= 75:
+            return {
+                'action': 'trade_moderate',
+                'reason': f"Boa oportunidade em {best_opportunity['symbol']}",
+                'confidence': confidence,
+                'trade_config': best_opportunity
+            }
+        else:
+            return {
+                'action': 'wait',
+                'reason': 'Aguardar condições mais favoráveis',
+                'best_confidence': confidence
+            }
+    
+    def generate_market_overview(self, analyses):
+        """Gera overview do mercado"""
+        try:
+            total = len(analyses)
+            tradeable = sum(1 for a in analyses if a.get('should_trade', False))
+            avg_confidence = np.mean([a.get('confidence', 0) for a in analyses])
+            
+            # Análise por direção
+            calls = sum(1 for a in analyses if a.get('direction') == 'CALL')
+            puts = sum(1 for a in analyses if a.get('direction') == 'PUT')
+            
+            # Análise por volatilidade
+            high_vol = sum(1 for a in analyses 
+                          if a.get('market_data', {}).get('volatility', 0) > 1.0)
+            
+            return {
+                'total_symbols': total,
+                'tradeable_opportunities': tradeable,
+                'average_confidence': round(avg_confidence, 1),
+                'market_bias': 'BULLISH' if calls > puts else 'BEARISH' if puts > calls else 'NEUTRAL',
+                'high_volatility_symbols': high_vol,
+                'market_condition': 'FAVORABLE' if tradeable > total * 0.3 else 'UNFAVORABLE'
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro no overview: {e}")
+            return {'error': str(e)}
 
-# Instância global da IA com Online Learning
-trading_ai = OnlineTradingAI()
+
+# Instância global
+trading_ai = EnhancedTradingAI()
 
 # ====================================
-# ROTAS DA API
+# ROTAS DA API CORRIGIDAS
 # ====================================
 
 @app.route('/', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'online',
-        'service': 'Trading AI API - Online Learning',
-        'version': '2.0.0',
+        'service': 'Enhanced Deriv Trading AI',
+        'version': '4.0.0',
         'timestamp': datetime.now().isoformat(),
-        'models': {
-            'offline_trained': trading_ai.offline_trained,
-            'online_initialized': trading_ai.online_initialized,
-            'passive_initialized': trading_ai.passive_initialized
+        'supported_symbols': list(trading_ai.deriv_manager.symbol_configs.keys()),
+        'supported_timeframes': {
+            'ticks': list(trading_ai.deriv_manager.timeframe_mapping['t'].keys()),
+            'minutes': list(trading_ai.deriv_manager.timeframe_mapping['m'].keys())
         },
-        'online_metrics': {
-            'total_predictions': trading_ai.online_metrics['total_predictions'],
-            'accuracy': (trading_ai.online_metrics['correct_predictions'] / 
-                        max(1, trading_ai.online_metrics['total_predictions'])),
-            'learning_updates': trading_ai.online_metrics['learning_updates']
-        },
-        'database': 'connected'
+        'full_ai_mode': trading_ai.full_ai_mode
     })
 
 @app.route('/analyze', methods=['POST'])
-def analyze_market():
+def analyze_symbol():
+    """Análise específica para símbolo e timeframe do usuário"""
     try:
         data = request.get_json()
-        symbol = data.get('symbol', 'R_100')
         
-        # Obter dados de mercado
-        market_data = trading_ai.get_market_data(symbol)
+        # Parâmetros obrigatórios
+        symbol = data.get('symbol', 'R_50')
+        duration_type = data.get('duration_type', 't')
+        duration_value = int(data.get('duration', 5))
         
-        # Análise detalhada
-        analysis = {
-            'symbol': symbol,
-            'current_price': market_data['price'],
-            'timestamp': market_data['timestamp'],
-            'technical_indicators': {
-                'rsi': market_data['rsi'],
-                'macd': market_data['macd'],
-                'bb_upper': market_data['bb_upper'],
-                'bb_lower': market_data['bb_lower'],
-                'volatility': market_data['volatility']
-            },
-            'market_condition': 'neutral',
-            'volatility_level': 'medium',
-            'trend': 'sideways',
-            'online_learning_status': {
-                'initialized': trading_ai.online_initialized,
-                'total_updates': trading_ai.online_metrics['learning_updates'],
-                'recent_accuracy': (sum(1 for t in trading_ai.online_metrics['last_10_trades'] if t['correct']) / 
-                                  max(1, len(trading_ai.online_metrics['last_10_trades']))) if trading_ai.online_metrics['last_10_trades'] else 0
-            }
-        }
+        # Parâmetros opcionais
+        stake = data.get('stake')
+        ai_mode = data.get('ai_mode', False)
         
-        # Determinar condições de mercado
-        rsi = market_data['rsi']
-        if rsi < 30:
-            analysis['market_condition'] = 'oversold'
-            analysis['trend'] = 'bullish_reversal'
-        elif rsi > 70:
-            analysis['market_condition'] = 'overbought'
-            analysis['trend'] = 'bearish_reversal'
-        elif market_data['macd'] > 0:
-            analysis['trend'] = 'bullish'
-        elif market_data['macd'] < 0:
-            analysis['trend'] = 'bearish'
+        # Validar entrada
+        if not symbol or not duration_type or not duration_value:
+            return jsonify({
+                'error': 'Parâmetros obrigatórios: symbol, duration_type, duration',
+                'example': {
+                    'symbol': 'R_50',
+                    'duration_type': 't',
+                    'duration': 5,
+                    'stake': 1.0
+                }
+            }), 400
         
-        # Nível de volatilidade
-        if market_data['volatility'] > 2.0:
-            analysis['volatility_level'] = 'high'
-        elif market_data['volatility'] < 0.5:
-            analysis['volatility_level'] = 'low'
+        # Fazer análise
+        result = trading_ai.predict_with_user_config(
+            symbol, duration_type, duration_value, stake, ai_mode
+        )
         
-        analysis['message'] = f"Análise técnica: RSI {rsi:.1f}, Volatilidade {market_data['volatility']:.2f}, Tendência {analysis['trend']}"
-        
-        return jsonify(analysis)
+        return jsonify(result)
         
     except Exception as e:
         logger.error(f"Erro na análise: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/predict', methods=['POST'])
-def predict():
+@app.route('/full-ai-analysis', methods=['POST'])
+def full_ai_analysis():
+    """Análise completa automatizada da IA"""
     try:
-        data = request.get_json()
-        symbol = data.get('symbol', 'R_100')
+        data = request.get_json() or {}
+        preferred_symbols = data.get('preferred_symbols')
         
-        # Obter dados de mercado
-        market_data = trading_ai.get_market_data(symbol)
+        result = trading_ai.full_ai_analysis(preferred_symbols)
+        return jsonify(result)
         
-        # Obter histórico de trades (opcional)
-        trade_history = data.get('trade_history', [])
-        
-        # Fazer predição usando ensemble de modelos
-        prediction = trading_ai.predict_direction(market_data, trade_history)
+    except Exception as e:
+        logger.error(f"Erro na análise completa: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/symbol-info/<symbol>', methods=['GET'])
+def get_symbol_info(symbol):
+    """Informações detalhadas sobre um símbolo"""
+    try:
+        config = trading_ai.deriv_manager.get_symbol_config(symbol)
+        market_data = trading_ai.get_market_data_for_symbol(symbol)
         
         return jsonify({
             'symbol': symbol,
-            'prediction': prediction['direction'],
-            'confidence': prediction['confidence'],
-            'method': prediction['method'],
-            'market_data': {
-                'price': market_data['price'],
-                'rsi': market_data['rsi'],
-                'macd': market_data['macd'],
-                'volatility': market_data['volatility']
-            },
-            'timestamp': datetime.now().isoformat(),
-            'online_learning_active': trading_ai.online_initialized
+            'config': config,
+            'current_market_data': market_data,
+            'symbol_type': trading_ai.get_symbol_type(symbol),
+            'recommended_timeframes': trading_ai.get_recommended_timeframes(symbol, config.get('volatility', 1.0)),
+            'optimal_timeframe': trading_ai.deriv_manager.get_optimal_timeframe(symbol, 75, market_data)
         })
         
     except Exception as e:
-        logger.error(f"Erro na predição: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
+        logger.error(f"Erro ao obter info do símbolo: {e}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/report_trade', methods=['POST'])
+@app.route('/market-overview', methods=['GET'])
+def market_overview():
+    """Overview geral do mercado para todos os símbolos"""
+    try:
+        symbols = list(trading_ai.deriv_manager.symbol_configs.keys())[:10]  # Limitar a 10
+        analyses = []
+        
+        for symbol in symbols:
+            try:
+                market_data = trading_ai.get_market_data_for_symbol(symbol)
+                optimal_tf = trading_ai.deriv_manager.get_optimal_timeframe(symbol, 70, market_data)
+                
+                quick_analysis = {
+                    'symbol': symbol,
+                    'price': market_data['price'],
+                    'trend': market_data['trend'],
+                    'volatility': market_data['volatility'],
+                    'rsi': market_data['rsi'],
+                    'optimal_timeframe': f"{optimal_tf['duration']}{optimal_tf['type']}"
+                }
+                analyses.append(quick_analysis)
+                
+            except Exception as e:
+                logger.error(f"Erro ao analisar {symbol}: {e}")
+                continue
+        
+        return jsonify({
+            'timestamp': datetime.now().isoformat(),
+            'symbols_analyzed': len(analyses),
+            'market_data': analyses,
+            'overall_sentiment': trading_ai.generate_market_overview([{'market_data': a, 'direction': 'CALL'} for a in analyses])
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro no overview: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/report-trade', methods=['POST'])
 def report_trade():
-    """Endpoint para reportar resultado de trades e atualizar online learning"""
+    """Reporta resultado de trade"""
     try:
         data = request.get_json()
         
-        # Validar dados obrigatórios
-        required_fields = ['symbol', 'direction', 'result', 'entry_price']
-        for field in required_fields:
+        # Validação
+        required = ['symbol', 'direction', 'result', 'entry_price', 'stake']
+        for field in required:
             if field not in data:
-                return jsonify({'error': f'Campo obrigatório ausente: {field}'}), 400
-        
-        # Obter dados de mercado no momento do trade
-        market_data = trading_ai.get_market_data(data['symbol'])
-        
-        # Extrair features
-        features = trading_ai.extract_features(market_data, data.get('trade_history', []))
-        
-        # Converter resultado para target numérico
-        target = 1 if data['result'].lower() == 'win' else 0
-        
-        # Atualizar modelo online
-        trading_ai.update_online_model(features, target)
-        
-        # Salvar trade no banco
-        trade_record = {
-            'timestamp': datetime.now().isoformat(),
-            'symbol': data['symbol'],
-            'direction': data['direction'],
-            'stake': data.get('stake', 0),
-            'duration': data.get('duration', '1m'),
-            'entry_price': data['entry_price'],
-            'exit_price': data.get('exit_price', data['entry_price']),
-            'result': data['result'],
-            'pnl': data.get('pnl', 0),
-            'martingale_level': data.get('martingale_level', 0),
-            'market_conditions': json.dumps(market_data),
-            'features': json.dumps(features.flatten().tolist()),
-            'online_updated': True,
-            'prediction_confidence': data.get('confidence', 0),
-            'model_used': 'online_ensemble',
-            'learning_iteration': trading_ai.online_metrics['learning_updates']
-        }
+                return jsonify({'error': f'Campo obrigatório: {field}'}), 400
         
         # Salvar no banco
         conn = sqlite3.connect(DATABASE_URL)
@@ -1003,194 +907,97 @@ def report_trade():
         
         cursor.execute('''
             INSERT INTO trades 
-            (timestamp, symbol, direction, stake, duration, entry_price, exit_price, 
-             result, pnl, martingale_level, market_conditions, features, online_updated,
-             prediction_confidence, model_used, learning_iteration)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (timestamp, symbol, direction, stake, duration_type, duration_value,
+             entry_price, exit_price, result, pnl, confidence, timeframe_used, ai_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            trade_record['timestamp'], trade_record['symbol'], trade_record['direction'],
-            trade_record['stake'], trade_record['duration'], trade_record['entry_price'],
-            trade_record['exit_price'], trade_record['result'], trade_record['pnl'],
-            trade_record['martingale_level'], trade_record['market_conditions'],
-            trade_record['features'], trade_record['online_updated'],
-            trade_record['prediction_confidence'], trade_record['model_used'],
-            trade_record['learning_iteration']
+            datetime.now().isoformat(),
+            data['symbol'],
+            data['direction'],
+            data['stake'],
+            data.get('duration_type', 't'),
+            data.get('duration_value', 5),
+            data['entry_price'],
+            data.get('exit_price', data['entry_price']),
+            data['result'],
+            data.get('pnl', 0),
+            data.get('confidence', 0),
+            data.get('timeframe_used', '5t'),
+            data.get('ai_mode', False)
         ))
         
         conn.commit()
         conn.close()
         
-        # Resposta com status do aprendizado
         return jsonify({
-            'message': 'Trade reportado e modelo atualizado',
-            'trade_id': cursor.lastrowid,
-            'online_learning_status': {
-                'initialized': trading_ai.online_initialized,
-                'total_updates': trading_ai.online_metrics['learning_updates'],
-                'recent_accuracy': (sum(1 for t in trading_ai.online_metrics['last_10_trades'] if t['correct']) / 
-                                  max(1, len(trading_ai.online_metrics['last_10_trades']))) if trading_ai.online_metrics['last_10_trades'] else 0,
-                'overall_accuracy': trading_ai.online_metrics['correct_predictions'] / max(1, trading_ai.online_metrics['total_predictions'])
-            }
+            'message': 'Trade reportado com sucesso',
+            'trade_id': cursor.lastrowid
         })
         
     except Exception as e:
         logger.error(f"Erro ao reportar trade: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
-    """Obter estatísticas de trading e online learning"""
+    """Estatísticas do sistema"""
     try:
         conn = sqlite3.connect(DATABASE_URL)
         
-        # Estatísticas gerais
-        trades_df = pd.read_sql_query('''
-            SELECT * FROM trades 
-            ORDER BY timestamp DESC
-            LIMIT 1000
-        ''', conn)
+        # Estatísticas básicas
+        trades_df = pd.read_sql_query('SELECT * FROM trades ORDER BY timestamp DESC LIMIT 100', conn)
         
         if len(trades_df) == 0:
             return jsonify({
                 'total_trades': 0,
-                'win_rate': 0,
-                'online_learning': {
-                    'initialized': trading_ai.online_initialized,
-                    'total_updates': 0,
-                    'accuracy': 0
-                }
+                'message': 'Nenhum trade registrado ainda'
             })
         
-        # Calcular estatísticas
-        total_trades = len(trades_df)
         wins = len(trades_df[trades_df['result'] == 'win'])
         losses = len(trades_df[trades_df['result'] == 'loss'])
         win_rate = wins / (wins + losses) if (wins + losses) > 0 else 0
         
-        total_pnl = trades_df['pnl'].sum() if 'pnl' in trades_df.columns else 0
+        # Estatísticas por símbolo
+        symbol_stats = {}
+        for symbol in trades_df['symbol'].unique():
+            symbol_trades = trades_df[trades_df['symbol'] == symbol]
+            symbol_wins = len(symbol_trades[symbol_trades['result'] == 'win'])
+            symbol_stats[symbol] = {
+                'total': len(symbol_trades),
+                'wins': symbol_wins,
+                'win_rate': symbol_wins / len(symbol_trades) if len(symbol_trades) > 0 else 0
+            }
         
-        # Estatísticas de online learning
-        online_stats = {
-            'initialized': trading_ai.online_initialized,
-            'total_updates': trading_ai.online_metrics['learning_updates'],
-            'total_predictions': trading_ai.online_metrics['total_predictions'],
-            'correct_predictions': trading_ai.online_metrics['correct_predictions'],
-            'overall_accuracy': trading_ai.online_metrics['correct_predictions'] / max(1, trading_ai.online_metrics['total_predictions']),
-            'recent_accuracy': (sum(1 for t in trading_ai.online_metrics['last_10_trades'] if t['correct']) / 
-                              max(1, len(trading_ai.online_metrics['last_10_trades']))) if trading_ai.online_metrics['last_10_trades'] else 0,
-            'buffer_size': len(trading_ai.feature_buffer),
-            'buffer_required': trading_ai.min_samples_init
-        }
-        
-        # Últimos trades
-        recent_trades = trades_df.head(10).to_dict('records') if len(trades_df) > 0 else []
+        # Estatísticas por timeframe
+        timeframe_stats = {}
+        for tf in trades_df['timeframe_used'].unique():
+            if tf:
+                tf_trades = trades_df[trades_df['timeframe_used'] == tf]
+                tf_wins = len(tf_trades[tf_trades['result'] == 'win'])
+                timeframe_stats[tf] = {
+                    'total': len(tf_trades),
+                    'wins': tf_wins,
+                    'win_rate': tf_wins / len(tf_trades) if len(tf_trades) > 0 else 0
+                }
         
         conn.close()
         
         return jsonify({
-            'total_trades': total_trades,
+            'total_trades': len(trades_df),
             'wins': wins,
             'losses': losses,
-            'win_rate': win_rate,
-            'total_pnl': total_pnl,
-            'recent_trades': recent_trades,
-            'online_learning': online_stats,
-            'models': {
-                'offline_trained': trading_ai.offline_trained,
-                'online_initialized': trading_ai.online_initialized,
-                'passive_initialized': trading_ai.passive_initialized
-            }
+            'win_rate': round(win_rate * 100, 2),
+            'symbol_performance': symbol_stats,
+            'timeframe_performance': timeframe_stats,
+            'recent_trades': trades_df.head(10).to_dict('records')
         })
         
     except Exception as e:
-        logger.error(f"Erro ao obter estatísticas: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/train', methods=['POST'])
-def train_models():
-    """Endpoint para treinar modelos offline"""
-    try:
-        # Tentar treinar modelo offline
-        success = trading_ai.train_offline_model()
-        
-        if success:
-            return jsonify({
-                'message': 'Modelo offline treinado com sucesso',
-                'offline_trained': True,
-                'online_initialized': trading_ai.online_initialized
-            })
-        else:
-            return jsonify({
-                'message': 'Dados insuficientes para treinar modelo offline',
-                'offline_trained': False,
-                'required_trades': 50
-            })
-        
-    except Exception as e:
-        logger.error(f"Erro no treinamento: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/reset_online', methods=['POST'])
-def reset_online_learning():
-    """Reset do sistema de online learning"""
-    try:
-        # Reset dos modelos online
-        trading_ai.online_initialized = False
-        trading_ai.passive_initialized = False
-        
-        # Limpar buffers
-        trading_ai.feature_buffer = []
-        trading_ai.target_buffer = []
-        
-        # Reset das métricas
-        trading_ai.online_metrics = {
-            'total_predictions': 0,
-            'correct_predictions': 0,
-            'recent_accuracy': [],
-            'last_10_trades': [],
-            'learning_updates': 0
-        }
-        
-        # Recriar modelos
-        trading_ai.online_model = SGDClassifier(
-            loss='log_loss', 
-            learning_rate='adaptive',
-            eta0=0.01,
-            random_state=42,
-            max_iter=1000
-        )
-        
-        trading_ai.passive_model = PassiveAggressiveClassifier(
-            C=1.0,
-            random_state=42,
-            max_iter=1000
-        )
-        
-        trading_ai.online_scaler = StandardScaler()
-        
-        logger.info("Sistema de online learning resetado")
-        
-        return jsonify({
-            'message': 'Sistema de online learning resetado com sucesso',
-            'status': {
-                'online_initialized': False,
-                'passive_initialized': False,
-                'buffer_size': 0,
-                'learning_updates': 0
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Erro no reset: {e}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
+        logger.error(f"Erro nas estatísticas: {e}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Tentar treinar modelo offline na inicialização
-    try:
-        logger.info("Tentando treinar modelo offline na inicialização...")
-        trading_ai.train_offline_model()
-    except Exception as e:
-        logger.warning(f"Não foi possível treinar modelo offline: {e}")
-    
-    logger.info(f"Iniciando Trading AI API na porta {API_PORT}")
+    logger.info(f"Sistema de Trading Deriv rodando na porta {API_PORT}")
+    logger.info(f"Símbolos suportados: {len(trading_ai.deriv_manager.symbol_configs)}")
+    logger.info("APIs principais: /analyze, /full-ai-analysis, /symbol-info, /market-overview")
     app.run(host='0.0.0.0', port=API_PORT, debug=False)
