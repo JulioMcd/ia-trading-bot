@@ -923,7 +923,7 @@ def analyze_market():
 def predict():
     try:
         data = request.get_json()
-        symbol = data.get('symbol', 'R_50')
+        symbol = data.get('symbol', 'R_100')
         
         # Obter dados de mercado
         market_data = trading_ai.get_market_data(symbol)
