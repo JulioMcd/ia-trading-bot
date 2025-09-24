@@ -1,4 +1,10 @@
-numpy==1.24.3
-Flask==2.3.3
-Flask-CORS==4.0.0
-gunicorn==21.2.0
+setuptools>=70.0.0
+numpy>=2.1.0
+Flask>=2.3.3
+Flask-CORS>=4.0.0
+gunicorn>=21.2.0
+scikit-learn>=1.5.0
+pandas>=2.2.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+yfinance>=0.2.37
