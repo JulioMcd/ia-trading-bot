@@ -6,7 +6,26 @@ logger = logging.getLogger(__name__)
 
 class TradingManager:
     def __init__(self):
-        # Configurações de gerenciamento de banca
+        # Configuraçõ    def analyze_market_conditions(self, signals, timeframe=None, price_data=None, candles=None):
+        """Analisa condições de mercado para determinar melhor momento de entrada"""
+        # Verificações obrigatórias de dados
+        if not signals or not price_data or not candles:
+            return False, 0.0, "Dados insuficientes para análise"
+            
+        if len(signals) < 3:
+            return False, 0.0, "Número insuficiente de sinais para análise"
+            
+        if len(price_data) < 20:
+            return False, 0.0, "Histórico de preços insuficiente para análise"
+            
+        if len(candles) < 3:
+            return False, 0.0, "Número insuficiente de candles para análise"
+            
+        current_time = datetime.now()
+        
+        # Verifica se estamos no início do minuto (primeiros 10 segundos)
+        if current_time.second > 10:
+            return False, 0.0, "Aguardando início do próximo minuto para entrada"erenciamento de banca
         self.initial_balance = 100.0  # Saldo inicial
         self.current_balance = self.initial_balance
         self.risk_per_trade = 0.02  # 2% do saldo por trade
