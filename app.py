@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
+from datetime import datetime
 from trading_manager import TradingManager
 
 # Configuração de logging
@@ -26,23 +27,54 @@ def home():
 def analyze_market():
     try:
         data = request.get_json()
-        symbol = data.get('symbol', 'R_50')
+        symbol = data.get('symbol')
+        if not symbol:
+            return jsonify({
+                'error': 'Symbol é obrigatório',
+                'can_trade': False
+            }), 400
+            
         confidence = data.get('confidence', 75)
         volatility = data.get('volatility', 1.0)
+        timeframe = data.get('timeframe', 0)  # Timeframe em ticks
+
+        # Verifica se timeframe é adequado
+        if timeframe < trading_manager.min_timeframe:
+            return jsonify({
+                'error': f'Timeframe muito curto. Mínimo requerido: {trading_manager.min_timeframe} ticks',
+                'can_trade': False
+            }), 400
 
         # Calcula tamanho da posição
         position_size = trading_manager.calculate_position_size(confidence, volatility)
 
-        # Verifica condições de mercado
+        # Obtem dados adicionais para análise
         signals = data.get('signals', [])
-        is_good_entry, signal_strength = trading_manager.analyze_market_conditions(signals)
+        price_data = data.get('price_data', [])
+        candles = data.get('candles', [])
+        
+        # Verifica condições de mercado
+        is_good_entry, signal_strength, message = trading_manager.analyze_market_conditions(
+            signals, 
+            timeframe=timeframe,
+            last_trade_time=trading_manager.last_trade_time,
+            price_data=price_data,
+            candles=candles)
+
+        # Calcula tempo desde última operação
+        time_since_last_trade = None
+        if trading_manager.last_trade_time:
+            time_since_last_trade = (datetime.now() - trading_manager.last_trade_time).total_seconds()
 
         return jsonify({
             'symbol': symbol,
             'recommended_stake': position_size,
-            'can_trade': trading_manager.can_trade(),
+            'can_trade': trading_manager.can_trade() and is_good_entry,
             'is_good_entry': is_good_entry,
             'signal_strength': signal_strength,
+            'message': message,
+            'time_since_last_trade': time_since_last_trade,
+            'min_time_between_trades': trading_manager.min_time_between_trades,
             'trading_stats': trading_manager.get_trading_stats()
         })
     except Exception as e:
