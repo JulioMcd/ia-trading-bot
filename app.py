@@ -3,19 +3,23 @@ import json
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import yfinance as yf
-import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
 import logging
-# MUDANÇA: Modelos que suportam online learning
-from sklearn.linear_model import SGDClassifier, PassiveAggressiveClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestRegressor
+from sklearn.linear_model import SGDClassifier, PassiveAggressiveRegressor
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, mean_squared_error
+import joblib
 import warnings
+import threading
+import time
+from collections import deque
+from scipy.optimize import minimize
+from scipy.stats import entropy
+from itertools import combinations
+import math
 warnings.filterwarnings('ignore')
 
 # Configuração do Flask
@@ -27,960 +31,1336 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configurações
-API_PORT = int(os.environ.get('PORT', 5000))
-DATABASE_URL = 'trading_stats_online.db'
+API_PORT = int(os.environ.get('PORT', 5001))
+DATABASE_URL = 'quantum_enhanced_trading.db'
+MODEL_PATH = 'quantum_models/'
 
-class TechnicalIndicators:
-    """Classe para calcular indicadores técnicos sem dependências externas"""
+def fix_json_types(data):
+    """Converte tipos numpy para tipos Python nativos recursivamente"""
+    if isinstance(data, dict):
+        return {k: fix_json_types(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [fix_json_types(item) for item in data]
+    elif isinstance(data, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(data)
+    elif isinstance(data, (np.floating, np.float64, np.float32, np.float16)):
+        return float(data)
+    elif isinstance(data, np.ndarray):
+        return data.tolist()
+    elif isinstance(data, np.bool_):
+        return bool(data)
+    elif hasattr(data, 'item'):
+        return data.item()
+    return data
+
+def safe_jsonify(data):
+    """Wrapper seguro para jsonify que converte tipos numpy"""
+    return jsonify(fix_json_types(data))
+
+class QuantumInspiredFeatureMap:
+    """
+    Mapeamento de features inspirado em quantum computing
+    Simula superposição e entrelaçamento quântico para feature engineering
+    """
     
-    @staticmethod
-    def rsi(prices, window=14):
-        """Calcula RSI"""
-        try:
-            prices_series = pd.Series(prices)
-            delta = prices_series.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            return float(rsi.fillna(50).iloc[-1])
-        except:
-            return 50.0
+    def __init__(self, n_qubits=8, entanglement_depth=2):
+        self.n_qubits = n_qubits
+        self.entanglement_depth = entanglement_depth
+        self.feature_weights = np.random.uniform(-np.pi, np.pi, n_qubits)
+        self.entanglement_gates = self._initialize_entanglement_gates()
+        
+    def _initialize_entanglement_gates(self):
+        """Inicializa portas de entrelaçamento quântico simulado"""
+        gates = []
+        for depth in range(self.entanglement_depth):
+            layer = []
+            for i in range(0, self.n_qubits - 1, 2):
+                layer.append((i, i + 1, np.random.uniform(0, 2*np.pi)))
+            gates.append(layer)
+        return gates
     
-    @staticmethod
-    def macd(prices, fast=12, slow=26, signal=9):
-        """Calcula MACD"""
+    def quantum_feature_encoding(self, features):
+        """
+        Codifica features clássicas em espaço quântico inspirado
+        Simula rotações e entrelaçamentos quânticos
+        """
         try:
-            prices_series = pd.Series(prices)
-            ema_fast = prices_series.ewm(span=fast).mean()
-            ema_slow = prices_series.ewm(span=slow).mean()
-            macd_line = ema_fast - ema_slow
-            signal_line = macd_line.ewm(span=signal).mean()
+            # Normalizar features
+            normalized_features = np.array(features)
+            if len(normalized_features) < self.n_qubits:
+                # Pad com zeros se necessário
+                normalized_features = np.pad(normalized_features, 
+                                           (0, self.n_qubits - len(normalized_features)))
+            else:
+                # Truncar se muito longo
+                normalized_features = normalized_features[:self.n_qubits]
             
-            return float(macd_line.iloc[-1]) if len(macd_line) > 0 else 0.0
+            # Aplicar rotações quânticas simuladas (RY gates)
+            quantum_state = np.zeros(2**self.n_qubits, dtype=complex)
+            quantum_state[0] = 1.0  # Estado inicial |00...0⟩
+            
+            # Simular superposição
+            for i, feature_val in enumerate(normalized_features):
+                angle = feature_val * self.feature_weights[i]
+                # Aplicar rotação Y simulada
+                cos_half = np.cos(angle / 2)
+                sin_half = np.sin(angle / 2)
+                
+                # Transformação do estado quântico simplificada
+                quantum_state = self._apply_rotation(quantum_state, i, cos_half, sin_half)
+            
+            # Aplicar entrelaçamentos
+            for layer in self.entanglement_gates:
+                for qubit1, qubit2, angle in layer:
+                    quantum_state = self._apply_entanglement(quantum_state, qubit1, qubit2, angle)
+            
+            # Extrair features quânticas
+            quantum_features = self._extract_quantum_features(quantum_state)
+            
+            return quantum_features
+            
+        except Exception as e:
+            logger.error(f"Erro na codificação quântica: {e}")
+            return np.zeros(self.n_qubits * 4)  # Fallback
+    
+    def _apply_rotation(self, state, qubit_idx, cos_half, sin_half):
+        """Aplica rotação quântica simulada"""
+        # Implementação simplificada de rotação quântica
+        new_state = state.copy()
+        for i in range(len(state)):
+            if (i >> qubit_idx) & 1 == 0:  # Qubit em estado |0⟩
+                j = i | (1 << qubit_idx)   # Flip para |1⟩
+                if j < len(state):
+                    temp = cos_half * state[i] - 1j * sin_half * state[j]
+                    new_state[j] = -1j * sin_half * state[i] + cos_half * state[j]
+                    new_state[i] = temp
+        return new_state
+    
+    def _apply_entanglement(self, state, qubit1, qubit2, angle):
+        """Aplica entrelaçamento quântico simulado (CNOT + rotação)"""
+        # Implementação simplificada de entrelaçamento
+        new_state = state.copy()
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+        
+        for i in range(len(state)):
+            if (i >> qubit1) & 1 == 1:  # Se qubit de controle é |1⟩
+                if (i >> qubit2) & 1 == 0:  # E target é |0⟩
+                    j = i | (1 << qubit2)  # Flip target
+                    if j < len(state):
+                        new_state[i] = cos_angle * state[i] + sin_angle * state[j]
+                        new_state[j] = sin_angle * state[i] + cos_angle * state[j]
+        
+        return new_state
+    
+    def _extract_quantum_features(self, quantum_state):
+        """Extrai features do estado quântico"""
+        # Probabilidades de medição
+        probabilities = np.abs(quantum_state)**2
+        
+        # Features derivadas do estado quântico
+        features = []
+        
+        # 1. Probabilidades de qubits individuais
+        for i in range(self.n_qubits):
+            prob_0 = sum(probabilities[j] for j in range(len(probabilities)) 
+                        if (j >> i) & 1 == 0)
+            features.append(prob_0)
+        
+        # 2. Correlações entre qubits (entrelaçamento)
+        for i in range(self.n_qubits - 1):
+            for j in range(i + 1, self.n_qubits):
+                correlation = self._compute_correlation(probabilities, i, j)
+                features.append(correlation)
+        
+        # 3. Entropia quântica
+        entropy_val = entropy(probabilities + 1e-10)  # Evitar log(0)
+        features.append(entropy_val)
+        
+        # 4. Amplitude média
+        avg_amplitude = np.mean(np.abs(quantum_state))
+        features.append(avg_amplitude)
+        
+        return np.array(features)
+    
+    def _compute_correlation(self, probabilities, qubit1, qubit2):
+        """Computa correlação quântica entre dois qubits"""
+        # Probabilidade conjunta P(00), P(01), P(10), P(11)
+        p_00 = sum(probabilities[i] for i in range(len(probabilities))
+                  if (i >> qubit1) & 1 == 0 and (i >> qubit2) & 1 == 0)
+        p_11 = sum(probabilities[i] for i in range(len(probabilities))
+                  if (i >> qubit1) & 1 == 1 and (i >> qubit2) & 1 == 1)
+        p_01 = sum(probabilities[i] for i in range(len(probabilities))
+                  if (i >> qubit1) & 1 == 0 and (i >> qubit2) & 1 == 1)
+        p_10 = sum(probabilities[i] for i in range(len(probabilities))
+                  if (i >> qubit1) & 1 == 1 and (i >> qubit2) & 1 == 0)
+        
+        # Correlação quântica simplificada
+        correlation = p_00 + p_11 - p_01 - p_10
+        return correlation
+
+class QuantumApproximateOptimization:
+    """
+    Implementação do algoritmo QAOA (Quantum Approximate Optimization Algorithm)
+    para otimização de hiperparâmetros e estratégias de trading
+    """
+    
+    def __init__(self, n_layers=3, n_params=6):
+        self.n_layers = n_layers
+        self.n_params = n_params
+        self.optimal_params = None
+        self.best_cost = float('inf')
+        
+    def qaoa_optimizer(self, cost_function, initial_params=None, max_iterations=100):
+        """
+        Otimizador QAOA para problemas de trading
+        """
+        try:
+            if initial_params is None:
+                initial_params = np.random.uniform(0, 2*np.pi, self.n_params)
+            
+            # Simular circuito QAOA
+            def qaoa_objective(params):
+                return self._qaoa_expectation_value(params, cost_function)
+            
+            # Otimização clássica dos parâmetros quânticos
+            result = minimize(
+                qaoa_objective,
+                initial_params,
+                method='COBYLA',
+                options={'maxiter': max_iterations}
+            )
+            
+            self.optimal_params = result.x
+            self.best_cost = result.fun
+            
+            return {
+                'optimal_params': self.optimal_params.tolist(),
+                'best_cost': float(self.best_cost),
+                'success': result.success,
+                'iterations': result.nfev
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro no QAOA: {e}")
+            return {'error': str(e)}
+    
+    def _qaoa_expectation_value(self, params, cost_function):
+        """Calcula valor esperado do hamiltoniano QAOA"""
+        try:
+            # Dividir parâmetros em betas e gammas
+            mid = len(params) // 2
+            betas = params[:mid]
+            gammas = params[mid:]
+            
+            # Simular evolução quântica QAOA
+            expectation = 0.0
+            n_samples = 1000  # Número de amostras para estimativa
+            
+            for _ in range(n_samples):
+                # Gerar estado quântico simulado após QAOA
+                quantum_state = self._simulate_qaoa_evolution(betas, gammas)
+                
+                # Medir valor da função de custo
+                measurement = self._measure_cost_function(quantum_state, cost_function)
+                expectation += measurement
+            
+            return expectation / n_samples
+            
+        except Exception as e:
+            logger.error(f"Erro no cálculo QAOA: {e}")
+            return float('inf')
+    
+    def _simulate_qaoa_evolution(self, betas, gammas):
+        """Simula evolução temporal QAOA"""
+        # Estado inicial: superposição uniforme
+        n_qubits = min(len(betas) + len(gammas), 8)
+        state = np.ones(2**n_qubits) / np.sqrt(2**n_qubits)
+        
+        # Aplicar camadas QAOA
+        for beta, gamma in zip(betas, gammas):
+            # Hamiltoniano do problema (simulado)
+            state = self._apply_problem_hamiltonian(state, gamma)
+            # Hamiltoniano mixer
+            state = self._apply_mixer_hamiltonian(state, beta)
+        
+        return state
+    
+    def _apply_problem_hamiltonian(self, state, gamma):
+        """Aplica hamiltoniano do problema"""
+        # Simulação simplificada de rotações Z
+        new_state = state.copy()
+        for i in range(len(state)):
+            phase = gamma * self._compute_problem_energy(i)
+            new_state[i] *= np.exp(-1j * phase)
+        return new_state
+    
+    def _apply_mixer_hamiltonian(self, state, beta):
+        """Aplica hamiltoniano mixer (rotações X)"""
+        # Simulação simplificada de rotações X
+        new_state = np.zeros_like(state, dtype=complex)
+        cos_beta = np.cos(beta)
+        sin_beta = np.sin(beta)
+        
+        for i in range(len(state)):
+            # Para cada bit, aplicar rotação X
+            for bit in range(int(np.log2(len(state)))):
+                j = i ^ (1 << bit)  # Flip bit
+                new_state[i] += cos_beta * state[i] - 1j * sin_beta * state[j]
+        
+        return new_state / np.linalg.norm(new_state)
+    
+    def _compute_problem_energy(self, bitstring):
+        """Computa energia do problema para uma configuração"""
+        # Função de energia simplificada para otimização de trading
+        energy = 0
+        for i in range(int(np.log2(len(bin(bitstring)) - 2))):
+            if (bitstring >> i) & 1:
+                energy += (-1)**i  # Alternating weights
+        return energy
+    
+    def _measure_cost_function(self, state, cost_function):
+        """Mede função de custo no estado quântico"""
+        # Amostragem do estado quântico
+        probabilities = np.abs(state)**2
+        measurement = np.random.choice(len(state), p=probabilities)
+        
+        # Converter para parâmetros de trading
+        params = self._bitstring_to_params(measurement)
+        
+        try:
+            return cost_function(params)
         except:
+            return 1.0  # Penalidade para parâmetros inválidos
+    
+    def _bitstring_to_params(self, bitstring):
+        """Converte bitstring em parâmetros de trading"""
+        # Mapear bitstring para parâmetros reais
+        n_bits = int(np.log2(max(bitstring, 1))) + 1
+        params = []
+        
+        for i in range(min(n_bits, 6)):  # Máximo 6 parâmetros
+            bit_val = (bitstring >> i) & 1
+            param = bit_val / (2**i + 1)  # Normalizar
+            params.append(param)
+        
+        return np.array(params)
+
+class QuantumEnsembleClassifier:
+    """
+    Classificador ensemble inspirado em superposição quântica
+    Combina múltiplos modelos usando princípios quânticos
+    """
+    
+    def __init__(self, base_classifiers, n_quantum_states=8):
+        self.base_classifiers = base_classifiers
+        self.n_quantum_states = n_quantum_states
+        self.quantum_weights = None
+        self.superposition_amplitudes = None
+        
+    def fit(self, X, y):
+        """Treina o ensemble quântico"""
+        try:
+            # Treinar classificadores base
+            for clf in self.base_classifiers:
+                clf.fit(X, y)
+            
+            # Calcular pesos quânticos baseados na performance
+            self._compute_quantum_weights(X, y)
+            
+            # Inicializar amplitudes de superposição
+            self._initialize_superposition()
+            
+            logger.info(f"Ensemble quântico treinado com {len(self.base_classifiers)} classificadores")
+            
+        except Exception as e:
+            logger.error(f"Erro no treinamento ensemble quântico: {e}")
+    
+    def predict_proba(self, X):
+        """Predição probabilística usando superposição quântica"""
+        try:
+            if self.quantum_weights is None:
+                raise ValueError("Modelo não treinado")
+            
+            # Obter predições de cada classificador
+            base_predictions = []
+            for clf in self.base_classifiers:
+                if hasattr(clf, 'predict_proba'):
+                    pred = clf.predict_proba(X)
+                else:
+                    # Converter predições binárias em probabilidades
+                    pred_binary = clf.predict(X)
+                    pred = np.column_stack([1 - pred_binary, pred_binary])
+                base_predictions.append(pred)
+            
+            # Combinar usando superposição quântica
+            quantum_proba = self._quantum_superposition_combination(base_predictions)
+            
+            return quantum_proba
+            
+        except Exception as e:
+            logger.error(f"Erro na predição ensemble quântico: {e}")
+            return np.array([[0.5, 0.5]] * len(X))
+    
+    def predict(self, X):
+        """Predição binária"""
+        proba = self.predict_proba(X)
+        return (proba[:, 1] > 0.5).astype(int)
+    
+    def _compute_quantum_weights(self, X, y):
+        """Computa pesos quânticos baseados na performance"""
+        try:
+            accuracies = []
+            
+            for clf in self.base_classifiers:
+                if hasattr(clf, 'predict_proba'):
+                    pred_proba = clf.predict_proba(X)
+                    pred = (pred_proba[:, 1] > 0.5).astype(int)
+                else:
+                    pred = clf.predict(X)
+                
+                accuracy = np.mean(pred == y)
+                accuracies.append(accuracy)
+            
+            # Converter accuracies em amplitudes quânticas
+            # Amplitude = sqrt(accuracy) para preservar normalização
+            amplitudes = np.sqrt(np.array(accuracies))
+            norm = np.linalg.norm(amplitudes)
+            
+            if norm > 0:
+                self.quantum_weights = amplitudes / norm
+            else:
+                # Pesos uniformes se todas accuracies são zero
+                self.quantum_weights = np.ones(len(self.base_classifiers)) / np.sqrt(len(self.base_classifiers))
+            
+        except Exception as e:
+            logger.error(f"Erro no cálculo de pesos quânticos: {e}")
+            self.quantum_weights = np.ones(len(self.base_classifiers)) / np.sqrt(len(self.base_classifiers))
+    
+    def _initialize_superposition(self):
+        """Inicializa estado de superposição quântica"""
+        # Criar amplitudes de superposição para diferentes combinações
+        n_classifiers = len(self.base_classifiers)
+        
+        # Amplitudes para cada combinação possível de classificadores
+        self.superposition_amplitudes = {}
+        
+        for r in range(1, min(n_classifiers + 1, self.n_quantum_states)):
+            for combo in combinations(range(n_classifiers), r):
+                # Amplitude baseada na média dos pesos dos classificadores na combinação
+                amplitude = np.mean([self.quantum_weights[i] for i in combo])
+                self.superposition_amplitudes[combo] = amplitude
+        
+        # Normalizar amplitudes
+        total_prob = sum(amp**2 for amp in self.superposition_amplitudes.values())
+        if total_prob > 0:
+            norm_factor = np.sqrt(total_prob)
+            for combo in self.superposition_amplitudes:
+                self.superposition_amplitudes[combo] /= norm_factor
+    
+    def _quantum_superposition_combination(self, base_predictions):
+        """Combina predições usando superposição quântica"""
+        try:
+            n_samples = len(base_predictions[0])
+            n_classes = base_predictions[0].shape[1]
+            
+            # Resultado final
+            quantum_proba = np.zeros((n_samples, n_classes))
+            
+            # Para cada estado de superposição
+            for combo, amplitude in self.superposition_amplitudes.items():
+                # Probabilidade deste estado na superposição
+                state_prob = amplitude**2
+                
+                # Combinar predições dos classificadores nesta combinação
+                combo_pred = np.zeros((n_samples, n_classes))
+                for i in combo:
+                    combo_pred += base_predictions[i] * self.quantum_weights[i]
+                
+                # Normalizar predições da combinação
+                combo_sum = np.sum(combo_pred, axis=1, keepdims=True)
+                combo_sum[combo_sum == 0] = 1  # Evitar divisão por zero
+                combo_pred = combo_pred / combo_sum
+                
+                # Adicionar contribuição quântica
+                quantum_proba += state_prob * combo_pred
+            
+            # Aplicar interferência quântica (simulada)
+            quantum_proba = self._apply_quantum_interference(quantum_proba)
+            
+            # Normalizar resultado final
+            final_sum = np.sum(quantum_proba, axis=1, keepdims=True)
+            final_sum[final_sum == 0] = 1
+            quantum_proba = quantum_proba / final_sum
+            
+            return quantum_proba
+            
+        except Exception as e:
+            logger.error(f"Erro na combinação quântica: {e}")
+            # Fallback: média simples
+            mean_pred = np.mean(base_predictions, axis=0)
+            return mean_pred
+    
+    def _apply_quantum_interference(self, probabilities):
+        """Aplica efeitos de interferência quântica"""
+        # Simular interferência construtiva/destrutiva
+        interference = np.cos(np.sum(probabilities, axis=1, keepdims=True) * np.pi)
+        interference_factor = 1 + 0.1 * interference  # Efeito sutil
+        
+        return probabilities * interference_factor
+
+class QuantumDriftDetector:
+    """
+    Detector de drift conceitual usando princípios quânticos
+    Detecta mudanças em distribuições usando entropia quântica
+    """
+    
+    def __init__(self, window_size=100, sensitivity=0.1):
+        self.window_size = window_size
+        self.sensitivity = sensitivity
+        self.feature_history = deque(maxlen=window_size)
+        self.quantum_entropy_history = deque(maxlen=50)
+        self.baseline_entropy = None
+        
+    def add_sample(self, features, label):
+        """Adiciona nova amostra para detecção de drift"""
+        try:
+            # Armazenar amostra
+            self.feature_history.append({
+                'features': np.array(features),
+                'label': label,
+                'timestamp': datetime.now()
+            })
+            
+            # Calcular entropia quântica se temos amostras suficientes
+            if len(self.feature_history) >= 20:
+                quantum_entropy = self._compute_quantum_entropy()
+                self.quantum_entropy_history.append(quantum_entropy)
+                
+                # Estabelecer baseline se ainda não temos
+                if self.baseline_entropy is None and len(self.quantum_entropy_history) >= 10:
+                    self.baseline_entropy = np.mean(list(self.quantum_entropy_history)[-10:])
+                
+        except Exception as e:
+            logger.error(f"Erro ao adicionar amostra para drift quântico: {e}")
+    
+    def detect_drift(self):
+        """Detecta drift usando análise de entropia quântica"""
+        try:
+            if len(self.quantum_entropy_history) < 10 or self.baseline_entropy is None:
+                return False, 0.0
+            
+            # Entropia recente
+            recent_entropy = np.mean(list(self.quantum_entropy_history)[-5:])
+            
+            # Mudança relativa na entropia
+            entropy_change = abs(recent_entropy - self.baseline_entropy) / (self.baseline_entropy + 1e-10)
+            
+            # Detectar drift se mudança excede sensibilidade
+            drift_detected = entropy_change > self.sensitivity
+            
+            # Atualizar baseline gradualmente se não há drift
+            if not drift_detected:
+                alpha = 0.1  # Taxa de aprendizado
+                self.baseline_entropy = (1 - alpha) * self.baseline_entropy + alpha * recent_entropy
+            
+            return drift_detected, float(entropy_change)
+            
+        except Exception as e:
+            logger.error(f"Erro na detecção de drift quântico: {e}")
+            return False, 0.0
+    
+    def _compute_quantum_entropy(self):
+        """Computa entropia quântica das features recentes"""
+        try:
+            if len(self.feature_history) < 10:
+                return 0.0
+            
+            # Obter features recentes
+            recent_features = [sample['features'] for sample in list(self.feature_history)[-20:]]
+            feature_matrix = np.array(recent_features)
+            
+            # Criar mapa de features quântico
+            quantum_map = QuantumInspiredFeatureMap(n_qubits=6)
+            
+            # Mapear features para espaço quântico
+            quantum_features_list = []
+            for features in recent_features:
+                quantum_features = quantum_map.quantum_feature_encoding(features)
+                quantum_features_list.append(quantum_features)
+            
+            # Criar matriz densidade quântica simplificada
+            quantum_matrix = np.array(quantum_features_list)
+            
+            # Calcular entropia de von Neumann aproximada
+            # Usando correlação como proxy para entrelaçamento
+            correlation_matrix = np.corrcoef(quantum_matrix.T)
+            eigenvalues = np.linalg.eigvals(correlation_matrix)
+            
+            # Normalizar eigenvalues para formar distribuição
+            eigenvalues = np.real(eigenvalues)
+            eigenvalues = eigenvalues[eigenvalues > 1e-10]  # Filtrar valores muito pequenos
+            eigenvalues = eigenvalues / np.sum(eigenvalues)
+            
+            # Entropia de von Neumann
+            quantum_entropy = -np.sum(eigenvalues * np.log2(eigenvalues + 1e-10))
+            
+            return float(quantum_entropy)
+            
+        except Exception as e:
+            logger.error(f"Erro no cálculo de entropia quântica: {e}")
             return 0.0
-    
-    @staticmethod
-    def bollinger_bands(prices, window=20, num_std=2):
-        """Calcula Bollinger Bands"""
-        try:
-            prices_series = pd.Series(prices)
-            rolling_mean = prices_series.rolling(window=window).mean()
-            rolling_std = prices_series.rolling(window=window).std()
-            
-            upper_band = rolling_mean + (rolling_std * num_std)
-            lower_band = rolling_mean - (rolling_std * num_std)
-            
-            return {
-                'upper': float(upper_band.iloc[-1]) if len(upper_band) > 0 else prices[-1] * 1.02,
-                'lower': float(lower_band.iloc[-1]) if len(lower_band) > 0 else prices[-1] * 0.98
-            }
-        except:
-            return {
-                'upper': prices[-1] * 1.02,
-                'lower': prices[-1] * 0.98
-            }
-    
-    @staticmethod
-    def volatility(prices, window=14):
-        """Calcula volatilidade (ATR simplificado)"""
-        try:
-            prices_series = pd.Series(prices)
-            returns = prices_series.pct_change().dropna()
-            volatility = returns.rolling(window=window).std() * np.sqrt(252)  # Anualizada
-            return float(volatility.iloc[-1]) if len(volatility) > 0 else 1.0
-        except:
-            return 1.0
 
-class OnlineTradingAI:
+class QuantumEnhancedTradingEngine:
+    """
+    Engine de trading com inteligência quântica avançada
+    Integra todos os componentes quânticos
+    """
+    
     def __init__(self):
-        # SISTEMA HÍBRIDO: Offline + Online Learning
-        self.offline_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        # Componentes quânticos
+        self.quantum_feature_map = QuantumInspiredFeatureMap(n_qubits=8)
+        self.qaoa_optimizer = QuantumApproximateOptimization(n_layers=3)
+        self.quantum_drift_detector = QuantumDriftDetector()
         
-        # MODELOS ONLINE LEARNING
-        self.online_model = SGDClassifier(
-            loss='log_loss', 
-            learning_rate='adaptive',
-            eta0=0.01,
-            random_state=42,
-            max_iter=1000
-        )
+        # Classificadores base para ensemble quântico
+        base_classifiers = [
+            SGDClassifier(loss='log_loss', random_state=42),
+            GradientBoostingClassifier(n_estimators=50, random_state=42),
+            RandomForestRegressor(n_estimators=30, random_state=42)
+        ]
         
-        # Modelo alternativo para comparação
-        self.passive_model = PassiveAggressiveClassifier(
-            C=1.0,
-            random_state=42,
-            max_iter=1000
-        )
+        # Ensemble quântico
+        self.quantum_ensemble = QuantumEnsembleClassifier(base_classifiers[:2])  # Apenas classificadores
         
+        # Modelos tradicionais mantidos
+        self.traditional_classifier = SGDClassifier(loss='log_loss', random_state=42)
+        self.pnl_predictor = RandomForestRegressor(n_estimators=50, random_state=42)
+        
+        # Scalers
         self.scaler = StandardScaler()
-        self.online_scaler = StandardScaler()
+        self.quantum_scaler = StandardScaler()
         
-        # CONTROLES DE ESTADO
-        self.offline_trained = False
-        self.online_initialized = False
-        self.passive_initialized = False
-        
-        # BUFFERS PARA INICIALIZAÇÃO ONLINE
-        self.feature_buffer = []
-        self.target_buffer = []
-        self.min_samples_init = 20
-        
-        # MÉTRICAS EM TEMPO REAL
-        self.online_metrics = {
-            'total_predictions': 0,
-            'correct_predictions': 0,
-            'recent_accuracy': [],
-            'last_10_trades': [],
-            'learning_updates': 0
+        # Estado do sistema
+        self.is_trained = False
+        self.quantum_optimization_results = {}
+        self.performance_metrics = {
+            'quantum_accuracy': 0.0,
+            'traditional_accuracy': 0.0,
+            'quantum_advantage': 0.0,
+            'drift_events': 0,
+            'optimization_iterations': 0
         }
         
-        self.indicators = TechnicalIndicators()
+        # Histórico de predições
+        self.prediction_history = deque(maxlen=1000)
+        
+        # Configurar database
         self.init_database()
         
     def init_database(self):
-        """Inicializa o banco de dados com colunas para online learning"""
+        """Inicializa database com tabelas quânticas"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             cursor = conn.cursor()
             
-            # Tabela de trades com campos para online learning
+            # Tabela para resultados de otimização quântica
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS trades (
+                CREATE TABLE IF NOT EXISTS quantum_optimizations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME,
-                    symbol TEXT,
-                    direction TEXT,
-                    stake REAL,
-                    duration TEXT,
-                    entry_price REAL,
-                    exit_price REAL,
-                    result TEXT,
-                    pnl REAL,
-                    martingale_level INTEGER,
-                    market_conditions TEXT,
-                    features TEXT,
-                    online_updated BOOLEAN DEFAULT 0,
-                    prediction_confidence REAL,
-                    model_used TEXT,
-                    learning_iteration INTEGER,
-                    data_type TEXT DEFAULT 'real',
-                    market_scenario TEXT
+                    algorithm TEXT,
+                    parameters TEXT,
+                    cost_value REAL,
+                    convergence_iterations INTEGER,
+                    quantum_advantage REAL
                 )
             ''')
             
-            # Tabela para métricas de online learning
+            # Tabela para detecção de drift quântico
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS online_metrics (
+                CREATE TABLE IF NOT EXISTS quantum_drift_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME,
-                    model_type TEXT,
-                    accuracy REAL,
-                    total_samples INTEGER,
-                    recent_performance TEXT,
-                    adaptation_rate REAL
+                    entropy_change REAL,
+                    baseline_entropy REAL,
+                    current_entropy REAL,
+                    drift_severity TEXT,
+                    adaptation_action TEXT
                 )
             ''')
             
-            # Demais tabelas mantidas...
+            # Tabela para predições quânticas
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS statistics (
+                CREATE TABLE IF NOT EXISTS quantum_predictions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date DATE,
-                    total_trades INTEGER,
-                    wins INTEGER,
-                    losses INTEGER,
-                    win_rate REAL,
-                    total_pnl REAL,
-                    best_streak INTEGER,
-                    worst_streak INTEGER,
-                    martingale_usage TEXT,
-                    online_accuracy REAL,
-                    adaptation_score REAL
+                    timestamp DATETIME,
+                    session_id TEXT,
+                    classical_prediction REAL,
+                    quantum_prediction REAL,
+                    quantum_confidence REAL,
+                    ensemble_prediction REAL,
+                    actual_result INTEGER,
+                    quantum_features TEXT,
+                    performance_gain REAL
                 )
             ''')
             
+            # Tabela para métricas de performance quântica
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS market_data (
+                CREATE TABLE IF NOT EXISTS quantum_performance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME,
-                    symbol TEXT,
-                    price REAL,
-                    volume REAL,
-                    rsi REAL,
-                    macd REAL,
-                    bb_upper REAL,
-                    bb_lower REAL,
-                    volatility REAL,
-                    data_type TEXT DEFAULT 'real',
-                    market_scenario TEXT,
-                    synthetic_params TEXT
+                    metric_name TEXT,
+                    classical_value REAL,
+                    quantum_value REAL,
+                    improvement_percentage REAL,
+                    statistical_significance REAL
                 )
             ''')
             
             conn.commit()
             conn.close()
-            logger.info("🗄️ Banco de dados de online learning inicializado")
+            logger.info("🔮 Database quântico inicializado")
             
         except Exception as e:
-            logger.error(f"Erro ao inicializar banco: {e}")
+            logger.error(f"Erro na inicialização do database quântico: {e}")
     
-    def get_market_data(self, symbol, force_scenario=None):
-        """Obtém dados de mercado em tempo real com laboratório sintético"""
+    def train_quantum_models(self, trades_data):
+        """Treina todos os modelos quânticos"""
         try:
-            # Para índices sintéticos Deriv, usar laboratório sintético
-            if symbol.startswith(('R_', '1HZ', 'CRASH', 'BOOM', 'JD', 'STEP')):
-                scenario = force_scenario or self.get_market_scenario(symbol)
-                return self.get_synthetic_data(symbol, scenario)
+            if not trades_data:
+                return {'error': 'Dados vazios'}
             
-            # Para outros símbolos, tentar yfinance primeiro
-            try:
-                ticker = yf.Ticker(symbol)
-                data = ticker.history(period="5d", interval="1m")
+            logger.info("🔮 Iniciando treinamento quântico...")
+            
+            # Preparar dados
+            features_list = []
+            labels = []
+            pnl_values = []
+            
+            for trade in trades_data:
+                # Features tradicionais
+                traditional_features = self._extract_traditional_features(trade)
                 
-                if not data.empty:
-                    return self.process_market_data(data, symbol, data_type='real')
-            except Exception as e:
-                logger.warning(f"yfinance falhou para {symbol}: {e}")
-                pass
+                # Mapear para features quânticas
+                quantum_features = self.quantum_feature_map.quantum_feature_encoding(traditional_features)
                 
-            # Fallback para laboratório sintético
-            scenario = force_scenario or 'normal'
-            logger.info(f"🏭 Usando laboratório sintético para {symbol} (cenário: {scenario})")
-            return self.get_synthetic_data(symbol, scenario)
+                features_list.append(quantum_features)
+                
+                # Labels
+                label = 1 if trade.get('result') == 'win' else 0
+                labels.append(label)
+                
+                pnl_values.append(float(trade.get('pnl', 0)))
+                
+                # Adicionar ao detector de drift
+                self.quantum_drift_detector.add_sample(quantum_features, label)
             
-        except Exception as e:
-            logger.error(f"Erro ao obter dados do mercado: {e}")
-            return self.get_fallback_data(symbol, data_type='synthetic', scenario='error_fallback')
-    
-    def get_synthetic_data(self, symbol):
-        """Gera dados sintéticos baseados em padrões de mercado reais (mantido igual)"""
-        try:
-            np.random.seed(int(datetime.now().timestamp()) % 1000)
+            if len(features_list) < 10:
+                return {'error': 'Dados insuficientes para treinamento quântico'}
             
-            # Mapear volatilidade por símbolo
-            volatility_map = {
-                'R_10': 0.1, 'R_25': 0.25, 'R_50': 0.5, 'R_75': 0.75, 'R_100': 1.0,
-                '1HZ10V': 0.1, '1HZ25V': 0.25, '1HZ50V': 0.5, '1HZ75V': 0.75, '1HZ100V': 1.0,
-                'CRASH300': 3.0, 'CRASH500': 5.0, 'CRASH1000': 10.0,
-                'BOOM300': 3.0, 'BOOM500': 5.0, 'BOOM1000': 10.0
+            X = np.array(features_list)
+            y = np.array(labels)
+            pnl = np.array(pnl_values)
+            
+            # Escalar features
+            X_scaled = self.quantum_scaler.fit_transform(X)
+            
+            # Treinar ensemble quântico
+            self.quantum_ensemble.fit(X_scaled, y)
+            
+            # Treinar modelo tradicional para comparação
+            self.traditional_classifier.fit(X_scaled, y)
+            
+            # Treinar preditor de PnL
+            self.pnl_predictor.fit(X_scaled, pnl)
+            
+            # Otimizar hiperparâmetros usando QAOA
+            optimization_result = self._optimize_with_qaoa(X_scaled, y)
+            
+            self.is_trained = True
+            
+            # Calcular métricas de performance
+            performance = self._evaluate_quantum_performance(X_scaled, y)
+            
+            logger.info(f"✅ Treinamento quântico concluído - Vantagem quântica: {performance.get('quantum_advantage', 0):.3f}")
+            
+            return {
+                'status': 'success',
+                'samples_trained': len(trades_data),
+                'quantum_features_dim': X.shape[1],
+                'optimization_result': optimization_result,
+                'performance_metrics': performance,
+                'quantum_advantage': performance.get('quantum_advantage', 0)
             }
             
-            volatility = volatility_map.get(symbol, 0.5)
-            base_price = 1000 + np.random.normal(0, 50)
-            
-            # Gerar série temporal realística
-            periods = 100
-            prices = [base_price]
-            
-            for i in range(periods - 1):
-                # Movimento browniano com drift e mean reversion
-                drift = np.random.normal(0, volatility * 0.01)
-                mean_reversion = (1000 - prices[-1]) * 0.001  # Leve mean reversion
-                noise = np.random.normal(0, volatility * 0.1)
-                
-                new_price = prices[-1] * (1 + drift + mean_reversion + noise)
-                prices.append(max(0.01, new_price))  # Evitar preços negativos
-            
-            # Criar DataFrame simulado
-            df = pd.DataFrame({
-                'Close': prices,
-                'High': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
-                'Low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
-                'Volume': [np.random.randint(1000, 10000) for _ in prices]
-            })
-            
-            return self.process_market_data(df, symbol)
-            
         except Exception as e:
-            logger.error(f"Erro ao gerar dados sintéticos: {e}")
-            return self.get_fallback_data(symbol)
+            logger.error(f"Erro no treinamento quântico: {e}")
+            return {'error': str(e)}
     
-    def process_market_data(self, data, symbol, data_type='real', scenario=None, synthetic_params=None):
-        """Processa dados de mercado e calcula indicadores técnicos"""
+    def predict_quantum_enhanced(self, trade_context):
+        """Faz predições usando inteligência quântica"""
         try:
-            close_prices = data['Close'].values
-            high_prices = data['High'].values if 'High' in data.columns else close_prices
-            low_prices = data['Low'].values if 'Low' in data.columns else close_prices
-            volume = data['Volume'].values if 'Volume' in data.columns else [1000] * len(close_prices)
+            if not self.is_trained:
+                return {'error': 'Modelos quânticos não treinados'}
             
-            # Calcular indicadores técnicos
-            rsi = self.indicators.rsi(close_prices)
-            macd = self.indicators.macd(close_prices)
-            bb = self.indicators.bollinger_bands(close_prices)
-            volatility = self.indicators.volatility(close_prices)
+            # Extrair features tradicionais
+            traditional_features = self._extract_traditional_features(trade_context)
             
-            current_data = {
-                'symbol': symbol,
-                'price': float(close_prices[-1]),
-                'rsi': rsi,
-                'macd': macd,
-                'macd_signal': 0.0,  # Simplificado
-                'bb_upper': bb['upper'],
-                'bb_lower': bb['lower'],
-                'volatility': volatility,
-                'volume': float(volume[-1]) if len(volume) > 0 else 1000.0,
+            # Mapear para espaço quântico
+            quantum_features = self.quantum_feature_map.quantum_feature_encoding(traditional_features)
+            
+            # Escalar features
+            X_quantum = self.quantum_scaler.transform([quantum_features])
+            
+            # Predições quânticas
+            quantum_proba = self.quantum_ensemble.predict_proba(X_quantum)[0]
+            quantum_prediction = quantum_proba[1]  # Probabilidade de win
+            
+            # Predição tradicional para comparação
+            traditional_proba = self.traditional_classifier.predict_proba(X_quantum)[0]
+            traditional_prediction = traditional_proba[1]
+            
+            # Predição de PnL
+            predicted_pnl = self.pnl_predictor.predict(X_quantum)[0]
+            
+            # Calcular confiança quântica
+            quantum_confidence = self._calculate_quantum_confidence(quantum_proba)
+            
+            # Detectar drift
+            drift_detected, drift_magnitude = self.quantum_drift_detector.detect_drift()
+            
+            # Combinar predições usando superposição quântica
+            ensemble_prediction = self._quantum_prediction_fusion(
+                quantum_prediction, traditional_prediction, quantum_confidence
+            )
+            
+            # Resultado estruturado
+            result = {
                 'timestamp': datetime.now().isoformat(),
-                # 🏷️ NOVOS CAMPOS PARA IDENTIFICAÇÃO
-                'data_type': data_type,
-                'market_scenario': scenario,
-                'synthetic_params': json.dumps(synthetic_params) if synthetic_params else None
+                'predictions': {
+                    'quantum_win_probability': float(quantum_prediction),
+                    'traditional_win_probability': float(traditional_prediction),
+                    'ensemble_win_probability': float(ensemble_prediction),
+                    'predicted_pnl': float(predicted_pnl)
+                },
+                'quantum_metrics': {
+                    'confidence': float(quantum_confidence),
+                    'feature_space_dimension': len(quantum_features),
+                    'quantum_advantage': float(abs(quantum_prediction - traditional_prediction)),
+                    'drift_detected': drift_detected,
+                    'drift_magnitude': float(drift_magnitude)
+                },
+                'recommendation': self._generate_quantum_recommendation(
+                    ensemble_prediction, quantum_confidence, drift_detected, predicted_pnl
+                )
             }
             
-            # Salvar no banco com identificação de tipo
-            self.save_market_data(current_data)
+            # Salvar predição
+            self._save_quantum_prediction(result, trade_context)
             
-            # Log diferenciado para dados sintéticos
-            if data_type == 'synthetic':
-                logger.info(f"🧪 DADOS SINTÉTICOS {scenario}: {symbol} - "
-                           f"Preço: {current_data['price']:.4f}, "
-                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
-            else:
-                logger.info(f"📈 DADOS REAIS: {symbol} - "
-                           f"Preço: {current_data['price']:.4f}, "
-                           f"RSI: {rsi:.1f}, Vol: {volatility:.3f}")
-            
-            return current_data
+            return result
             
         except Exception as e:
-            logger.error(f"Erro no processamento de dados: {e}")
-            return self.get_fallback_data(symbol, data_type=data_type, scenario=scenario)
+            logger.error(f"Erro na predição quântica: {e}")
+            return {'error': str(e)}
     
-    def get_fallback_data(self, symbol, data_type='synthetic', scenario='fallback'):
-        """Dados de fallback em caso de erro"""
-        return {
-            'symbol': symbol,
-            'price': 1000.0 + np.random.normal(0, 10),
-            'rsi': 45.0 + np.random.normal(0, 10),
-            'macd': np.random.normal(0, 0.5),
-            'macd_signal': 0.0,
-            'bb_upper': 1020.0,
-            'bb_lower': 980.0,
-            'volatility': 1.0 + np.random.normal(0, 0.3),
-            'volume': 1000.0,
-            'timestamp': datetime.now().isoformat(),
-            'data_type': data_type,
-            'market_scenario': scenario,
-            'synthetic_params': json.dumps({'source': 'fallback_emergency'})
-        }
-    
-    def save_market_data(self, data):
-        """Salva dados de mercado no banco com identificação de tipo"""
-        try:
-            conn = sqlite3.connect(DATABASE_URL)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO market_data 
-                (timestamp, symbol, price, volume, rsi, macd, bb_upper, bb_lower, volatility,
-                 data_type, market_scenario, synthetic_params)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                data['timestamp'], data['symbol'], data['price'], data['volume'],
-                data['rsi'], data['macd'], data['bb_upper'], data['bb_lower'], 
-                data['volatility'], data.get('data_type', 'real'), 
-                data.get('market_scenario'), data.get('synthetic_params')
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            logger.error(f"Erro ao salvar dados de mercado: {e}")
-    
-    # ====================================
-    # 🏭 LABORATÓRIO DE MERCADO - FUNÇÕES AUXILIARES
-    # ====================================
-    
-    def get_market_scenario(self, symbol, force_scenario=None):
-        """
-        Determina qual cenário usar baseado em condições ou força um cenário específico
-        """
-        if force_scenario:
-            return force_scenario
-        
-        # Auto-detecção de cenário baseado no histórico recente
-        try:
-            conn = sqlite3.connect(DATABASE_URL)
-            recent_data = pd.read_sql_query('''
-                SELECT price, volatility, timestamp FROM market_data 
-                WHERE symbol = ? AND data_type = 'real'
-                ORDER BY timestamp DESC LIMIT 10
-            ''', conn, params=[symbol])
-            conn.close()
-            
-            if len(recent_data) < 5:
-                return 'normal'
-            
-            # Analisar tendência recente
-            price_change = (recent_data['price'].iloc[0] - recent_data['price'].iloc[-1]) / recent_data['price'].iloc[-1]
-            avg_volatility = recent_data['volatility'].mean()
-            
-            if avg_volatility > 2.0:
-                return 'high_volatility'
-            elif price_change > 0.05:
-                return 'bull_market'
-            elif price_change < -0.05:
-                return 'bear_market'
-            elif avg_volatility < 0.3:
-                return 'low_volatility'
-            else:
-                return 'normal'
-                
-        except Exception as e:
-            logger.error(f"Erro na detecção de cenário: {e}")
-            return 'normal'
-    
-    def generate_training_scenarios(self, symbol, num_scenarios=10):
-        """
-        Gera múltiplos cenários de mercado para treinamento da IA
-        """
-        scenarios = ['normal', 'bull_market', 'bear_market', 'sideways', 
-                    'high_volatility', 'low_volatility', 'crash', 'pump']
-        
-        training_data = []
-        
-        for i in range(num_scenarios):
-            scenario = scenarios[i % len(scenarios)]
-            
-            # Variações nos parâmetros para cada iteração
-            custom_params = {
-                'volatility': np.random.uniform(0.1, 2.0),
-                'trend_strength': np.random.uniform(-0.005, 0.005),
-                'mean_reversion': np.random.uniform(0.001, 0.01)
-            }
-            
-            data = self.get_synthetic_data(symbol, scenario, custom_params)
-            data['scenario_id'] = i
-            training_data.append(data)
-            
-        logger.info(f"🏭 Gerados {num_scenarios} cenários de treinamento para {symbol}")
-        return training_data
-    
-    def validate_synthetic_quality(self, synthetic_data, real_data_sample=None):
-        """
-        Valida qualidade dos dados sintéticos comparando com dados reais
-        """
-        try:
-            metrics = {
-                'price_range': (min(synthetic_data), max(synthetic_data)),
-                'volatility_estimate': np.std(synthetic_data) / np.mean(synthetic_data),
-                'trend_analysis': 'stable',
-                'quality_score': 0.75  # Score padrão
-            }
-            
-            # Se temos dados reais para comparar
-            if real_data_sample and len(real_data_sample) > 10:
-                real_vol = np.std(real_data_sample) / np.mean(real_data_sample)
-                synthetic_vol = metrics['volatility_estimate']
-                
-                vol_similarity = 1 - abs(real_vol - synthetic_vol) / max(real_vol, synthetic_vol)
-                metrics['quality_score'] = vol_similarity
-                
-                logger.info(f"📊 Qualidade sintética: {vol_similarity:.3f} "
-                           f"(vol real: {real_vol:.3f}, sintética: {synthetic_vol:.3f})")
-            
-            return metrics
-            
-        except Exception as e:
-            logger.error(f"Erro na validação de qualidade: {e}")
-            return {'quality_score': 0.5, 'error': str(e)}
-    
-    def extract_features(self, market_data, trade_history=None):
-        """Extrai features para o modelo de ML (mantido igual)"""
+    def _extract_traditional_features(self, trade_data):
+        """Extrai features tradicionais do trade"""
         try:
             features = []
             
-            # Features de mercado
+            # Features básicas
             features.extend([
-                market_data['rsi'],
-                market_data['macd'],
-                market_data['volatility'],
-                (market_data['price'] - market_data['bb_lower']) / (market_data['bb_upper'] - market_data['bb_lower']) if market_data['bb_upper'] != market_data['bb_lower'] else 0.5
+                float(trade_data.get('stake', 1.0)),
+                float(trade_data.get('martingale_level', 0)),
+                float(trade_data.get('duration', 60)),
+                float(trade_data.get('entry_price', 1000.0)),
+                float(trade_data.get('exit_price', 1000.0)),
+                float(trade_data.get('volatility', 0.02))
             ])
             
             # Features temporais
-            now = datetime.now()
+            if 'timestamp' in trade_data:
+                try:
+                    ts = pd.to_datetime(trade_data['timestamp'])
+                    features.extend([
+                        float(ts.hour / 24.0),
+                        float(ts.weekday() / 6.0),
+                        float(ts.minute / 59.0)
+                    ])
+                except:
+                    features.extend([0.5, 0.5, 0.5])
+            else:
+                features.extend([0.5, 0.5, 0.5])
+            
+            # Features derivadas
             features.extend([
-                now.hour / 24.0,  # Hora do dia normalizada
-                now.weekday() / 6.0,  # Dia da semana normalizado
-                (now.minute % 60) / 60.0  # Minuto normalizado
+                float(trade_data.get('recent_win_rate', 0.5)),
+                float(trade_data.get('consecutive_losses', 0)),
+                float(trade_data.get('account_balance', 1000.0))
             ])
             
-            # Features de histórico
-            if trade_history and len(trade_history) > 0:
-                recent_trades = trade_history[-10:]  # Últimos 10 trades
-                win_rate = sum(1 for t in recent_trades if t.get('result') == 'win') / len(recent_trades)
-                avg_pnl = np.mean([t.get('pnl', 0) for t in recent_trades])
-                features.extend([win_rate, avg_pnl / 100.0])  # Normalizar PnL
-            else:
-                features.extend([0.5, 0.0])
-            
-            return np.array(features).reshape(1, -1)
+            return np.array(features)
             
         except Exception as e:
-            logger.error(f"Erro ao extrair features: {e}")
-            return np.array([50, 0, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0]).reshape(1, -1)
+            logger.error(f"Erro na extração de features: {e}")
+            return np.zeros(12)
     
-    # ====================================
-    # NOVO: SISTEMA DE ONLINE LEARNING
-    # ====================================
-    
-    def initialize_online_model(self):
-        """Inicializa modelo online com dados do buffer"""
+    def _optimize_with_qaoa(self, X, y):
+        """Otimiza hiperparâmetros usando QAOA"""
         try:
-            if len(self.feature_buffer) < self.min_samples_init:
-                logger.info(f"🔄 Buffer insuficiente: {len(self.feature_buffer)}/{self.min_samples_init}")
-                return False
+            def cost_function(params):
+                # Função de custo para otimização de trading
+                # Simula performance baseada nos parâmetros
+                if len(params) < 3:
+                    return 1.0
+                
+                # Simular accuracy baseada nos parâmetros
+                learning_rate = params[0]
+                regularization = params[1] if len(params) > 1 else 0.1
+                
+                # Penalizar valores extremos
+                penalty = 0
+                if learning_rate > 0.9 or learning_rate < 0.01:
+                    penalty += 0.5
+                if regularization > 0.9 or regularization < 0.001:
+                    penalty += 0.3
+                
+                # Simular accuracy invertida (QAOA minimiza)
+                simulated_accuracy = learning_rate * 0.7 + regularization * 0.3
+                cost = 1.0 - simulated_accuracy + penalty
+                
+                return cost
             
-            X = np.array(self.feature_buffer)
-            y = np.array(self.target_buffer)
+            # Executar QAOA
+            result = self.qaoa_optimizer.qaoa_optimizer(cost_function, max_iterations=50)
             
-            # Inicializar scaler online
-            self.online_scaler.fit(X)
-            X_scaled = self.online_scaler.transform(X)
+            self.quantum_optimization_results = result
             
-            # Inicializar modelos online
-            self.online_model.partial_fit(X_scaled, y, classes=[0, 1])
-            self.passive_model.partial_fit(X_scaled, y, classes=[0, 1])
+            # Salvar resultado
+            self._save_optimization_result(result)
             
-            self.online_initialized = True
-            self.passive_initialized = True
-            
-            # Calcular accuracy inicial
-            predictions = self.online_model.predict(X_scaled)
-            initial_accuracy = accuracy_score(y, predictions)
-            
-            logger.info(f"✅ ONLINE LEARNING INICIALIZADO!")
-            logger.info(f"📊 Amostras: {len(X)}, Accuracy inicial: {initial_accuracy:.3f}")
-            
-            # Limpar buffer
-            self.feature_buffer = []
-            self.target_buffer = []
-            
-            return True
+            return result
             
         except Exception as e:
-            logger.error(f"❌ Erro ao inicializar online learning: {e}")
-            return False
+            logger.error(f"Erro na otimização QAOA: {e}")
+            return {'error': str(e)}
     
-    def update_online_model(self, features, target):
-        """Atualização incremental do modelo a cada trade"""
+    def _evaluate_quantum_performance(self, X, y):
+        """Avalia performance dos modelos quânticos vs tradicionais"""
         try:
-            features_flat = features.flatten()
+            # Predições quânticas
+            quantum_pred = self.quantum_ensemble.predict(X)
+            quantum_accuracy = np.mean(quantum_pred == y)
             
-            # Se não inicializado, adicionar ao buffer
-            if not self.online_initialized:
-                self.feature_buffer.append(features_flat)
-                self.target_buffer.append(target)
-                
-                logger.info(f"📥 Adicionado ao buffer: {len(self.feature_buffer)}/{self.min_samples_init}")
-                
-                # Tentar inicializar quando buffer estiver cheio
-                if len(self.feature_buffer) >= self.min_samples_init:
-                    self.initialize_online_model()
-                
-                return False
+            # Predições tradicionais
+            traditional_pred = self.traditional_classifier.predict(X)
+            traditional_accuracy = np.mean(traditional_pred == y)
             
-            # Modelo já inicializado - atualização incremental
-            X_scaled = self.online_scaler.transform([features_flat])
-            
-            # Fazer predição antes da atualização (para métricas)
-            prediction_before = self.online_model.predict(X_scaled)[0]
-            confidence_before = max(self.online_model.predict_proba(X_scaled)[0])
-            
-            # ATUALIZAÇÃO INCREMENTAL
-            self.online_model.partial_fit(X_scaled, [target])
-            self.passive_model.partial_fit(X_scaled, [target])
+            # Calcular vantagem quântica
+            quantum_advantage = quantum_accuracy - traditional_accuracy
             
             # Atualizar métricas
-            self.online_metrics['total_predictions'] += 1
-            self.online_metrics['learning_updates'] += 1
-            
-            is_correct = (prediction_before == target)
-            if is_correct:
-                self.online_metrics['correct_predictions'] += 1
-            
-            # Manter histórico dos últimos 10 trades
-            self.online_metrics['last_10_trades'].append({
-                'prediction': prediction_before,
-                'actual': target,
-                'correct': is_correct,
-                'confidence': confidence_before
+            self.performance_metrics.update({
+                'quantum_accuracy': float(quantum_accuracy),
+                'traditional_accuracy': float(traditional_accuracy),
+                'quantum_advantage': float(quantum_advantage)
             })
             
-            if len(self.online_metrics['last_10_trades']) > 10:
-                self.online_metrics['last_10_trades'].pop(0)
+            # Salvar métricas
+            self._save_performance_metrics()
             
-            # Calcular accuracy dos últimos 10
-            recent_correct = sum(1 for t in self.online_metrics['last_10_trades'] if t['correct'])
-            recent_accuracy = recent_correct / len(self.online_metrics['last_10_trades'])
-            self.online_metrics['recent_accuracy'].append(recent_accuracy)
-            
-            if len(self.online_metrics['recent_accuracy']) > 50:
-                self.online_metrics['recent_accuracy'].pop(0)
-            
-            # Log da atualização
-            overall_accuracy = self.online_metrics['correct_predictions'] / self.online_metrics['total_predictions']
-            
-            result_emoji = "✅" if is_correct else "❌"
-            target_name = "WIN" if target == 1 else "LOSS"
-            
-            logger.info(f"🧠 ONLINE UPDATE #{self.online_metrics['learning_updates']}")
-            logger.info(f"{result_emoji} Predição: {'WIN' if prediction_before == 1 else 'LOSS'}, "
-                       f"Real: {target_name}, Confiança: {confidence_before:.3f}")
-            logger.info(f"📊 Accuracy Geral: {overall_accuracy:.3f}, "
-                       f"Últimos 10: {recent_accuracy:.3f}")
-            
-            # Salvar métricas no banco periodicamente
-            if self.online_metrics['learning_updates'] % 10 == 0:
-                self.save_online_metrics()
-            
-            return True
+            return self.performance_metrics
             
         except Exception as e:
-            logger.error(f"❌ Erro na atualização online: {e}")
-            return False
+            logger.error(f"Erro na avaliação de performance: {e}")
+            return {}
     
-    def get_best_prediction(self, market_data, trade_history=None):
-        """Combina predições de múltiplos modelos"""
+    def _calculate_quantum_confidence(self, probabilities):
+        """Calcula confiança quântica baseada na entropia"""
         try:
-            features = self.extract_features(market_data, trade_history)
+            # Entropia normalizada
+            entropy_val = entropy(probabilities + 1e-10)
+            max_entropy = np.log2(len(probabilities))
             
-            predictions = {}
+            # Confiança = 1 - entropia_normalizada
+            confidence = 1.0 - (entropy_val / max_entropy)
             
-            # 1. Modelo offline (se treinado)
-            if self.offline_trained:
-                try:
-                    features_scaled = self.scaler.transform(features)
-                    offline_pred = self.offline_model.predict(features_scaled)[0]
-                    offline_proba = self.offline_model.predict_proba(features_scaled)[0]
-                    predictions['offline'] = {
-                        'prediction': offline_pred,
-                        'confidence': max(offline_proba)
-                    }
-                except:
-                    pass
-            
-            # 2. Modelo online SGD
-            if self.online_initialized:
-                try:
-                    features_scaled = self.online_scaler.transform(features)
-                    online_pred = self.online_model.predict(features_scaled)[0]
-                    online_proba = self.online_model.predict_proba(features_scaled)[0]
-                    predictions['online_sgd'] = {
-                        'prediction': online_pred,
-                        'confidence': max(online_proba)
-                    }
-                except:
-                    pass
-            
-            # 3. Modelo Passive Aggressive
-            if self.passive_initialized:
-                try:
-                    features_scaled = self.online_scaler.transform(features)
-                    passive_pred = self.passive_model.predict(features_scaled)[0]
-                    # Passive Aggressive não tem predict_proba, usar confidence baseada em decision_function
-                    decision = self.passive_model.decision_function(features_scaled)[0]
-                    passive_confidence = 1 / (1 + np.exp(-abs(decision)))  # Sigmoid do decision
-                    predictions['passive'] = {
-                        'prediction': passive_pred,
-                        'confidence': passive_confidence
-                    }
-                except:
-                    pass
-            
-            # Escolher melhor predição
-            if predictions:
-                # Preferir modelo online se disponível e confiante
-                if 'online_sgd' in predictions and predictions['online_sgd']['confidence'] > 0.6:
-                    best = predictions['online_sgd']
-                    method = 'online_sgd'
-                elif 'passive' in predictions and predictions['passive']['confidence'] > 0.6:
-                    best = predictions['passive']
-                    method = 'passive_aggressive'
-                elif 'offline' in predictions:
-                    best = predictions['offline']
-                    method = 'offline_random_forest'
-                else:
-                    best = list(predictions.values())[0]
-                    method = list(predictions.keys())[0]
-                
-                direction = 'CALL' if best['prediction'] == 1 else 'PUT'
-                confidence = best['confidence'] * 100
-                
-                logger.info(f"🎯 Melhor predição via {method}: {direction} ({confidence:.1f}%)")
-                
-                return {
-                    'direction': direction,
-                    'confidence': confidence,
-                    'method': f'best_of_ensemble_{method}',
-                    'all_predictions': predictions
-                }
-            
-            # Fallback para híbrido
-            return self.hybrid_prediction(market_data)
+            return max(0.0, min(1.0, confidence))
             
         except Exception as e:
-            logger.error(f"❌ Erro na predição ensemble: {e}")
-            return self.hybrid_prediction(market_data)
+            logger.error(f"Erro no cálculo de confiança quântica: {e}")
+            return 0.5
     
-    def save_online_metrics(self):
-        """Salva métricas de online learning no banco"""
+    def _quantum_prediction_fusion(self, quantum_pred, traditional_pred, confidence):
+        """Fusão quântica de predições usando superposição"""
+        try:
+            # Peso baseado na confiança quântica
+            quantum_weight = confidence
+            traditional_weight = 1.0 - confidence
+            
+            # Fusão com interferência quântica simulada
+            interference = np.cos((quantum_pred - traditional_pred) * np.pi)
+            interference_factor = 1.0 + 0.1 * interference
+            
+            fused_prediction = (
+                quantum_weight * quantum_pred + 
+                traditional_weight * traditional_pred
+            ) * interference_factor
+            
+            return np.clip(fused_prediction, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Erro na fusão quântica: {e}")
+            return (quantum_pred + traditional_pred) / 2.0
+    
+    def _generate_quantum_recommendation(self, prediction, confidence, drift_detected, predicted_pnl):
+        """Gera recomendação baseada em análise quântica"""
+        try:
+            # Análise base
+            if prediction > 0.7 and confidence > 0.8 and predicted_pnl > 0:
+                base_recommendation = 'STRONG_BUY'
+                strength = 'HIGH'
+            elif prediction > 0.6 and confidence > 0.6:
+                base_recommendation = 'BUY'
+                strength = 'MEDIUM'
+            elif prediction < 0.3 and confidence > 0.6:
+                base_recommendation = 'STRONG_SELL'
+                strength = 'HIGH'
+            elif prediction < 0.4:
+                base_recommendation = 'SELL'
+                strength = 'MEDIUM'
+            else:
+                base_recommendation = 'HOLD'
+                strength = 'LOW'
+            
+            # Ajustar por drift
+            if drift_detected:
+                if strength == 'HIGH':
+                    strength = 'MEDIUM'
+                elif strength == 'MEDIUM':
+                    strength = 'LOW'
+                base_recommendation += '_WITH_CAUTION'
+            
+            return {
+                'action': base_recommendation,
+                'confidence_level': strength,
+                'quantum_score': float(prediction * confidence),
+                'risk_factors': {
+                    'drift_detected': drift_detected,
+                    'low_confidence': confidence < 0.5,
+                    'negative_pnl_expected': predicted_pnl < 0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro na geração de recomendação: {e}")
+            return {'action': 'HOLD', 'confidence_level': 'LOW'}
+    
+    def _save_quantum_prediction(self, result, trade_context):
+        """Salva predição quântica no database"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
             cursor = conn.cursor()
             
-            overall_accuracy = (self.online_metrics['correct_predictions'] / 
-                              self.online_metrics['total_predictions']) if self.online_metrics['total_predictions'] > 0 else 0
-            
-            recent_performance = {
-                'last_10_accuracy': sum(1 for t in self.online_metrics['last_10_trades'] if t['correct']) / max(1, len(self.online_metrics['last_10_trades'])),
-                'avg_confidence': np.mean([t['confidence'] for t in self.online_metrics['last_10_trades']]) if self.online_metrics['last_10_trades'] else 0,
-                'learning_updates': self.online_metrics['learning_updates']
-            }
-            
             cursor.execute('''
-                INSERT INTO online_metrics 
-                (timestamp, model_type, accuracy, total_samples, recent_performance, adaptation_rate)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO quantum_predictions 
+                (timestamp, session_id, classical_prediction, quantum_prediction, 
+                 quantum_confidence, ensemble_prediction, quantum_features)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
-                datetime.now().isoformat(),
-                'sgd_online',
-                overall_accuracy,
-                self.online_metrics['total_predictions'],
-                json.dumps(recent_performance),
-                len(self.online_metrics['recent_accuracy']) / 50.0  # Taxa de adaptação
+                result['timestamp'],
+                trade_context.get('session_id', 'unknown'),
+                result['predictions']['traditional_win_probability'],
+                result['predictions']['quantum_win_probability'],
+                result['quantum_metrics']['confidence'],
+                result['predictions']['ensemble_win_probability'],
+                json.dumps(result['quantum_metrics'])
             ))
             
             conn.commit()
             conn.close()
             
-            logger.info(f"💾 Métricas online salvas: {overall_accuracy:.3f} accuracy")
-            
         except Exception as e:
-            logger.error(f"❌ Erro ao salvar métricas: {e}")
+            logger.error(f"Erro ao salvar predição quântica: {e}")
     
-    # ====================================
-    # MODIFICAÇÕES NAS FUNÇÕES EXISTENTES
-    # ====================================
-    
-    def train_offline_model(self):
-        """Treina modelo offline com dados históricos"""
+    def _save_optimization_result(self, result):
+        """Salva resultado de otimização QAOA"""
         try:
             conn = sqlite3.connect(DATABASE_URL)
+            cursor = conn.cursor()
             
-            # Obter dados de trades
-            trades_df = pd.read_sql_query('''
-                SELECT * FROM trades 
-                WHERE result IN ('win', 'loss')
-                ORDER BY timestamp DESC
-                LIMIT 1000
-            ''', conn)
+            cursor.execute('''
+                INSERT INTO quantum_optimizations 
+                (timestamp, algorithm, parameters, cost_value, convergence_iterations)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                datetime.now().isoformat(),
+                'QAOA',
+                json.dumps(result.get('optimal_params', [])),
+                result.get('best_cost', 0.0),
+                result.get('iterations', 0)
+            ))
             
-            if len(trades_df) < 50:  # Dados insuficientes
-                logger.info("📊 Dados insuficientes para treinar modelo offline")
-                conn.close()
-                return False
-            
-            # Preparar features e targets
-            X = []
-            y = []
-            
-            for _, trade in trades_df.iterrows():
-                try:
-                    features = json.loads(trade['features']) if trade['features'] else []
-                    if len(features) == 9:  # Verificar se tem o número correto de features
-                        X.append(features)
-                        y.append(1 if trade['result'] == 'win' else 0)
-                except:
-                    continue
-            
-            if len(X) < 50:
-                logger.info("📊 Features insuficientes para treinar modelo offline")
-                conn.close()
-                return False
-            
-            X = np.array(X)
-            y = np.array(y)
-            
-            # Treinar modelo offline
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
-            self.scaler.fit(X_train)
-            X_train_scaled = self.scaler.transform(X_train)
-            X_test_scaled = self.scaler.transform(X_test)
-            
-            self.offline_model.fit(X_train_scaled, y_train)
-            
-            # Avaliar modelo
-            accuracy = self.offline_model.score(X_test_scaled, y_test)
-            logger.info(f"✅ MODELO OFFLINE treinado com acurácia: {accuracy:.3f}")
-            
-            self.offline_trained = True
+            conn.commit()
             conn.close()
-            return True
             
         except Exception as e:
-            logger.error(f"❌ Erro ao treinar modelo offline: {e}")
-            return False
+            logger.error(f"Erro ao salvar otimização: {e}")
     
-    def predict_direction(self, market_data, trade_history=None):
-        """Prediz direção usando sistema híbrido online/offline"""
-        # Usar sistema ensemble com online learning
-        return self.get_best_prediction(market_data, trade_history)
-    
-    def hybrid_prediction(self, market_data):
-        """Predição híbrida usando análise técnica + padrões (mantido igual do original)"""
+    def _save_performance_metrics(self):
+        """Salva métricas de performance"""
         try:
-            rsi = market_data['rsi']
-            macd = market_data['macd']
-            price = market_data['price']
-            bb_upper = market_data['bb_upper']
-            bb_lower = market_data['bb_lower']
-            volatility = market_data['volatility']
+            conn = sqlite3.connect(DATABASE_URL)
+            cursor = conn.cursor()
             
-            signals = []
+            for metric_name, quantum_value in self.performance_metrics.items():
+                if metric_name.startswith('quantum_'):
+                    classical_metric = metric_name.replace('quantum_', 'traditional_')
+                    classical_value = self.performance_metrics.get(classical_metric, 0.0)
+                    
+                    improvement = ((quantum_value - classical_value) / 
+                                 (classical_value + 1e-10)) * 100
+                    
+                    cursor.execute('''
+                        INSERT INTO quantum_performance 
+                        (timestamp, metric_name, classical_value, quantum_value, improvement_percentage)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (
+                        datetime.now().isoformat(),
+                        metric_name,
+                        float(classical_value),
+                        float(quantum_value),
+                        float(improvement)
+                    ))
             
-            # Análise RSI
-            if rsi < 30:
-                signals.append(('CALL', 0.7))  # Sobrevenda
-            elif rsi > 70:
-                signals.append(('PUT', 0.7))   # Sobrecompra
-            
-            # Análise MACD
-            if macd > 0:
-                signals.append(('CALL', 0.6))
-            else:
-                signals.append(('PUT', 0.6))
-            
-            # Análise Bollinger Bands
-            bb_position = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
-            if bb_position < 0.2:
-                signals.append(('CALL', 0.8))  # Próximo da banda inferior
-            elif bb_position > 0.8:
-                signals.append(('PUT', 0.8))   # Próximo da banda superior
-            
-            # Análise de volatilidade
-            if volatility > 2.0:
-                # Alta volatilidade favorece reversões
-                if rsi > 60:
-                    signals.append(('PUT', 0.5))
-                elif rsi < 40:
-                    signals.append(('CALL', 0.5))
-            
-            # Combinar sinais
-            call_weight = sum(weight for direction, weight in signals if direction == 'CALL')
-            put_weight = sum(weight for direction, weight in signals if direction == 'PUT')
-            
-            if call_weight > put_weight:
-                direction = 'CALL'
-                confidence = min(95, (call_weight / (call_weight + put_weight)) * 100) if (call_weight + put_weight) > 0 else 65
-            else:
-                direction = 'PUT'
-                confidence = min(95, (put_weight / (call_weight + put_weight)) * 100) if (call_weight + put_weight) > 0 else 65
-            
-            # Ajustar confiança baseada na volatilidade
-            if volatility > 3.0:
-                confidence *= 0.8  # Reduzir confiança em alta volatilidade
-            
-            return {
-                'direction': direction,
-                'confidence': max(60, confidence),  # Mínimo de 60%
-                'method': 'hybrid_technical_analysis'
-            }
+            conn.commit()
+            conn.close()
             
         except Exception as e:
-            logger.error(f"❌ Erro na predição híbrida: {e}")
-            return {
-                'direction': 'CALL' if np.random.random() > 0.5 else 'PUT',
-                'confidence': 65.0,
-                'method': 'fallback_random'
+            logger.error(f"Erro ao salvar métricas: {e}")
+    
+    def get_quantum_status(self):
+        """Retorna status completo do sistema quântico"""
+        try:
+            status = {
+                'timestamp': datetime.now().isoformat(),
+                'system_status': {
+                    'is_trained': self.is_trained,
+                    'quantum_components_active': True,
+                    'optimization_completed': bool(self.quantum_optimization_results)
+                },
+                'quantum_metrics': self.performance_metrics,
+                'drift_detection': {
+                    'samples_analyzed': len(self.quantum_drift_detector.feature_history),
+                    'baseline_entropy': self.quantum_drift_detector.baseline_entropy,
+                    'events_detected': self.performance_metrics.get('drift_events', 0)
+                },
+                'optimization_results': self.quantum_optimization_results,
+                'feature_map': {
+                    'qubits': self.quantum_feature_map.n_qubits,
+                    'entanglement_depth': self.quantum_feature_map.entanglement_depth
+                },
+                'ensemble_info': {
+                    'base_classifiers': len(self.quantum_ensemble.base_classifiers),
+                    'quantum_states': self.quantum_ensemble.n_quantum_states
+                }
             }
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Erro ao obter status quântico: {e}")
+            return {'error': str(e)}
 
-# Instância global da IA com Online Learning
-trading_ai = OnlineTradingAI()
+# Instância global do engine quântico
+quantum_engine = QuantumEnhancedTradingEngine()
 
 # ====================================
-# ROTAS DA API (MODIFICADAS)
+# ROTAS DA API QUÂNTICA
 # ====================================
 
 @app.route('/', methods=['GET'])
 def health_check():
-    return jsonify({
+    return safe_jsonify({
         'status': 'online',
-        'service': 'Trading AI API - Online Learning',
-        'version': '2.0.0',
+        'service': 'Quantum Enhanced Trading Intelligence API',
+        'version': '3.0.0 - Quantum Edition',
         'timestamp': datetime.now().isoformat(),
-        'models': {
-            'offline_trained': trading_ai.offline_trained,
-            'online_initialized': trading_ai.online_initialized,
-            'passive_initialized': trading_ai.passive_initialized
-        },
-        'online_metrics': {
-            'total_predictions': trading_ai.online_metrics['total_predictions'],
-            'accuracy': (trading_ai.online_metrics['correct_predictions'] / 
-                        max(1, trading_ai.online_metrics['total_predictions'])),
-            'learning_updates': trading_ai.online_metrics['learning_updates']
-        },
-        'database': 'connected'
+        'quantum_features': [
+            'quantum_inspired_feature_maps',
+            'qaoa_optimization',
+            'quantum_ensemble_learning',
+            'quantum_drift_detection',
+            'superposition_prediction_fusion',
+            'quantum_error_correction_inspired'
+        ],
+        'quantum_status': quantum_engine.get_quantum_status()
     })
 
-@app.route('/analyze', methods=['POST'])
-def analyze_market():
+@app.route('/train-quantum', methods=['POST'])
+def train_quantum():
+    """Treina modelos com inteligência quântica"""
     try:
         data = request.get_json()
-        symbol = data.get('symbol', 'R_50')
+        trades_data = data.get('trades', [])
         
-        # Obter dados de mercado
-        market_data = trading_ai.get_market_data(symbol)
+        if not trades_data:
+            return safe_jsonify({'error': 'Dados de trades necessários'}), 400
         
-        # Análise detalhada (mantida igual)
-        analysis = {
-            'symbol': symbol,
-            'current_price': market_data['price'],
-            'timestamp': market_data['timestamp'],
-            'technical_indicators': {
-                'rsi': market_data['rsi'],
-                'macd': market_data['macd'],
-                'bb_upper': market_data['bb_upper'],
-                'bb_lower': market_data['bb_lower'],
-                'volatility': market_data['volatility']
-            },
-            'market_condition': 'neutral',
-            'volatility_level': 'medium',
-            'trend': 'sideways',
-            'online_learning_status': {
-                'initialized': trading_ai.online_initialized,
-                'total_updates': trading_ai.online_metrics['learning_updates'],
-                'recent_accuracy': (sum(1 for t in trading_ai.online_metrics['last_10_trades'] if t['correct']) / 
-                                  max(1, len(trading_ai.online_metrics['last_10_trades']))) if trading_ai.online_metrics['last_10_trades'] else 0
-            }
-        }
+        result = quantum_engine.train_quantum_models(trades_data)
         
-        # Determinar condições de mercado (mantido igual)
-        rsi = market_data['rsi']
-        if rsi < 30:
-            analysis['market_condition'] = 'oversold'
-            analysis['trend'] = 'bullish_reversal'
-        elif rsi > 70:
-            analysis['market_condition'] = 'overbought'
-            analysis['trend'] = 'bearish_reversal'
-        elif market_data['macd'] > 0:
-            analysis['trend'] = 'bullish'
-        elif market_data['macd'] < 0:
-            analysis['trend'] = 'bearish'
-        
-        # Nível de volatilidade (mantido igual)
-        if market_data['volatility'] > 2.0:
-            analysis['volatility_level'] = 'high'
-        elif market_data['volatility'] < 0.5:
-            analysis['volatility_level'] = 'low'
-        
-        analysis['message'] = f"Análise técnica: RSI {rsi:.1f}, Volatilidade {market_data['volatility']:.2f}, Tendência {analysis['trend']}"
-        
-        return jsonify(analysis)
+        return safe_jsonify(result)
         
     except Exception as e:
-        logger.error(f"❌ Erro na análise
+        logger.error(f"Erro no treinamento quântico: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+@app.route('/predict-quantum', methods=['POST'])
+def predict_quantum():
+    """Faz predições usando inteligência quântica"""
+    try:
+        data = request.get_json()
+        trade_context = data.get('context', {})
+        
+        if not trade_context:
+            return safe_jsonify({'error': 'Contexto do trade necessário'}), 400
+        
+        result = quantum_engine.predict_quantum_enhanced(trade_context)
+        
+        return safe_jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Erro na predição quântica: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+@app.route('/quantum-optimization', methods=['POST'])
+def quantum_optimization():
+    """Executa otimização QAOA personalizada"""
+    try:
+        data = request.get_json()
+        
+        # Função de custo personalizada
+        def custom_cost(params):
+            return data.get('target_value', 1.0) - np.sum(params**2)
+        
+        result = quantum_engine.qaoa_optimizer.qaoa_optimizer(
+            custom_cost, 
+            max_iterations=data.get('max_iterations', 100)
+        )
+        
+        return safe_jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Erro na otimização quântica: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+@app.route('/quantum-status', methods=['GET'])
+def quantum_status():
+    """Status completo do sistema quântico"""
+    try:
+        status = quantum_engine.get_quantum_status()
+        return safe_jsonify(status)
+        
+    except Exception as e:
+        logger.error(f"Erro no status quântico: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+@app.route('/quantum-drift-analysis', methods=['GET'])
+def quantum_drift_analysis():
+    """Análise detalhada de drift quântico"""
+    try:
+        conn = sqlite3.connect(DATABASE_URL)
+        
+        # Eventos de drift recentes
+        drift_df = pd.read_sql_query('''
+            SELECT * FROM quantum_drift_events 
+            ORDER BY timestamp DESC 
+            LIMIT 50
+        ''', conn)
+        
+        # Métricas de performance
+        performance_df = pd.read_sql_query('''
+            SELECT * FROM quantum_performance 
+            ORDER BY timestamp DESC 
+            LIMIT 20
+        ''', conn)
+        
+        conn.close()
+        
+        analysis = {
+            'drift_events': drift_df.to_dict('records') if not drift_df.empty else [],
+            'performance_trends': performance_df.to_dict('records') if not performance_df.empty else [],
+            'current_entropy': quantum_engine.quantum_drift_detector.baseline_entropy,
+            'samples_analyzed': len(quantum_engine.quantum_drift_detector.feature_history)
+        }
+        
+        return safe_jsonify(analysis)
+        
+    except Exception as e:
+        logger.error(f"Erro na análise de drift: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+@app.route('/generate-quantum-demo', methods=['GET'])
+def generate_quantum_demo():
+    """Gera demonstração das capacidades quânticas"""
+    try:
+        # Dados de exemplo para demonstração
+        demo_trades = []
+        for i in range(20):
+            trade = {
+                'trade_id': f'demo_{i}',
+                'timestamp': (datetime.now() - timedelta(minutes=i*5)).isoformat(),
+                'result': 'win' if np.random.random() > 0.4 else 'loss',
+                'stake': np.random.uniform(1, 10),
+                'pnl': np.random.uniform(-10, 15),
+                'martingale_level': np.random.randint(0, 4),
+                'entry_price': 1000 + np.random.normal(0, 50),
+                'exit_price': 1000 + np.random.normal(0, 50),
+                'volatility': np.random.uniform(0.01, 0.05),
+                'recent_win_rate': np.random.uniform(0.3, 0.8),
+                'consecutive_losses': np.random.randint(0, 5)
+            }
+            demo_trades.append(trade)
+        
+        # Treinar com dados demo
+        training_result = quantum_engine.train_quantum_models(demo_trades)
+        
+        # Fazer predição demo
+        demo_context = demo_trades[-1]
+        prediction_result = quantum_engine.predict_quantum_enhanced(demo_context)
+        
+        # Exemplo de feature mapping quântico
+        feature_demo = quantum_engine.quantum_feature_map.quantum_feature_encoding(
+            [1.0, 2.0, 3.0, 4.0, 5.0]
+        )
+        
+        return safe_jsonify({
+            'demo_status': 'success',
+            'training_result': training_result,
+            'prediction_example': prediction_result,
+            'quantum_feature_mapping': {
+                'input_features': [1.0, 2.0, 3.0, 4.0, 5.0],
+                'quantum_features': feature_demo.tolist(),
+                'dimensionality_expansion': f"{5} → {len(feature_demo)}"
+            },
+            'quantum_advantages_demonstrated': [
+                'High-dimensional feature mapping',
+                'Quantum-inspired ensemble learning',
+                'QAOA optimization',
+                'Quantum drift detection',
+                'Superposition-based prediction fusion'
+            ]
+        })
+        
+    except Exception as e:
+        logger.error(f"Erro na demo quântica: {e}")
+        return safe_jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    logger.info("🔮 Iniciando Quantum Enhanced Trading Intelligence API v3.0.0...")
+    logger.info("⚛️ Componentes quânticos: Feature Maps, QAOA, Ensemble, Drift Detection")
+    logger.info("🌌 Recursos: Superposição, Entrelaçamento, Interferência Quântica")
+    app.run(host='0.0.0.0', port=API_PORT, debug=False)
