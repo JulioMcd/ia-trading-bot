@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum Trading Bot - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .api-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.online {
+            background: #00C851;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .balance-display {
+            font-size: 48px;
+            color: #667eea;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .balance-label {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #00C851;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #ff4444;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffbb33;
+            color: white;
+        }
+
+        .prediction-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+
+        .prediction-box h3 {
+            margin-bottom: 15px;
+        }
+
+        .prediction-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+
+        .recommendation {
+            text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .recommendation.BUY, .recommendation.STRONG_BUY {
+            background: #00C851;
+            color: white;
+        }
+
+        .recommendation.SELL, .recommendation.STRONG_SELL {
+            background: #ff4444;
+            color: white;
+        }
+
+        .recommendation.HOLD {
+            background: #ffbb33;
+            color: white;
+        }
+
+        .history-item {
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .history-item.win {
+            border-left-color: #00C851;
+        }
+
+        .history-item.loss {
+            border-left-color: #ff4444;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .alert-danger {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            color: #1565c0;
+            border-left: 4px solid #1565c0;
+        }
+
+        #historyList {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .quantum-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>🚀 Quantum Trading Bot Dashboard</h1>
+                <span id="userName" style="color: #666;">Bem-vindo, Trader!</span>
+            </div>
+            <div class="api-status">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span id="statusText">Conectando...</span>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid">
+            <!-- Account Info -->
+            <div class="card">
+                <h2>💰 Minha Conta</h2>
+                <div id="loginSection">
+                    <div class="form-group">
+                        <label>Nome do Trader</label>
+                        <input type="text" id="traderName" placeholder="Seu nome" value="Trader Pro">
+                    </div>
+                    <div class="form-group">
+                        <label>Saldo Inicial ($)</label>
+                        <input type="number" id="initialBalance" placeholder="1000.00" value="10000">
+                    </div>
+                    <button class="btn btn-primary" onclick="initAccount()">Iniciar Sessão</button>
+                </div>
+                <div id="accountSection" style="display: none;">
+                    <div class="balance-label">Saldo Disponível</div>
+                    <div class="balance-display" id="currentBalance">$0.00</div>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalTrades">0</div>
+                            <div class="stat-label">Trades</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="winRate">0%</div>
+                            <div class="stat-label">Win Rate</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalProfit">$0</div>
+                            <div class="stat-label">Lucro Total</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="consecutiveLosses">0</div>
+                            <div class="stat-label">Perdas Seguidas</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-danger" onclick="logout()" style="margin-top: 20px;">Encerrar Sessão</button>
+                </div>
+            </div>
+
+            <!-- Trading Form -->
+            <div class="card">
+                <h2>📊 Nova Operação</h2>
+                <div id="tradingForm">
+                    <div class="form-group">
+                        <label>Valor da Aposta ($)</label>
+                        <input type="number" id="stake" placeholder="10.00" value="10" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label>Preço de Entrada</label>
+                        <input type="number" id="entryPrice" placeholder="1000.00" value="50000" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label>Preço de Saída (Estimado)</label>
+                        <input type="number" id="exitPrice" placeholder="1010.00" value="51000" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label>Duração (segundos)</label>
+                        <input type="number" id="duration" placeholder="60" value="60">
+                    </div>
+                    <div class="form-group">
+                        <label>Volatilidade (0-1)</label>
+                        <input type="number" id="volatility" placeholder="0.02" value="0.02" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Nível Martingale</label>
+                        <input type="number" id="martingaleLevel" placeholder="1" value="1" min="1">
+                    </div>
+                    <button class="btn btn-primary" onclick="getPrediction()">🔮 Obter Previsão Quantum</button>
+                </div>
+            </div>
+
+            <!-- Prediction Results -->
+            <div class="card">
+                <h2>🎯 Previsão Quantum <span class="quantum-badge">AI POWERED</span></h2>
+                <div id="predictionResults">
+                    <div class="alert alert-info">
+                        Preencha os dados da operação e clique em "Obter Previsão Quantum" para ver a análise da IA.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History -->
+        <div class="card">
+            <h2>📈 Histórico de Operações</h2>
+            <div id="historyList">
+                <div class="alert alert-info">
+                    Nenhuma operação realizada ainda. Faça sua primeira previsão!
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading" id="loadingOverlay">
+            <div class="spinner"></div>
+            <p>Processando com IA Quantum...</p>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_URL = 'http://localhost:5001';
+
+        // Global State
+        let accountData = {
+            name: '',
+            balance: 0,
+            initialBalance: 0,
+            trades: [],
+            consecutiveLosses: 0,
+            sessionId: ''
+        };
+
+        let lastPrediction = null;
+
+        // Initialize
+        window.onload = function() {
+            checkAPIStatus();
+            loadAccountFromStorage();
+            setInterval(checkAPIStatus, 10000); // Check every 10 seconds
+        };
+
+        // Check API Status
+        async function checkAPIStatus() {
+            try {
+                const response = await fetch(`${API_URL}/`);
+                const data = await response.json();
+
+                if (data.status === 'online') {
+                    document.getElementById('statusIndicator').classList.add('online');
+                    document.getElementById('statusText').textContent = 'API Online';
+                } else {
+                    document.getElementById('statusIndicator').classList.remove('online');
+                    document.getElementById('statusText').textContent = 'API Offline';
+                }
+            } catch (error) {
+                document.getElementById('statusIndicator').classList.remove('online');
+                document.getElementById('statusText').textContent = 'API Offline';
+                console.error('API Status Error:', error);
+            }
+        }
+
+        // Initialize Account
+        function initAccount() {
+            const name = document.getElementById('traderName').value;
+            const balance = parseFloat(document.getElementById('initialBalance').value);
+
+            if (!name || balance <= 0) {
+                alert('Por favor, preencha todos os campos corretamente!');
+                return;
+            }
+
+            accountData.name = name;
+            accountData.balance = balance;
+            accountData.initialBalance = balance;
+            accountData.sessionId = 'session_' + Date.now();
+            accountData.trades = [];
+            accountData.consecutiveLosses = 0;
+
+            document.getElementById('userName').textContent = `Bem-vindo, ${name}!`;
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('accountSection').style.display = 'block';
+
+            updateAccountDisplay();
+            saveAccountToStorage();
+        }
+
+        // Logout
+        function logout() {
+            if (confirm('Deseja realmente encerrar a sessão?')) {
+                localStorage.removeItem('quantumTradingAccount');
+                location.reload();
+            }
+        }
+
+        // Update Account Display
+        function updateAccountDisplay() {
+            document.getElementById('currentBalance').textContent = `$${accountData.balance.toFixed(2)}`;
+            document.getElementById('totalTrades').textContent = accountData.trades.length;
+
+            const wins = accountData.trades.filter(t => t.result === 'win').length;
+            const winRate = accountData.trades.length > 0 ? (wins / accountData.trades.length * 100) : 0;
+            document.getElementById('winRate').textContent = `${winRate.toFixed(1)}%`;
+
+            const profit = accountData.balance - accountData.initialBalance;
+            document.getElementById('totalProfit').textContent = `$${profit.toFixed(2)}`;
+            document.getElementById('consecutiveLosses').textContent = accountData.consecutiveLosses;
+        }
+
+        // Save to LocalStorage
+        function saveAccountToStorage() {
+            localStorage.setItem('quantumTradingAccount', JSON.stringify(accountData));
+        }
+
+        // Load from LocalStorage
+        function loadAccountFromStorage() {
+            const saved = localStorage.getItem('quantumTradingAccount');
+            if (saved) {
+                accountData = JSON.parse(saved);
+                document.getElementById('userName').textContent = `Bem-vindo, ${accountData.name}!`;
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('accountSection').style.display = 'block';
+                updateAccountDisplay();
+                renderHistory();
+            }
+        }
+
+        // Get Prediction
+        async function getPrediction() {
+            if (!accountData.name) {
+                alert('Por favor, inicie uma sessão primeiro!');
+                return;
+            }
+
+            const stake = parseFloat(document.getElementById('stake').value);
+            const entryPrice = parseFloat(document.getElementById('entryPrice').value);
+            const exitPrice = parseFloat(document.getElementById('exitPrice').value);
+            const duration = parseInt(document.getElementById('duration').value);
+            const volatility = parseFloat(document.getElementById('volatility').value);
+            const martingaleLevel = parseInt(document.getElementById('martingaleLevel').value);
+
+            if (!stake || !entryPrice || !exitPrice || !duration || !volatility || !martingaleLevel) {
+                alert('Por favor, preencha todos os campos!');
+                return;
+            }
+
+            if (stake > accountData.balance) {
+                alert('Saldo insuficiente!');
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                const wins = accountData.trades.filter(t => t.result === 'win').length;
+                const recentWinRate = accountData.trades.length > 0 ? wins / accountData.trades.length : 0.5;
+
+                const requestData = {
+                    context: {
+                        stake: stake,
+                        martingale_level: martingaleLevel,
+                        duration: duration,
+                        entry_price: entryPrice,
+                        exit_price: exitPrice,
+                        volatility: volatility,
+                        timestamp: new Date().toISOString(),
+                        recent_win_rate: recentWinRate,
+                        consecutive_losses: accountData.consecutiveLosses,
+                        account_balance: accountData.balance,
+                        session_id: accountData.sessionId
+                    }
+                };
+
+                const response = await fetch(`${API_URL}/predict-quantum`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Erro na API');
+                }
+
+                const data = await response.json();
+                lastPrediction = data;
+                displayPrediction(data);
+
+            } catch (error) {
+                console.error('Prediction Error:', error);
+                document.getElementById('predictionResults').innerHTML = `
+                    <div class="alert alert-danger">
+                        ❌ Erro ao obter previsão: ${error.message}
+                        <br><small>Verifique se a API está rodando na porta 5001</small>
+                    </div>
+                `;
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Display Prediction
+        function displayPrediction(data) {
+            const pred = data.predictions;
+            const quantum = data.quantum_metrics;
+            const rec = data.recommendation;
+
+            let riskWarnings = '';
+            if (rec.risk_factors.drift_detected) {
+                riskWarnings += '<div class="alert alert-danger">⚠️ Deriva de mercado detectada!</div>';
+            }
+            if (rec.risk_factors.low_confidence) {
+                riskWarnings += '<div class="alert alert-danger">⚠️ Baixa confiança na previsão!</div>';
+            }
+            if (rec.risk_factors.negative_pnl_expected) {
+                riskWarnings += '<div class="alert alert-danger">⚠️ PnL negativo esperado!</div>';
+            }
+
+            const html = `
+                ${riskWarnings}
+
+                <div class="recommendation ${rec.action}">
+                    ${getActionEmoji(rec.action)} ${rec.action}
+                    <div style="font-size: 14px; margin-top: 10px;">
+                        Confiança: ${rec.confidence_level} (${(quantum.confidence * 100).toFixed(1)}%)
+                    </div>
+                </div>
+
+                <div class="prediction-box">
+                    <h3>📊 Probabilidades de Vitória</h3>
+                    <div class="prediction-item">
+                        <span>🔮 Quantum:</span>
+                        <span>${(pred.quantum_win_probability * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span>🤖 Tradicional:</span>
+                        <span>${(pred.traditional_win_probability * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span>🎯 Ensemble:</span>
+                        <span>${(pred.ensemble_win_probability * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span>💰 PnL Previsto:</span>
+                        <span>$${pred.predicted_pnl.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div class="prediction-box">
+                    <h3>⚛️ Métricas Quantum</h3>
+                    <div class="prediction-item">
+                        <span>Vantagem Quantum:</span>
+                        <span>${(quantum.quantum_advantage * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span>Dimensão do Espaço:</span>
+                        <span>${quantum.feature_space_dimension}D</span>
+                    </div>
+                    <div class="prediction-item">
+                        <span>Score Quantum:</span>
+                        <span>${(rec.quantum_score * 100).toFixed(2)}%</span>
+                    </div>
+                </div>
+
+                <button class="btn btn-success" onclick="executeTrade('win')" style="margin-top: 15px;">
+                    ✅ Executar Trade (Simular Vitória)
+                </button>
+                <button class="btn btn-danger" onclick="executeTrade('loss')" style="margin-top: 10px;">
+                    ❌ Executar Trade (Simular Perda)
+                </button>
+            `;
+
+            document.getElementById('predictionResults').innerHTML = html;
+        }
+
+        // Execute Trade
+        function executeTrade(result) {
+            if (!lastPrediction) {
+                alert('Obtenha uma previsão primeiro!');
+                return;
+            }
+
+            const stake = parseFloat(document.getElementById('stake').value);
+            const entryPrice = parseFloat(document.getElementById('entryPrice').value);
+            const exitPrice = parseFloat(document.getElementById('exitPrice').value);
+            const martingaleLevel = parseInt(document.getElementById('martingaleLevel').value);
+
+            let pnl = 0;
+            if (result === 'win') {
+                pnl = stake * 0.85; // 85% payout
+                accountData.balance += pnl;
+                accountData.consecutiveLosses = 0;
+            } else {
+                pnl = -stake;
+                accountData.balance += pnl;
+                accountData.consecutiveLosses++;
+            }
+
+            const trade = {
+                trade_id: 'trade_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                result: result,
+                stake: stake,
+                pnl: pnl,
+                martingale_level: martingaleLevel,
+                entry_price: entryPrice,
+                exit_price: exitPrice,
+                prediction: lastPrediction,
+                balance_after: accountData.balance
+            };
+
+            accountData.trades.unshift(trade);
+
+            updateAccountDisplay();
+            saveAccountToStorage();
+            renderHistory();
+
+            // Clear prediction
+            lastPrediction = null;
+            document.getElementById('predictionResults').innerHTML = `
+                <div class="alert alert-success">
+                    ✅ Trade executado com sucesso! ${result === 'win' ? 'Vitória' : 'Perda'}: $${pnl.toFixed(2)}
+                </div>
+            `;
+        }
+
+        // Render History
+        function renderHistory() {
+            const historyDiv = document.getElementById('historyList');
+
+            if (accountData.trades.length === 0) {
+                historyDiv.innerHTML = '<div class="alert alert-info">Nenhuma operação realizada ainda.</div>';
+                return;
+            }
+
+            let html = '';
+            accountData.trades.forEach(trade => {
+                const date = new Date(trade.timestamp).toLocaleString('pt-BR');
+                const winProb = trade.prediction ?
+                    (trade.prediction.predictions.quantum_win_probability * 100).toFixed(1) : 'N/A';
+                const action = trade.prediction ? trade.prediction.recommendation.action : 'N/A';
+
+                html += `
+                    <div class="history-item ${trade.result}">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <strong>${trade.result === 'win' ? '✅ VITÓRIA' : '❌ PERDA'}</strong>
+                            <strong style="color: ${trade.pnl >= 0 ? '#00C851' : '#ff4444'};">
+                                ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}
+                            </strong>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            <div>📅 ${date}</div>
+                            <div>💰 Aposta: $${trade.stake.toFixed(2)} | Martingale: ${trade.martingale_level}</div>
+                            <div>📊 Previsão IA: ${winProb}% | Recomendação: ${action}</div>
+                            <div>💵 Saldo após: $${trade.balance_after.toFixed(2)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            historyDiv.innerHTML = html;
+        }
+
+        // Helper Functions
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').classList.toggle('active', show);
+        }
+
+        function getActionEmoji(action) {
+            const emojis = {
+                'BUY': '📈',
+                'STRONG_BUY': '🚀',
+                'SELL': '📉',
+                'STRONG_SELL': '⚠️',
+                'HOLD': '⏸️'
+            };
+            return emojis[action] || '❓';
+        }
+    </script>
+</body>
+</html>
