@@ -16,7 +16,7 @@ import joblib
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 logging.basicConfig(
     level=logging.INFO,
@@ -891,6 +891,14 @@ def config():
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'time': datetime.utcnow().isoformat()})
+
+@app.route('/monitor')
+def monitor():
+    """Serve o monitor HTML diretamente pelo servidor."""
+    monitor_path = os.path.join(os.path.dirname(__file__), 'btc_monitor.html')
+    if os.path.exists(monitor_path):
+        return send_file(monitor_path)
+    return "Monitor não encontrado", 404
 
 # ── STARTUP (roda com gunicorn E python direto) ───────────────────
 def _startup():
