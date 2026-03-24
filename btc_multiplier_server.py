@@ -887,6 +887,7 @@ def config():
         log.info("🔑 Token configurado via /config")
     return jsonify({'ok': True})
 
+@app.route('/')
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'time': datetime.utcnow().isoformat()})
