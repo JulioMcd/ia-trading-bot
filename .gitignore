@@ -1,0 +1,10 @@
+*.exe
+*.xls
+*.xlsx
+*.pdf
+*.csv
+desktop.ini
+__pycache__/
+*.pyc
+.env
+/data/
