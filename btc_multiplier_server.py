@@ -905,6 +905,30 @@ def config():
         log.info("🔑 Token configurado via /config")
     return jsonify({'ok': True})
 
+@app.route('/reset-contract', methods=['POST'])
+def reset_contract():
+    """Desbloqueia contrato travado."""
+    cid = trader._open_contract
+    with trader._lock:
+        trader._open_contract = None
+        trader._pending.clear()
+    log.info(f"🔧 Contrato desbloqueado via /reset-contract: {cid}")
+    return jsonify({'cleared': cid})
+
+@app.route('/reconnect', methods=['POST'])
+def reconnect():
+    """Força reconexão com a Deriv."""
+    log.info("🔄 Reconexão forçada via /reconnect")
+    try:
+        if deriv._ws:
+            deriv._ws.close()
+    except: pass
+    deriv._auth = False
+    deriv._reconnecting = False
+    time.sleep(2)
+    deriv._connect()
+    return jsonify({'status': 'reconnecting'})
+
 @app.route('/')
 @app.route('/health')
 def health():
@@ -940,21 +964,49 @@ def _startup():
 
     threading.Thread(target=auto_save, daemon=True).start()
 
+    # Watchdog: reconecta Deriv se cair
+    def watchdog():
+        time.sleep(60)
+        while True:
+            try:
+                if not deriv.is_ready and DERIV_TOKEN and not deriv._reconnecting:
+                    log.warning("🔄 Watchdog: Deriv desconectado — reconectando...")
+                    deriv._reconnecting = True
+                    try:
+                        if deriv._ws: deriv._ws.close()
+                    except: pass
+                    time.sleep(5)
+                    try:
+                        deriv._connect()
+                    except Exception as e:
+                        log.error(f"Watchdog reconexão erro: {e}")
+                        deriv._reconnecting = False
+            except Exception as e:
+                log.error(f"Watchdog erro: {e}")
+                deriv._reconnecting = False
+            time.sleep(30)
+    threading.Thread(target=watchdog, daemon=True).start()
+
     if not btc_model.trained and DERIV_TOKEN:
         log.info("📥 Sem modelo salvo — iniciando download automático em 5s...")
         time.sleep(5)
         downloader.start()
 
-    # live feed após download
+    # live feed — aguarda conexão + download e subscreve
     def await_and_subscribe():
+        # espera download se estiver rodando
         while downloader.status not in ('done', 'error', 'idle'):
             time.sleep(5)
-        if downloader.status == 'done' and deriv.is_ready:
+        # espera Deriv conectar (até 120s)
+        for _ in range(40):
+            if deriv.is_ready:
+                break
+            time.sleep(3)
+        if deriv.is_ready:
+            log.info("📡 Inscrevendo live feed M5 + H1...")
             live_feed.subscribe()
-        elif downloader.status == 'idle' and btc_model.trained and deriv.is_ready:
-            # modelo já existia, subscreve direto
-            time.sleep(10)
-            live_feed.subscribe()
+        else:
+            log.warning("⚠️ Deriv não conectou — live feed não inscrito. Watchdog vai tentar reconectar.")
 
     threading.Thread(target=await_and_subscribe, daemon=True).start()
 
