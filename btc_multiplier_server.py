@@ -551,11 +551,13 @@ class LiveFeed:
                 deriv._subs[sub_id] = on_update
             log.info(f"📡 Live feed {label} ativo")
 
+        # M5: 500 candles = ~41h | H1: 200 candles = ~8 dias
+        initial_count = 500 if gran == 300 else 200
         deriv.send({
             'ticks_history': SYMBOL,
             'style':         'candles',
             'granularity':   gran,
-            'count':         50,
+            'count':         initial_count,
             'end':           'latest',
             'subscribe':     1,
         }, callback=on_initial)
