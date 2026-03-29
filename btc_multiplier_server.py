@@ -609,6 +609,12 @@ class MultiplierTrader:
             if mtype == 'authorize':
                 self._auth = True
                 log.info("✅ Trader autorizado")
+                # re-subscreve contrato aberto se WS reconectou com contrato pendente
+                with self._lock:
+                    open_cid = self._open
+                if open_cid:
+                    log.info(f"🔄 Re-subscrevendo contrato {open_cid} após reconexão...")
+                    self._send({'proposal_open_contract': 1, 'contract_id': open_cid, 'subscribe': 1})
                 return
 
             if mtype == 'proposal':
@@ -834,6 +840,16 @@ def auto_save():
 
 # ── FLASK API ────────────────────────────────────────────────────
 app = Flask(__name__)
+
+@app.route('/reset-contract', methods=['POST'])
+def reset_contract():
+    """Desbloqueia contrato travado manualmente."""
+    old = trader._open
+    with trader._lock:
+        trader._open = None
+        trader._pending.pop(old, None) if old else None
+    log.info(f"🔧 Contrato {old} removido manualmente via /reset-contract")
+    return jsonify({'ok': True, 'cleared': old})
 
 @app.route('/stats')
 def stats():
