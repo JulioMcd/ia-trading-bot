@@ -17,6 +17,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -360,14 +361,20 @@ class DerivClient:
 
     def _on_close(self, ws, code, msg):
         self._auth = False
+        if self._reconnecting:
+            return  # já tem outra reconexão em andamento
         self._reconnecting = True
         log.warning(f"WS fechado ({code}). Reconectando em 10s...")
-        time.sleep(10)
-        if self._running:
-            try: self._connect()
-            except Exception as e:
-                log.error(f"Reconexão erro: {e}")
-                self._reconnecting = False
+
+        def do_reconnect():
+            time.sleep(10)
+            if self._running:
+                try:
+                    self._connect()
+                except Exception as e:
+                    log.error(f"Reconexão erro: {e}")
+                    self._reconnecting = False
+        threading.Thread(target=do_reconnect, daemon=True).start()
 
     def _connect(self):
         self._ws = websocket.WebSocketApp(
@@ -842,6 +849,7 @@ def auto_save():
 
 # ── FLASK API ────────────────────────────────────────────────────
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/reset-contract', methods=['POST'])
 def reset_contract():
@@ -944,48 +952,55 @@ def monitor():
 
 # ── STARTUP (roda com gunicorn E python direto) ───────────────────
 def _startup():
-    log.info("=" * 60)
-    log.info("🚀 BTC/USD Multipliers Bot — Deriv")
-    log.info(f"   Símbolo:     {SYMBOL}")
-    log.info(f"   Multiplier:  x{MULTIPLIER}")
-    log.info(f"   Stake:       ${STAKE}")
-    log.info(f"   Stop Loss:   ${STOP_LOSS}  ({STOP_LOSS/STAKE*100:.0f}% do stake)")
-    log.info(f"   Take Profit: ${TAKE_PROFIT} ({TAKE_PROFIT/STAKE*100:.0f}% do stake)")
-    log.info(f"   RR:          1:{TAKE_PROFIT/STOP_LOSS:.0f} → precisa acertar >{STOP_LOSS/(STOP_LOSS+TAKE_PROFIT)*100:.0f}% para lucrar")
-    log.info(f"   Confiança:   {MIN_CONF*100:.0f}%")
-    log.info("=" * 60)
+    try:
+        log.info("=" * 60)
+        log.info("🚀 BTC/USD Multipliers Bot — Deriv")
+        log.info(f"   Símbolo:     {SYMBOL}")
+        log.info(f"   Multiplier:  x{MULTIPLIER}")
+        log.info(f"   Stake:       ${STAKE}")
+        log.info(f"   Stop Loss:   ${STOP_LOSS}  ({STOP_LOSS/STAKE*100:.0f}% do stake)")
+        log.info(f"   Take Profit: ${TAKE_PROFIT} ({TAKE_PROFIT/STAKE*100:.0f}% do stake)")
+        log.info(f"   RR:          1:{TAKE_PROFIT/STOP_LOSS:.0f} → precisa acertar >{STOP_LOSS/(STOP_LOSS+TAKE_PROFIT)*100:.0f}% para lucrar")
+        log.info(f"   Confiança:   {MIN_CONF*100:.0f}%")
+        log.info("=" * 60)
 
-    load_model()
+        load_model()
 
-    deriv.start()
-    time.sleep(3)
+        if DERIV_TOKEN:
+            deriv.start()
+            time.sleep(3)
+            trader.start()
+        else:
+            log.warning("⚠️ DERIV_TOKEN vazio — aguardando /config")
 
-    trader.start()
+        threading.Thread(target=auto_save, daemon=True).start()
 
-    threading.Thread(target=auto_save, daemon=True).start()
-
-    # Watchdog: reconecta Deriv se cair
-    def watchdog():
-        time.sleep(60)
-        while True:
-            try:
-                if not deriv.is_ready and DERIV_TOKEN and not deriv._reconnecting:
-                    log.warning("🔄 Watchdog: Deriv desconectado — reconectando...")
-                    deriv._reconnecting = True
-                    try:
-                        if deriv._ws: deriv._ws.close()
-                    except: pass
-                    time.sleep(5)
-                    try:
-                        deriv._connect()
-                    except Exception as e:
-                        log.error(f"Watchdog reconexão erro: {e}")
-                        deriv._reconnecting = False
-            except Exception as e:
-                log.error(f"Watchdog erro: {e}")
-                deriv._reconnecting = False
-            time.sleep(30)
-    threading.Thread(target=watchdog, daemon=True).start()
+        # Watchdog: reconecta Deriv se cair
+        def watchdog():
+            time.sleep(60)
+            while True:
+                try:
+                    if not deriv.is_ready and DERIV_TOKEN and not deriv._reconnecting:
+                        log.warning("🔄 Watchdog: Deriv desconectado — reconectando...")
+                        deriv._reconnecting = True
+                        try:
+                            if deriv._ws: deriv._ws.close()
+                        except: pass
+                        time.sleep(5)
+                        try:
+                            deriv._connect()
+                        except Exception as e:
+                            log.error(f"Watchdog reconexão erro: {e}")
+                            deriv._reconnecting = False
+                except Exception as e:
+                    log.error(f"Watchdog erro: {e}")
+                    deriv._reconnecting = False
+                time.sleep(30)
+        threading.Thread(target=watchdog, daemon=True).start()
+    except Exception as e:
+        log.error(f"❌ STARTUP ERRO: {e}")
+        import traceback
+        log.error(traceback.format_exc())
 
     if not btc_model.trained and DERIV_TOKEN:
         log.info("📥 Sem modelo salvo — iniciando download automático em 5s...")
