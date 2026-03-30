@@ -913,16 +913,6 @@ def config():
         log.info("🔑 Token configurado via /config")
     return jsonify({'ok': True})
 
-@app.route('/reset-contract', methods=['POST'])
-def reset_contract():
-    """Desbloqueia contrato travado."""
-    cid = trader._open_contract
-    with trader._lock:
-        trader._open_contract = None
-        trader._pending.clear()
-    log.info(f"🔧 Contrato desbloqueado via /reset-contract: {cid}")
-    return jsonify({'cleared': cid})
-
 @app.route('/reconnect', methods=['POST'])
 def reconnect():
     """Força reconexão com a Deriv."""
