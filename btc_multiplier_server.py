@@ -800,7 +800,7 @@ class MultiplierTrader:
                 time.sleep(30)
 
     def start(self):
-        if not DERIV_TOKEN:EsObb4d9cyePeGb
+        if not DERIV_TOKEN:
             log.warning("⚠️ DERIV_TOKEN não configurado — use /config para definir")
             return
         self._running = True
