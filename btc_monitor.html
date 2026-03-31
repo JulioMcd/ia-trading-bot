@@ -169,6 +169,7 @@
     <div class="cfg"><span>Stop Loss: </span><b id="cfg-sl" style="color:#f85149">—</b></div>
     <div class="cfg"><span>Take Profit: </span><b id="cfg-tp" style="color:#3fb950">—</b></div>
     <div class="cfg"><span>Confiança mín.: </span><b id="cfg-conf">—</b></div>
+    <div class="cfg"><span>Sinal: </span><b id="cfg-invert" style="color:#f0883e">—</b></div>
   </div>
   <div class="rr-box">
     <div class="rr-item">
@@ -283,7 +284,8 @@
 <div class="card">
   <div class="card-title">🔧 Ações de Manutenção</div>
   <button class="btn red" onclick="resetContract()">🔧 Desbloquear Contrato Travado</button>
-  <div class="note">Use se o bot parar de abrir ordens por mais de 10 minutos</div>
+  <button class="btn" onclick="resetStats()" style="background:#d29922;margin-top:8px">🔄 Zerar Contadores (Recomeçar)</button>
+  <div class="note">Use "Desbloquear" se parar de abrir ordens. "Zerar" para resetar winrate após inverter sinal.</div>
 </div>
 
 <script>
@@ -321,6 +323,9 @@ function render(d) {
   document.getElementById('cfg-sl').textContent     = '$' + sl.toFixed(2);
   document.getElementById('cfg-tp').textContent     = '$' + tp.toFixed(2);
   document.getElementById('cfg-conf').textContent   = ((d.min_conf || 0) * 100).toFixed(0) + '%';
+  const inv = d.invert_signal;
+  document.getElementById('cfg-invert').textContent = inv ? '🔄 INVERTIDO' : '➡️ Normal';
+  document.getElementById('cfg-invert').style.color = inv ? '#f0883e' : '#3fb950';
   document.getElementById('rr-sl').textContent      = '$' + sl.toFixed(2);
   document.getElementById('rr-tp').textContent      = '$' + tp.toFixed(2);
   document.getElementById('rr-rr').textContent      = '1:' + (tp/sl).toFixed(1);
@@ -460,6 +465,15 @@ async function startDownload() {
     if (d.error) alert(d.error);
     else { load(); }
   } catch(e) { alert('Erro ao conectar com o servidor'); }
+}
+
+async function resetStats() {
+  try {
+    const r = await fetch(`${SERVER}/reset-stats`, {method:'POST'});
+    const d = await r.json();
+    alert('Contadores zerados! Acompanhe a nova performance.');
+    load();
+  } catch(e) { alert('Erro ao conectar'); }
 }
 
 async function resetContract() {

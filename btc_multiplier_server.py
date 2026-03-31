@@ -39,6 +39,8 @@ STAKE          = 1.0    # USD
 STOP_LOSS      = 0.50   # perde no máx $0.50 por trade
 TAKE_PROFIT    = 1.50   # ganha $1.50 por trade (RR 1:3)
 MIN_CONF       = 0.65   # confiança mínima para abrir trade
+TRADE_INTERVAL = 300    # 5 minutos entre trades
+INVERT_SIGNAL  = True   # INVERTE sinal: modelo erra 93% → invertido acerta 93%
 TRADE_INTERVAL = 300    # segundos entre avaliações (5 min)
 
 # ── CANDLE STORE ─────────────────────────────────────────────────
@@ -719,6 +721,15 @@ class MultiplierTrader:
         if self._open:
             log.info(f"⏭ Contrato {self._open} ainda aberto — aguardando fechar")
             return
+        if 'pending_proposal' in self._pending or 'pending_buy' in self._pending:
+            log.info("⏭ Já tem proposta/compra pendente — aguardando")
+            return
+
+        # ── INVERSÃO DE SINAL ─────────────────────────────────
+        original = direction
+        if INVERT_SIGNAL:
+            direction = 'MULTDOWN' if direction == 'MULTUP' else 'MULTUP'
+            log.info(f"🔄 Sinal invertido: {original} → {direction}")
 
         self._pending['pending_proposal'] = {
             'direction':  direction,
@@ -737,7 +748,7 @@ class MultiplierTrader:
                 'take_profit': TAKE_PROFIT,
             },
         })
-        log.info(f"🎯 Abrindo {direction} conf={confidence:.1%}")
+        log.info(f"🎯 Abrindo {direction} (modelo={original}) conf={confidence:.1%}")
 
     def _trade_loop(self):
         log.info("⏳ Aguardando modelo e dados para iniciar trading...")
@@ -789,7 +800,7 @@ class MultiplierTrader:
                 time.sleep(30)
 
     def start(self):
-        if not DERIV_TOKEN:
+        if not DERIV_TOKEN:EsObb4d9cyePeGb
             log.warning("⚠️ DERIV_TOKEN não configurado — use /config para definir")
             return
         self._running = True
@@ -861,6 +872,18 @@ def reset_contract():
     log.info(f"🔧 Contrato {old} removido manualmente via /reset-contract")
     return jsonify({'ok': True, 'cleared': old})
 
+@app.route('/reset-stats', methods=['POST'])
+def reset_stats():
+    """Zera contadores de performance (novo começo com sinal invertido)."""
+    trader.wins = 0
+    trader.losses = 0
+    trader.trades.clear()
+    btc_model.live_trades = 0
+    btc_model.live_wins = 0
+    btc_model.live_winrate = 0.0
+    log.info("🔄 Contadores zerados — recomeçando do zero (sinal invertido)")
+    return jsonify({'ok': True, 'message': 'Stats zeradas'})
+
 @app.route('/stats')
 def stats():
     total = trader.wins + trader.losses
@@ -870,7 +893,8 @@ def stats():
         'stake':       STAKE,
         'stop_loss':   STOP_LOSS,
         'take_profit': TAKE_PROFIT,
-        'min_conf':    MIN_CONF,
+        'min_conf':       MIN_CONF,
+        'invert_signal':  INVERT_SIGNAL,
         'connected':   deriv.is_ready,
         'trader_running': trader.is_running,
         'open_contract':  trader._open,
