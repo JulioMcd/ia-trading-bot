@@ -36,8 +36,8 @@ MODEL_PATH   = '/data/btc_model.pkl'
 SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 100
 STAKE          = 1.0    # USD
-STOP_LOSS      = 0.50   # perde no máx $0.50 por trade
-TAKE_PROFIT    = 1.50   # ganha $1.50 por trade (RR 1:3)
+STOP_LOSS      = 4.50   # perde no máx $4.50 por trade
+TAKE_PROFIT    = 0.50   # ganha $0.50 por trade (lucro rápido)
 MIN_CONF       = 0.65   # confiança mínima para abrir trade
 TRADE_INTERVAL = 300    # 5 minutos entre trades
 INVERT_SIGNAL  = True   # INVERTE sinal: modelo erra 93% → invertido acerta 93%
@@ -696,9 +696,11 @@ class MultiplierTrader:
     def _on_close(self, ws, code, msg):
         self._auth = False
         log.warning(f"Trader WS fechado ({code}). Reconectando em 15s...")
-        time.sleep(15)
-        if self._running:
-            self._connect()
+        def _reconnect():
+            time.sleep(15)
+            if self._running:
+                self._connect()
+        threading.Thread(target=_reconnect, daemon=True).start()
 
     def _connect(self):
         self._ws = websocket.WebSocketApp(
@@ -974,7 +976,7 @@ def _startup():
         log.info(f"   Stake:       ${STAKE}")
         log.info(f"   Stop Loss:   ${STOP_LOSS}  ({STOP_LOSS/STAKE*100:.0f}% do stake)")
         log.info(f"   Take Profit: ${TAKE_PROFIT} ({TAKE_PROFIT/STAKE*100:.0f}% do stake)")
-        log.info(f"   RR:          1:{TAKE_PROFIT/STOP_LOSS:.0f} → precisa acertar >{STOP_LOSS/(STOP_LOSS+TAKE_PROFIT)*100:.0f}% para lucrar")
+        log.info(f"   RR:          SL=${STOP_LOSS} TP=${TAKE_PROFIT} → precisa acertar >{STOP_LOSS/(STOP_LOSS+TAKE_PROFIT)*100:.0f}% para lucrar")
         log.info(f"   Confiança:   {MIN_CONF*100:.0f}%")
         log.info("=" * 60)
 
