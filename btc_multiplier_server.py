@@ -36,7 +36,7 @@ MODEL_PATH   = '/data/btc_model.pkl'
 SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 100
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
-STOP_LOSS      = 4.50   # perde no máx $4.50 por trade
+STOP_LOSS      = 2.90   # perde no máx $2.90 por trade
 TAKE_PROFIT    = 0.50   # ganha $0.50 por trade (lucro rápido)
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
