@@ -962,6 +962,57 @@ def reconnect():
     deriv._connect()
     return jsonify({'status': 'reconnecting'})
 
+@app.route('/debug')
+def debug():
+    """Diagnóstico: testa predição e mostra estado completo."""
+    m5 = store.get(300)
+    h1 = store.get(3600)
+    signal = None
+    predict_error = None
+    try:
+        if btc_model.trained and len(m5) >= 100 and len(h1) >= 20:
+            signal = btc_model.predict(m5, h1)
+    except Exception as e:
+        predict_error = str(e)
+
+    ws_ok = False
+    try:
+        ws_ok = bool(trader._ws and trader._ws.sock and trader._ws.sock.connected)
+    except:
+        pass
+
+    return jsonify({
+        'trader_auth':     trader._auth,
+        'trader_ws_ok':    ws_ok,
+        'trader_running':  trader._running,
+        'trader_open':     trader._open,
+        'trader_pending':  list(trader._pending.keys()),
+        'deriv_ready':     deriv.is_ready,
+        'model_trained':   btc_model.trained,
+        'candles_m5':      len(m5),
+        'candles_h1':      len(h1),
+        'signal':          signal,
+        'predict_error':   predict_error,
+        'min_conf':        MIN_CONF,
+        'would_trade':     signal is not None and signal['confidence'] >= MIN_CONF,
+        'deriv_token_set': bool(DERIV_TOKEN),
+    })
+
+@app.route('/force-trade', methods=['POST'])
+def force_trade():
+    """Força uma trade de teste."""
+    m5 = store.get(300)
+    h1 = store.get(3600)
+    if not btc_model.trained:
+        return jsonify({'error': 'Modelo não treinado'}), 400
+    if len(m5) < 100:
+        return jsonify({'error': f'Poucas candles M5: {len(m5)}'}), 400
+    signal = btc_model.predict(m5, h1)
+    if not signal:
+        return jsonify({'error': 'Predict retornou None'}), 400
+    trader.open_trade(signal['direction'], signal['confidence'])
+    return jsonify({'ok': True, 'signal': signal, 'inverted': INVERT_SIGNAL})
+
 @app.route('/')
 @app.route('/health')
 def health():
