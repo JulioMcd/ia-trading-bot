@@ -38,7 +38,7 @@ MULTIPLIER     = 100
 STAKE          = 1.0    # USD
 STOP_LOSS      = 4.50   # perde no máx $4.50 por trade
 TAKE_PROFIT    = 0.50   # ganha $0.50 por trade (lucro rápido)
-MIN_CONF       = 0.65   # confiança mínima para abrir trade
+MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
 INVERT_SIGNAL  = True   # INVERTE sinal: modelo erra 93% → invertido acerta 93%
 TRADE_INTERVAL = 300    # segundos entre avaliações (5 min)
