@@ -998,7 +998,7 @@ def debug():
         'deriv_token_set': bool(DERIV_TOKEN),
     })
 
-@app.route('/force-trade', methods=['POST'])
+@app.route('/force-trade', methods=['GET', 'POST'])
 def force_trade():
     """Força uma trade de teste."""
     m5 = store.get(300)
