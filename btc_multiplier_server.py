@@ -601,8 +601,13 @@ class MultiplierTrader:
                 log.warning(f"Trader send erro: {e}")
 
     def _on_open(self, ws):
-        log.info("💰 Trader WS aberto")
-        self._send({'authorize': DERIV_TOKEN})
+        log.info("💰 Trader WS aberto — enviando authorize...")
+        try:
+            payload = json.dumps({'authorize': DERIV_TOKEN, 'req_id': self._next()})
+            ws.send(payload)
+            log.info("💰 Authorize enviado ao Trader WS")
+        except Exception as e:
+            log.error(f"💰 ERRO ao enviar authorize no Trader: {e}")
 
     def _on_message(self, ws, raw):
         try:
@@ -612,7 +617,7 @@ class MultiplierTrader:
             rid   = msg.get('req_id')
 
             if err:
-                log.warning(f"⚠️ Trader: {err.get('message','?')}")
+                log.warning(f"⚠️ Trader ERRO: {err.get('code','?')} — {err.get('message','?')} | msg_type={mtype}")
                 self._pending.pop('pending_proposal', None)
                 self._pending.pop('pending_buy', None)
                 return
@@ -764,6 +769,7 @@ class MultiplierTrader:
         while self._running:
             try:
                 if not self._auth:
+                    log.warning("⏳ Trade loop: Trader NÃO autorizado — aguardando auth...")
                     time.sleep(10)
                     continue
 
@@ -897,9 +903,12 @@ def stats():
         'take_profit': TAKE_PROFIT,
         'min_conf':       MIN_CONF,
         'invert_signal':  INVERT_SIGNAL,
-        'connected':   deriv.is_ready,
+        'connected':      deriv.is_ready,
         'trader_running': trader.is_running,
+        'trader_auth':    trader._auth,
+        'trader_ws_ok':   bool(trader._ws and trader._ws.sock and trader._ws.sock.connected) if trader._ws else False,
         'open_contract':  trader._open,
+        'pending':        list(trader._pending.keys()),
         'download': {
             'status':   downloader.status,
             'progress': downloader.progress,
