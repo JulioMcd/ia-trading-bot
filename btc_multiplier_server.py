@@ -586,6 +586,7 @@ class MultiplierTrader:
         self.trades   = deque(maxlen=200)
         self.wins     = 0
         self.losses   = 0
+        self.last_error = None        # último erro da Deriv
 
     def _next(self) -> int:
         with self._lock:
@@ -617,7 +618,9 @@ class MultiplierTrader:
             rid   = msg.get('req_id')
 
             if err:
-                log.warning(f"⚠️ Trader ERRO: {err.get('code','?')} — {err.get('message','?')} | msg_type={mtype}")
+                err_msg = f"{err.get('code','?')} — {err.get('message','?')} | msg_type={mtype}"
+                log.warning(f"⚠️ Trader ERRO: {err_msg}")
+                self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': mtype, 'time': datetime.utcnow().isoformat()}
                 self._pending.pop('pending_proposal', None)
                 self._pending.pop('pending_buy', None)
                 return
@@ -996,6 +999,7 @@ def debug():
         'min_conf':        MIN_CONF,
         'would_trade':     signal is not None and signal['confidence'] >= MIN_CONF,
         'deriv_token_set': bool(DERIV_TOKEN),
+        'last_error':      trader.last_error,
     })
 
 @app.route('/force-trade', methods=['GET', 'POST'])
