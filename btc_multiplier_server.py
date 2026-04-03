@@ -37,7 +37,8 @@ SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 100
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
 STOP_LOSS      = 2.90   # perde no máx $2.90 por trade
-TAKE_PROFIT    = 3.90   # ganha $3.90 por trade
+TAKE_PROFIT_PCT = 0.04  # fecha no lucro quando profit > 4% do stake
+MAX_OPEN       = 5      # máximo de ordens abertas simultâneas
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
 INVERT_SIGNAL  = True   # INVERTE sinal: modelo erra 93% → invertido acerta 93%
@@ -584,71 +585,94 @@ live_feed = LiveFeed()
 
 # ── TRADER (Multipliers) ──────────────────────────────────────────
 class MultiplierTrader:
-    """Trader que usa o DerivClient principal (sem WS próprio)."""
+    """Trader com múltiplas ordens — fecha com lucro > 4%."""
     def __init__(self):
-        self._running = False
-        self._lock    = threading.Lock()
-        self._pending = {}          # chave → info
-        self._open    = None        # contract_id em aberto
-        self.trades   = deque(maxlen=200)
-        self.wins     = 0
-        self.losses   = 0
+        self._running  = False
+        self._lock     = threading.Lock()
+        self._contracts = {}        # cid → {direction, confidence, buy_price}
+        self._buying   = 0          # quantas compras em andamento
+        self.trades    = deque(maxlen=200)
+        self.wins      = 0
+        self.losses    = 0
         self.last_error = None
 
+    @property
+    def open_count(self):
+        with self._lock:
+            return len(self._contracts)
+
     def _handle_proposal(self, msg):
-        """Callback quando Deriv responde à proposta."""
         err = msg.get('error')
         if err:
             log.warning(f"⚠️ Proposta ERRO: {err.get('code','?')} — {err.get('message','?')}")
             self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': 'proposal', 'time': datetime.utcnow().isoformat()}
-            self._pending.pop('pending_proposal', None)
+            with self._lock:
+                self._buying = max(0, self._buying - 1)
             return
 
         prop    = msg.get('proposal', {})
         prop_id = prop.get('id')
-        info    = self._pending.pop('pending_proposal', None)
-        if prop_id and info:
+        if prop_id and msg.get('_info'):
+            info = msg['_info']
             log.info(f"📋 Proposta: id={prop_id} ask={prop.get('ask_price')} comm={prop.get('commission')}")
-            self._pending['pending_buy'] = info
-            deriv.send({'buy': prop_id, 'price': float(prop.get('ask_price', STAKE))}, callback=self._handle_buy)
+            # Compra
+            def buy_cb(buy_msg):
+                self._handle_buy(buy_msg, info)
+            deriv.send({'buy': prop_id, 'price': float(prop.get('ask_price', STAKE))}, callback=buy_cb)
 
-    def _handle_buy(self, msg):
-        """Callback quando Deriv responde à compra."""
+    def _handle_buy(self, msg, info):
         err = msg.get('error')
         if err:
             log.warning(f"⚠️ Buy ERRO: {err.get('code','?')} — {err.get('message','?')}")
             self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': 'buy', 'time': datetime.utcnow().isoformat()}
-            self._pending.pop('pending_buy', None)
+            with self._lock:
+                self._buying = max(0, self._buying - 1)
             return
 
-        buy  = msg.get('buy', {})
-        cid  = buy.get('contract_id')
-        info = self._pending.pop('pending_buy', None)
-        if cid and info:
+        buy = msg.get('buy', {})
+        cid = buy.get('contract_id')
+        if cid:
+            buy_price = float(buy.get('buy_price', STAKE))
             with self._lock:
-                self._pending[cid] = info
-                self._open = cid
-            log.info(f"✅ Contrato aberto {cid} | {info['direction']} | stake=${STAKE} SL=${STOP_LOSS} TP=${TAKE_PROFIT}")
-            # Subscreve para monitorar (DerivClient encaminha poc via _handle_poc)
+                self._contracts[cid] = {
+                    'direction':  info['direction'],
+                    'confidence': info['confidence'],
+                    'buy_price':  buy_price,
+                }
+                self._buying = max(0, self._buying - 1)
+            log.info(f"✅ Contrato {cid} | {info['direction']} | ${buy_price} | abertos={self.open_count}")
             deriv.send({'proposal_open_contract': 1, 'contract_id': cid, 'subscribe': 1})
 
     def _handle_poc(self, msg):
-        """Callback para atualizações do contrato aberto."""
+        """Monitora contratos: fecha com lucro > 4% ou quando Deriv fecha (SL)."""
         try:
             poc = msg.get('proposal_open_contract', {})
             cid = poc.get('contract_id')
-            if not poc.get('is_expired') and not poc.get('is_sold'):
-                return   # ainda aberto
+            if not cid:
+                return
 
-            # Contrato fechou
+            is_closed = poc.get('is_expired') or poc.get('is_sold')
+
+            if not is_closed:
+                # Contrato ainda aberto — verifica lucro para fechar
+                profit = float(poc.get('profit', 0))
+                buy_price = float(poc.get('buy_price', STAKE))
+                profit_pct = profit / buy_price if buy_price > 0 else 0
+
+                if profit_pct >= TAKE_PROFIT_PCT:
+                    log.info(f"💰 Contrato {cid} lucro={profit:+.2f} ({profit_pct*100:.1f}%) >= {TAKE_PROFIT_PCT*100:.0f}% — FECHANDO!")
+                    deriv.send({'sell': cid, 'price': 0})
+                return
+
+            # Contrato fechou (SL ou sell manual)
             with self._lock:
-                info = self._pending.pop(cid, None)
-                self._open = None
+                info = self._contracts.pop(cid, None)
 
-            if not info: return
+            if not info:
+                return
 
             profit = float(poc.get('profit', 0))
-            win    = profit > 0
+            win = profit > 0
 
             if win: self.wins   += 1
             else:   self.losses += 1
@@ -669,7 +693,8 @@ class MultiplierTrader:
                 f"{'✅ WIN' if win else '❌ LOSS'} {info['direction']} "
                 f"profit={profit:+.2f} | "
                 f"total={total} W={self.wins} L={self.losses} "
-                f"WR={self.wins/max(total,1)*100:.1f}%"
+                f"WR={self.wins/max(total,1)*100:.1f}% | "
+                f"abertos={self.open_count}"
             )
         except Exception as e:
             log.error(f"POC handler erro: {e}")
@@ -678,11 +703,10 @@ class MultiplierTrader:
         if not deriv.is_ready:
             log.warning("Deriv não conectado — aguardando")
             return
-        if self._open:
-            log.info(f"⏭ Contrato {self._open} ainda aberto — aguardando fechar")
-            return
-        if 'pending_proposal' in self._pending or 'pending_buy' in self._pending:
-            log.info("⏭ Já tem proposta/compra pendente — aguardando")
+        with self._lock:
+            total_opening = len(self._contracts) + self._buying
+        if total_opening >= MAX_OPEN:
+            log.info(f"⏭ Máximo de {MAX_OPEN} ordens — aguardando fechar")
             return
 
         # ── INVERSÃO DE SINAL ─────────────────────────────────
@@ -691,10 +715,14 @@ class MultiplierTrader:
             direction = 'MULTDOWN' if direction == 'MULTUP' else 'MULTUP'
             log.info(f"🔄 Sinal invertido: {original} → {direction}")
 
-        self._pending['pending_proposal'] = {
-            'direction':  direction,
-            'confidence': confidence,
-        }
+        info = {'direction': direction, 'confidence': confidence}
+        with self._lock:
+            self._buying += 1
+
+        def proposal_cb(proposal_msg):
+            proposal_msg['_info'] = info
+            self._handle_proposal(proposal_msg)
+
         deriv.send({
             'proposal':      1,
             'contract_type': direction,
@@ -704,11 +732,10 @@ class MultiplierTrader:
             'multiplier':    MULTIPLIER,
             'currency':      'USD',
             'limit_order': {
-                'stop_loss':   STOP_LOSS,
-                'take_profit': TAKE_PROFIT,
+                'stop_loss': STOP_LOSS,
             },
-        }, callback=self._handle_proposal)
-        log.info(f"🎯 Abrindo {direction} (modelo={original}) conf={confidence:.1%}")
+        }, callback=proposal_cb)
+        log.info(f"🎯 Abrindo {direction} (modelo={original}) conf={confidence:.1%} | abertos={total_opening}")
 
     def _trade_loop(self):
         log.info("⏳ Aguardando modelo e dados para iniciar trading...")
@@ -717,7 +744,7 @@ class MultiplierTrader:
                 break
             time.sleep(10)
 
-        log.info("🚀 Iniciando loop de trading BTC/USD Multipliers")
+        log.info("🚀 Iniciando loop de trading BTC/USD Multipliers (multi-order)")
 
         while self._running:
             try:
@@ -746,7 +773,7 @@ class MultiplierTrader:
                 log.info(
                     f"📡 Sinal: {dir_} | conf={conf:.1%} | "
                     f"↑{signal['prob_up']:.1%} ↓{signal['prob_down']:.1%} | "
-                    f"M5={len(m5)} H1={len(h1)}"
+                    f"abertos={self.open_count}"
                 )
 
                 if conf >= MIN_CONF:
@@ -766,7 +793,7 @@ class MultiplierTrader:
             return
         self._running = True
         threading.Thread(target=self._trade_loop, daemon=True).start()
-        log.info("💰 Trader iniciado (usa WS principal)")
+        log.info("💰 Trader multi-order iniciado (max={MAX_OPEN})")
 
     @property
     def is_running(self) -> bool:
@@ -824,12 +851,12 @@ CORS(app)
 
 @app.route('/reset-contract', methods=['POST'])
 def reset_contract():
-    """Desbloqueia contrato travado manualmente."""
-    old = trader._open
+    """Limpa todos contratos travados."""
     with trader._lock:
-        trader._open = None
-        trader._pending.pop(old, None) if old else None
-    log.info(f"🔧 Contrato {old} removido manualmente via /reset-contract")
+        old = list(trader._contracts.keys())
+        trader._contracts.clear()
+        trader._buying = 0
+    log.info(f"🔧 {len(old)} contratos removidos via /reset-contract")
     return jsonify({'ok': True, 'cleared': old})
 
 @app.route('/reset-stats', methods=['POST'])
@@ -851,15 +878,15 @@ def stats():
         'symbol':      SYMBOL,
         'multiplier':  MULTIPLIER,
         'stake':       STAKE,
-        'stop_loss':   STOP_LOSS,
-        'take_profit': TAKE_PROFIT,
+        'stop_loss':      STOP_LOSS,
+        'take_profit_pct': TAKE_PROFIT_PCT,
+        'max_open':       MAX_OPEN,
         'min_conf':       MIN_CONF,
         'invert_signal':  INVERT_SIGNAL,
         'connected':      deriv.is_ready,
         'trader_running': trader.is_running,
-        'trader_auth':    deriv.is_ready,
-        'open_contract':  trader._open,
-        'pending':        list(trader._pending.keys()),
+        'open_contracts': list(trader._contracts.keys()),
+        'open_count':     trader.open_count,
         'download': {
             'status':   downloader.status,
             'progress': downloader.progress,
@@ -928,10 +955,10 @@ def debug():
 
     return jsonify({
         'trader_auth':     deriv.is_ready,
-        'trader_ws_ok':    deriv.is_ready,
         'trader_running':  trader._running,
-        'trader_open':     trader._open,
-        'trader_pending':  list(trader._pending.keys()),
+        'open_count':      trader.open_count,
+        'open_contracts':  list(trader._contracts.keys()),
+        'buying':          trader._buying,
         'deriv_ready':     deriv.is_ready,
         'model_trained':   btc_model.trained,
         'candles_m5':      len(m5),
@@ -981,8 +1008,8 @@ def _startup():
         log.info(f"   Multiplier:  x{MULTIPLIER}")
         log.info(f"   Stake:       ${STAKE}")
         log.info(f"   Stop Loss:   ${STOP_LOSS}  ({STOP_LOSS/STAKE*100:.0f}% do stake)")
-        log.info(f"   Take Profit: ${TAKE_PROFIT} ({TAKE_PROFIT/STAKE*100:.0f}% do stake)")
-        log.info(f"   RR:          SL=${STOP_LOSS} TP=${TAKE_PROFIT} → precisa acertar >{STOP_LOSS/(STOP_LOSS+TAKE_PROFIT)*100:.0f}% para lucrar")
+        log.info(f"   Take Profit: {TAKE_PROFIT_PCT*100:.0f}% do stake (dinâmico)")
+        log.info(f"   Max Ordens:  {MAX_OPEN} simultâneas")
         log.info(f"   Confiança:   {MIN_CONF*100:.0f}%")
         log.info("=" * 60)
 
@@ -1016,14 +1043,9 @@ def _startup():
                             log.error(f"Watchdog reconexão Deriv erro: {e}")
                             deriv._reconnecting = False
 
-                    # Limpa pendentes órfãos do trader se Deriv reconectou
+                    # Log estado do trader
                     if trader._running and deriv.is_ready:
-                        with trader._lock:
-                            stale = [k for k in trader._pending if k not in ('pending_proposal', 'pending_buy')]
-                            for k in stale:
-                                trader._pending.pop(k, None)
-                            if stale:
-                                log.info(f"🧹 Watchdog: limpou {len(stale)} pendentes órfãos")
+                        log.info(f"📊 Watchdog: {trader.open_count}/{MAX_OPEN} ordens abertas")
 
                 except Exception as e:
                     log.error(f"Watchdog erro: {e}")
