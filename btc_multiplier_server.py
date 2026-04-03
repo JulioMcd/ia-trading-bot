@@ -623,6 +623,18 @@ class MultiplierTrader:
                 self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': mtype, 'time': datetime.utcnow().isoformat()}
                 self._pending.pop('pending_proposal', None)
                 self._pending.pop('pending_buy', None)
+                # Retry authorize se falhou
+                if mtype == 'authorize' or err.get('code') == 'WrongResponse':
+                    log.warning("🔄 Authorize falhou — retry em 10s...")
+                    def _retry_auth():
+                        time.sleep(10)
+                        try:
+                            if self._ws and self._ws.sock and self._ws.sock.connected:
+                                self._ws.send(json.dumps({'authorize': DERIV_TOKEN, 'req_id': self._next()}))
+                                log.info("🔄 Retry authorize enviado")
+                        except Exception as e:
+                            log.error(f"Retry authorize erro: {e}")
+                    threading.Thread(target=_retry_auth, daemon=True).start()
                 return
 
             if mtype == 'authorize':
@@ -1076,20 +1088,27 @@ def _startup():
 
                     # Reconecta Trader se perdeu auth
                     if trader._running and not trader._auth:
-                        log.warning("🔄 Watchdog: Trader sem auth — reconectando...")
+                        log.warning("🔄 Watchdog: Trader sem auth — reconectando completo...")
                         # Limpa pendentes órfãos (contratos que nunca fecharam)
                         with trader._lock:
                             stale = [k for k in trader._pending if k not in ('pending_proposal', 'pending_buy')]
                             for k in stale:
                                 trader._pending.pop(k, None)
+                            trader._pending.pop('pending_proposal', None)
+                            trader._pending.pop('pending_buy', None)
+                            trader._open = None
                             if stale:
                                 log.info(f"🧹 Watchdog: limpou {len(stale)} pendentes órfãos")
                         try:
-                            if trader._ws: trader._ws.close()
+                            old_ws = trader._ws
+                            trader._ws = None
+                            if old_ws:
+                                old_ws.close()
                         except: pass
-                        time.sleep(3)
+                        time.sleep(5)
                         try:
                             trader._connect()
+                            log.info("🔄 Watchdog: Trader reconectado — aguardando auth...")
                         except Exception as e:
                             log.error(f"Watchdog reconexão Trader erro: {e}")
 
