@@ -37,7 +37,7 @@ SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 100
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
 STOP_LOSS      = 2.90   # perde no máx $2.90 por trade
-TAKE_PROFIT    = 0.50   # ganha $0.50 por trade (lucro rápido)
+TAKE_PROFIT    = 3.90   # ganha $3.90 por trade
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
 INVERT_SIGNAL  = True   # INVERTE sinal: modelo erra 93% → invertido acerta 93%
@@ -1055,11 +1055,12 @@ def _startup():
 
         threading.Thread(target=auto_save, daemon=True).start()
 
-        # Watchdog: reconecta Deriv se cair
+        # Watchdog: reconecta Deriv + Trader se caírem
         def watchdog():
             time.sleep(60)
             while True:
                 try:
+                    # Reconecta DerivClient principal
                     if not deriv.is_ready and DERIV_TOKEN and not deriv._reconnecting:
                         log.warning("🔄 Watchdog: Deriv desconectado — reconectando...")
                         deriv._reconnecting = True
@@ -1070,8 +1071,28 @@ def _startup():
                         try:
                             deriv._connect()
                         except Exception as e:
-                            log.error(f"Watchdog reconexão erro: {e}")
+                            log.error(f"Watchdog reconexão Deriv erro: {e}")
                             deriv._reconnecting = False
+
+                    # Reconecta Trader se perdeu auth
+                    if trader._running and not trader._auth:
+                        log.warning("🔄 Watchdog: Trader sem auth — reconectando...")
+                        # Limpa pendentes órfãos (contratos que nunca fecharam)
+                        with trader._lock:
+                            stale = [k for k in trader._pending if k not in ('pending_proposal', 'pending_buy')]
+                            for k in stale:
+                                trader._pending.pop(k, None)
+                            if stale:
+                                log.info(f"🧹 Watchdog: limpou {len(stale)} pendentes órfãos")
+                        try:
+                            if trader._ws: trader._ws.close()
+                        except: pass
+                        time.sleep(3)
+                        try:
+                            trader._connect()
+                        except Exception as e:
+                            log.error(f"Watchdog reconexão Trader erro: {e}")
+
                 except Exception as e:
                     log.error(f"Watchdog erro: {e}")
                     deriv._reconnecting = False
