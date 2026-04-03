@@ -34,7 +34,7 @@ PORT         = int(os.environ.get('PORT', 8000))
 MODEL_PATH   = '/data/btc_model.pkl'
 
 SYMBOL         = 'cryBTCUSD'
-MULTIPLIER     = 100
+MULTIPLIER     = 500
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
 STOP_LOSS      = 2.90   # perde no máx $2.90 por trade
 TAKE_PROFIT_PCT = 0.04  # fecha no lucro quando profit > 4% do stake
