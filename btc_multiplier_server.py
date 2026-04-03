@@ -338,7 +338,12 @@ class DerivClient:
 
             if err:
                 log.warning(f"⚠️ Deriv: {err.get('message','?')}")
-                if rid: self._callbacks.pop(rid, None)
+                # Encaminha erro para callback se houver
+                if rid and rid in self._callbacks:
+                    cb = self._callbacks.pop(rid)
+                    cb(msg)
+                elif rid:
+                    self._callbacks.pop(rid, None)
                 return
 
             if mtype == 'authorize':
@@ -353,6 +358,10 @@ class DerivClient:
             sub_id = msg.get('subscription', {}).get('id')
             if sub_id and sub_id in self._subs:
                 self._subs[sub_id](msg)
+
+            # Encaminha proposal_open_contract para trader via msg_type
+            if mtype == 'proposal_open_contract':
+                trader._handle_poc(msg)
 
         except Exception as e:
             log.error(f"WS handler erro: {e}")
@@ -575,170 +584,99 @@ live_feed = LiveFeed()
 
 # ── TRADER (Multipliers) ──────────────────────────────────────────
 class MultiplierTrader:
+    """Trader que usa o DerivClient principal (sem WS próprio)."""
     def __init__(self):
-        self._ws      = None
-        self._auth    = False
         self._running = False
         self._lock    = threading.Lock()
-        self._req     = 0
-        self._pending = {}          # req_id/contract_id → info
+        self._pending = {}          # chave → info
         self._open    = None        # contract_id em aberto
         self.trades   = deque(maxlen=200)
         self.wins     = 0
         self.losses   = 0
-        self.last_error = None        # último erro da Deriv
+        self.last_error = None
 
-    def _next(self) -> int:
-        with self._lock:
-            self._req += 1
-            return self._req
+    def _handle_proposal(self, msg):
+        """Callback quando Deriv responde à proposta."""
+        err = msg.get('error')
+        if err:
+            log.warning(f"⚠️ Proposta ERRO: {err.get('code','?')} — {err.get('message','?')}")
+            self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': 'proposal', 'time': datetime.utcnow().isoformat()}
+            self._pending.pop('pending_proposal', None)
+            return
 
-    def _send(self, payload: dict):
-        if self._ws and self._ws.sock and self._ws.sock.connected:
-            try:
-                payload['req_id'] = self._next()
-                self._ws.send(json.dumps(payload))
-            except Exception as e:
-                log.warning(f"Trader send erro: {e}")
+        prop    = msg.get('proposal', {})
+        prop_id = prop.get('id')
+        info    = self._pending.pop('pending_proposal', None)
+        if prop_id and info:
+            log.info(f"📋 Proposta: id={prop_id} ask={prop.get('ask_price')} comm={prop.get('commission')}")
+            self._pending['pending_buy'] = info
+            deriv.send({'buy': prop_id, 'price': float(prop.get('ask_price', STAKE))}, callback=self._handle_buy)
 
-    def _on_open(self, ws):
-        log.info("💰 Trader WS aberto — enviando authorize...")
+    def _handle_buy(self, msg):
+        """Callback quando Deriv responde à compra."""
+        err = msg.get('error')
+        if err:
+            log.warning(f"⚠️ Buy ERRO: {err.get('code','?')} — {err.get('message','?')}")
+            self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': 'buy', 'time': datetime.utcnow().isoformat()}
+            self._pending.pop('pending_buy', None)
+            return
+
+        buy  = msg.get('buy', {})
+        cid  = buy.get('contract_id')
+        info = self._pending.pop('pending_buy', None)
+        if cid and info:
+            with self._lock:
+                self._pending[cid] = info
+                self._open = cid
+            log.info(f"✅ Contrato aberto {cid} | {info['direction']} | stake=${STAKE} SL=${STOP_LOSS} TP=${TAKE_PROFIT}")
+            # Subscreve para monitorar (DerivClient encaminha poc via _handle_poc)
+            deriv.send({'proposal_open_contract': 1, 'contract_id': cid, 'subscribe': 1})
+
+    def _handle_poc(self, msg):
+        """Callback para atualizações do contrato aberto."""
         try:
-            payload = json.dumps({'authorize': DERIV_TOKEN, 'req_id': self._next()})
-            ws.send(payload)
-            log.info("💰 Authorize enviado ao Trader WS")
+            poc = msg.get('proposal_open_contract', {})
+            cid = poc.get('contract_id')
+            if not poc.get('is_expired') and not poc.get('is_sold'):
+                return   # ainda aberto
+
+            # Contrato fechou
+            with self._lock:
+                info = self._pending.pop(cid, None)
+                self._open = None
+
+            if not info: return
+
+            profit = float(poc.get('profit', 0))
+            win    = profit > 0
+
+            if win: self.wins   += 1
+            else:   self.losses += 1
+
+            btc_model.record_result(win)
+
+            self.trades.append({
+                'contract_id': cid,
+                'direction':   info['direction'],
+                'confidence':  info.get('confidence', 0),
+                'profit':      round(profit, 2),
+                'result':      'win' if win else 'loss',
+                'time':        datetime.utcnow().strftime('%H:%M:%S UTC'),
+            })
+
+            total = self.wins + self.losses
+            log.info(
+                f"{'✅ WIN' if win else '❌ LOSS'} {info['direction']} "
+                f"profit={profit:+.2f} | "
+                f"total={total} W={self.wins} L={self.losses} "
+                f"WR={self.wins/max(total,1)*100:.1f}%"
+            )
         except Exception as e:
-            log.error(f"💰 ERRO ao enviar authorize no Trader: {e}")
-
-    def _on_message(self, ws, raw):
-        try:
-            msg   = json.loads(raw)
-            mtype = msg.get('msg_type', '')
-            err   = msg.get('error')
-            rid   = msg.get('req_id')
-
-            if err:
-                err_msg = f"{err.get('code','?')} — {err.get('message','?')} | msg_type={mtype}"
-                log.warning(f"⚠️ Trader ERRO: {err_msg}")
-                self.last_error = {'code': err.get('code'), 'message': err.get('message'), 'type': mtype, 'time': datetime.utcnow().isoformat()}
-                self._pending.pop('pending_proposal', None)
-                self._pending.pop('pending_buy', None)
-                # Retry authorize se falhou
-                if mtype == 'authorize' or err.get('code') == 'WrongResponse':
-                    log.warning("🔄 Authorize falhou — retry em 10s...")
-                    def _retry_auth():
-                        time.sleep(10)
-                        try:
-                            if self._ws and self._ws.sock and self._ws.sock.connected:
-                                self._ws.send(json.dumps({'authorize': DERIV_TOKEN, 'req_id': self._next()}))
-                                log.info("🔄 Retry authorize enviado")
-                        except Exception as e:
-                            log.error(f"Retry authorize erro: {e}")
-                    threading.Thread(target=_retry_auth, daemon=True).start()
-                return
-
-            if mtype == 'authorize':
-                self._auth = True
-                log.info("✅ Trader autorizado")
-                # re-subscreve contrato aberto se WS reconectou com contrato pendente
-                with self._lock:
-                    open_cid = self._open
-                if open_cid:
-                    log.info(f"🔄 Re-subscrevendo contrato {open_cid} após reconexão...")
-                    self._send({'proposal_open_contract': 1, 'contract_id': open_cid, 'subscribe': 1})
-                return
-
-            if mtype == 'proposal':
-                prop    = msg.get('proposal', {})
-                prop_id = prop.get('id')
-                info    = self._pending.pop('pending_proposal', None)
-                if prop_id and info:
-                    log.info(f"📋 Proposta: id={prop_id} ask={prop.get('ask_price')} comm={prop.get('commission')}")
-                    self._pending['pending_buy'] = info
-                    self._send({'buy': prop_id, 'price': float(prop.get('ask_price', STAKE))})
-                return
-
-            if mtype == 'buy':
-                buy  = msg.get('buy', {})
-                cid  = buy.get('contract_id')
-                info = self._pending.pop('pending_buy', None)
-                if cid and info:
-                    with self._lock:
-                        self._pending[cid] = info
-                        self._open = cid
-                    log.info(f"✅ Contrato aberto {cid} | {info['direction']} | stake=${STAKE} SL=${STOP_LOSS} TP=${TAKE_PROFIT}")
-                    self._send({'proposal_open_contract': 1, 'contract_id': cid, 'subscribe': 1})
-                return
-
-            if mtype == 'proposal_open_contract':
-                poc = msg.get('proposal_open_contract', {})
-                cid = poc.get('contract_id')
-                if not poc.get('is_expired') and not poc.get('is_sold'):
-                    return   # ainda aberto
-
-                with self._lock:
-                    info = self._pending.pop(cid, None)
-                    self._open = None
-
-                if not info: return
-
-                profit = float(poc.get('profit', 0))
-                win    = profit > 0
-
-                if win: self.wins   += 1
-                else:   self.losses += 1
-
-                btc_model.record_result(win)
-
-                self.trades.append({
-                    'contract_id': cid,
-                    'direction':   info['direction'],
-                    'confidence':  info.get('confidence', 0),
-                    'profit':      round(profit, 2),
-                    'result':      'win' if win else 'loss',
-                    'time':        datetime.utcnow().strftime('%H:%M:%S UTC'),
-                })
-
-                total = self.wins + self.losses
-                log.info(
-                    f"{'✅ WIN' if win else '❌ LOSS'} {info['direction']} "
-                    f"profit={profit:+.2f} | "
-                    f"total={total} W={self.wins} L={self.losses} "
-                    f"WR={self.wins/max(total,1)*100:.1f}%"
-                )
-
-        except Exception as e:
-            log.error(f"Trader handler erro: {e}")
-
-    def _on_error(self, ws, err):
-        log.error(f"Trader WS erro: {err}")
-
-    def _on_close(self, ws, code, msg):
-        self._auth = False
-        log.warning(f"Trader WS fechado ({code}). Reconectando em 15s...")
-        def _reconnect():
-            time.sleep(15)
-            if self._running:
-                self._connect()
-        threading.Thread(target=_reconnect, daemon=True).start()
-
-    def _connect(self):
-        self._ws = websocket.WebSocketApp(
-            DERIV_WS,
-            on_open=self._on_open,
-            on_message=self._on_message,
-            on_error=self._on_error,
-            on_close=self._on_close,
-        )
-        threading.Thread(
-            target=self._ws.run_forever,
-            kwargs={'ping_interval': 30, 'ping_timeout': 10},
-            daemon=True
-        ).start()
+            log.error(f"POC handler erro: {e}")
 
     def open_trade(self, direction: str, confidence: float):
-        if not self._auth:
-            log.warning("Trader não autorizado — aguardando reconexão")
+        if not deriv.is_ready:
+            log.warning("Deriv não conectado — aguardando")
             return
         if self._open:
             log.info(f"⏭ Contrato {self._open} ainda aberto — aguardando fechar")
@@ -757,7 +695,7 @@ class MultiplierTrader:
             'direction':  direction,
             'confidence': confidence,
         }
-        self._send({
+        deriv.send({
             'proposal':      1,
             'contract_type': direction,
             'symbol':        SYMBOL,
@@ -769,7 +707,7 @@ class MultiplierTrader:
                 'stop_loss':   STOP_LOSS,
                 'take_profit': TAKE_PROFIT,
             },
-        })
+        }, callback=self._handle_proposal)
         log.info(f"🎯 Abrindo {direction} (modelo={original}) conf={confidence:.1%}")
 
     def _trade_loop(self):
@@ -783,8 +721,8 @@ class MultiplierTrader:
 
         while self._running:
             try:
-                if not self._auth:
-                    log.warning("⏳ Trade loop: Trader NÃO autorizado — aguardando auth...")
+                if not deriv.is_ready:
+                    log.warning("⏳ Trade loop: Deriv NÃO conectado — aguardando...")
                     time.sleep(10)
                     continue
 
@@ -827,13 +765,12 @@ class MultiplierTrader:
             log.warning("⚠️ DERIV_TOKEN não configurado — use /config para definir")
             return
         self._running = True
-        self._connect()
         threading.Thread(target=self._trade_loop, daemon=True).start()
-        log.info("💰 Trader iniciado")
+        log.info("💰 Trader iniciado (usa WS principal)")
 
     @property
     def is_running(self) -> bool:
-        return self._running and self._auth
+        return self._running and deriv.is_ready
 
     @property
     def winrate(self) -> float:
@@ -920,8 +857,7 @@ def stats():
         'invert_signal':  INVERT_SIGNAL,
         'connected':      deriv.is_ready,
         'trader_running': trader.is_running,
-        'trader_auth':    trader._auth,
-        'trader_ws_ok':   bool(trader._ws and trader._ws.sock and trader._ws.sock.connected) if trader._ws else False,
+        'trader_auth':    deriv.is_ready,
         'open_contract':  trader._open,
         'pending':        list(trader._pending.keys()),
         'download': {
@@ -990,15 +926,9 @@ def debug():
     except Exception as e:
         predict_error = str(e)
 
-    ws_ok = False
-    try:
-        ws_ok = bool(trader._ws and trader._ws.sock and trader._ws.sock.connected)
-    except:
-        pass
-
     return jsonify({
-        'trader_auth':     trader._auth,
-        'trader_ws_ok':    ws_ok,
+        'trader_auth':     deriv.is_ready,
+        'trader_ws_ok':    deriv.is_ready,
         'trader_running':  trader._running,
         'trader_open':     trader._open,
         'trader_pending':  list(trader._pending.keys()),
@@ -1086,31 +1016,14 @@ def _startup():
                             log.error(f"Watchdog reconexão Deriv erro: {e}")
                             deriv._reconnecting = False
 
-                    # Reconecta Trader se perdeu auth
-                    if trader._running and not trader._auth:
-                        log.warning("🔄 Watchdog: Trader sem auth — reconectando completo...")
-                        # Limpa pendentes órfãos (contratos que nunca fecharam)
+                    # Limpa pendentes órfãos do trader se Deriv reconectou
+                    if trader._running and deriv.is_ready:
                         with trader._lock:
                             stale = [k for k in trader._pending if k not in ('pending_proposal', 'pending_buy')]
                             for k in stale:
                                 trader._pending.pop(k, None)
-                            trader._pending.pop('pending_proposal', None)
-                            trader._pending.pop('pending_buy', None)
-                            trader._open = None
                             if stale:
                                 log.info(f"🧹 Watchdog: limpou {len(stale)} pendentes órfãos")
-                        try:
-                            old_ws = trader._ws
-                            trader._ws = None
-                            if old_ws:
-                                old_ws.close()
-                        except: pass
-                        time.sleep(5)
-                        try:
-                            trader._connect()
-                            log.info("🔄 Watchdog: Trader reconectado — aguardando auth...")
-                        except Exception as e:
-                            log.error(f"Watchdog reconexão Trader erro: {e}")
 
                 except Exception as e:
                     log.error(f"Watchdog erro: {e}")
