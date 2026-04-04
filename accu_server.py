@@ -69,9 +69,17 @@ class DerivClient:
             rid  = msg.get('req_id')
             mtype = msg.get('msg_type', '')
 
+            # Authorize — marca como autenticado
+            if mtype == 'authorize':
+                if msg.get('error'):
+                    log.error(f'Auth falhou: {msg["error"]["message"]}')
+                else:
+                    self._auth = True
+                    login = msg.get('authorize', {}).get('loginid', '?')
+                    log.info(f'Autenticado! Login={login}')
+
             # Passa para callback registrado
             if rid and rid in self._callbacks:
-                err = msg.get('error')
                 # callbacks de proposal ficam ate buy acontecer
                 if mtype not in ('proposal',):
                     cb = self._callbacks.pop(rid)
