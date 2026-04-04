@@ -36,8 +36,8 @@ MODEL_PATH   = '/data/btc_model.pkl'
 SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 800
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
-STOP_LOSS      = 4.50   # SL amplo para x800 (comissão consome SL pequeno)
-TAKE_PROFIT_PCT = 0.04  # fecha no lucro quando profit > 4% do stake
+STOP_LOSS      = 4.50   # SL amplo para x800
+TAKE_PROFIT    = 0.20   # TP fixo $0.20
 MAX_OPEN       = 5      # máximo de ordens abertas simultâneas
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
@@ -654,15 +654,7 @@ class MultiplierTrader:
             is_closed = poc.get('is_expired') or poc.get('is_sold')
 
             if not is_closed:
-                # Contrato ainda aberto — verifica lucro para fechar
-                profit = float(poc.get('profit', 0))
-                buy_price = float(poc.get('buy_price', STAKE))
-                profit_pct = profit / buy_price if buy_price > 0 else 0
-
-                if profit_pct >= TAKE_PROFIT_PCT:
-                    log.info(f"💰 Contrato {cid} lucro={profit:+.2f} ({profit_pct*100:.1f}%) >= {TAKE_PROFIT_PCT*100:.0f}% — FECHANDO!")
-                    deriv.send({'sell': cid, 'price': 0})
-                return
+                return  # TP/SL gerenciado pela Deriv via limit_order
 
             # Contrato fechou (SL ou sell manual)
             with self._lock:
@@ -732,7 +724,8 @@ class MultiplierTrader:
             'multiplier':    MULTIPLIER,
             'currency':      'USD',
             'limit_order': {
-                'stop_loss': STOP_LOSS,
+                'stop_loss':   STOP_LOSS,
+                'take_profit': TAKE_PROFIT,
             },
         }, callback=proposal_cb)
         log.info(f"🎯 Abrindo {direction} (modelo={original}) conf={confidence:.1%} | abertos={total_opening}")
@@ -879,7 +872,7 @@ def stats():
         'multiplier':  MULTIPLIER,
         'stake':       STAKE,
         'stop_loss':      STOP_LOSS,
-        'take_profit_pct': TAKE_PROFIT_PCT,
+        'take_profit':    TAKE_PROFIT,
         'max_open':       MAX_OPEN,
         'min_conf':       MIN_CONF,
         'invert_signal':  INVERT_SIGNAL,
@@ -1008,7 +1001,7 @@ def _startup():
         log.info(f"   Multiplier:  x{MULTIPLIER}")
         log.info(f"   Stake:       ${STAKE}")
         log.info(f"   Stop Loss:   ${STOP_LOSS}  ({STOP_LOSS/STAKE*100:.0f}% do stake)")
-        log.info(f"   Take Profit: {TAKE_PROFIT_PCT*100:.0f}% do stake (dinâmico)")
+        log.info(f"   Take Profit: ${TAKE_PROFIT}")
         log.info(f"   Max Ordens:  {MAX_OPEN} simultâneas")
         log.info(f"   Confiança:   {MIN_CONF*100:.0f}%")
         log.info("=" * 60)
