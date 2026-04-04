@@ -97,8 +97,10 @@
 <p class="refresh-info" id="refresh-info">Aguardando URL do bot...</p>
 
 <script>
-let BASE_URL = localStorage.getItem('accu_url') || '';
-if (BASE_URL) document.getElementById('apiUrl').value = BASE_URL;
+const DEFAULT_URL = 'https://web-production-41cb7.up.railway.app';
+let BASE_URL = DEFAULT_URL;
+document.getElementById('apiUrl').value = BASE_URL;
+localStorage.setItem('accu_url', BASE_URL);
 
 function setUrl() {
   BASE_URL = document.getElementById('apiUrl').value.trim().replace(/\/$/, '');
@@ -212,7 +214,7 @@ async function refresh() {
   }
 }
 
-if (BASE_URL) refresh();
+refresh();
 setInterval(refresh, 10000);
 </script>
 </body>
