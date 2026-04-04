@@ -26,7 +26,7 @@ PORT          = int(os.environ.get('PORT', 8000))
 
 STAKE         = 1.0    # USD por ordem
 GROWTH_RATE   = 0.05   # 5% crescimento por tick
-TAKE_PROFIT   = 0.20   # TP fixo $0.20
+TAKE_PROFIT   = 0.45   # TP fixo $0.45
 REOPEN_DELAY  = 1      # segundos antes de reabrir
 BOT_ACTIVE    = True
 
