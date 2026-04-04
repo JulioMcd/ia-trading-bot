@@ -677,7 +677,7 @@ class MultiplierTrader:
                 'confidence':  info.get('confidence', 0),
                 'profit':      round(profit, 2),
                 'result':      'win' if win else 'loss',
-                'time':        datetime.utcnow().strftime('%H:%M:%S UTC'),
+                'time':        datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
             })
 
             total = self.wins + self.losses
@@ -863,6 +863,16 @@ def reset_stats():
     btc_model.live_winrate = 0.0
     log.info("🔄 Contadores zerados — recomeçando do zero (sinal invertido)")
     return jsonify({'ok': True, 'message': 'Stats zeradas'})
+
+@app.route('/trades-all')
+def trades_all():
+    """Retorna todos os trades armazenados com timestamp completo."""
+    return jsonify({
+        'total': len(trader.trades),
+        'wins': trader.wins,
+        'losses': trader.losses,
+        'trades': list(trader.trades),
+    })
 
 @app.route('/stats')
 def stats():
