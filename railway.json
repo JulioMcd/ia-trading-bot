@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "gunicorn btc_multiplier_server:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT",
+    "startCommand": "gunicorn accu_server:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
