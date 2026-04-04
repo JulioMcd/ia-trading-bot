@@ -310,21 +310,38 @@ class AccuTrader:
         # ── Martingale: ajusta stake do proximo trade ──
         sym_pnl_now = self.sym_stats[symbol]['pnl']
         old_stake   = self.sym_stake.get(symbol, STAKE_BASE)
+
         if sym_pnl_now > 0:
-            # Ativo lucrativo: aplica Martingale
+            # Ativo lucrativo: aplica Martingale normal
             if result == 'LOSS':
-                # Dobra o stake apos loss (ate o maximo)
                 new_stake = min(old_stake * 2, STAKE_MAX)
                 log.info(f'[{symbol}] Martingale ON — LOSS — stake: ${old_stake:.2f} → ${new_stake:.2f}')
             else:
-                # Reseta ao base apos win
                 new_stake = STAKE_BASE
                 if old_stake > STAKE_BASE:
                     log.info(f'[{symbol}] Martingale ON — WIN — stake resetado: ${old_stake:.2f} → ${new_stake:.2f}')
+            self.sym_stake[symbol] = new_stake
         else:
-            # Ativo negativo: mantém stake base
+            # Ativo negativo: mantém stake base neste ativo
+            self.sym_stake[symbol] = STAKE_BASE
             new_stake = STAKE_BASE
-        self.sym_stake[symbol] = new_stake
+
+            # Se teve LOSS, redireciona o Martingale para o melhor ativo lucrativo
+            if result == 'LOSS':
+                best_sym = None
+                best_pnl = 0.0
+                for s in SYMBOLS:
+                    if s == symbol:
+                        continue
+                    spnl = self.sym_stats.get(s, {}).get('pnl', 0.0)
+                    if spnl > best_pnl:
+                        best_pnl = spnl
+                        best_sym = s
+                if best_sym:
+                    cur = self.sym_stake.get(best_sym, STAKE_BASE)
+                    boosted = min(cur * 2, STAKE_MAX)
+                    self.sym_stake[best_sym] = boosted
+                    log.info(f'[{symbol}] LOSS negativo — Martingale redirecionado → [{best_sym}] stake: ${cur:.2f} → ${boosted:.2f}')
 
         log.info(
             f'[{symbol}] {result} cid={cid} PnL=${pnl:+.4f} stake_prox=${new_stake:.2f} '
@@ -392,14 +409,20 @@ def index():
     open_syms = trader._symbols_open()
     winrate   = (trader.wins / (trader.wins + trader.losses) * 100
                  if (trader.wins + trader.losses) > 0 else 0)
+    # Stake medio ponderado atual
+    stakes = [trader.sym_stake.get(s, STAKE_BASE) for s in SYMBOLS]
+    avg_stake = round(sum(stakes) / len(stakes), 2) if stakes else STAKE_BASE
+
     return jsonify({
-        'bot':          'Accumulator Multi-Asset',
+        'bot':          'Accumulator Multi-Asset + Martingale',
         'active':       BOT_ACTIVE,
         'ws_ready':     deriv._auth,
         'symbols':      SYMBOLS,
         'open_orders':  len(trader._contracts),
         'open_symbols': list(open_syms),
-        'stake':        STAKE,
+        'stake_base':   STAKE_BASE,
+        'stake_max':    STAKE_MAX,
+        'stake_avg':    avg_stake,
         'growth_rate':  f'{int(GROWTH_RATE*100)}%',
         'take_profit':  TAKE_PROFIT,
         'wins':         trader.wins,
