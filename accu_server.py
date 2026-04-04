@@ -159,6 +159,39 @@ class AccuTrader:
                     return
             log.error('Timeout aguardando autenticacao')
         threading.Thread(target=_wait, daemon=True).start()
+        threading.Thread(target=self._watchdog, daemon=True).start()
+
+    def _watchdog(self):
+        """Verifica contratos fantasmas a cada 30s e reabre se necessario."""
+        MAX_AGE = 120  # segundos — ACCU com TP=$0.20 nunca dura mais que 2min
+        while True:
+            time.sleep(30)
+            try:
+                now = datetime.utcnow()
+                with self._lock:
+                    stale = []
+                    for cid, info in self._contracts.items():
+                        try:
+                            opened = datetime.strptime(info['open_time'], '%Y-%m-%d %H:%M:%S UTC')
+                            age = (now - opened).total_seconds()
+                            if age > MAX_AGE:
+                                stale.append(cid)
+                        except Exception:
+                            stale.append(cid)
+
+                    for cid in stale:
+                        log.warning(f'Watchdog: contrato fantasma {cid} removido (age>{MAX_AGE}s)')
+                        self._contracts.pop(cid, None)
+
+                if stale:
+                    log.info('Watchdog: reabrindo ordem apos limpeza...')
+                    self._open_trade()
+                elif not self._contracts and not self._opening and BOT_ACTIVE and deriv._auth:
+                    log.info('Watchdog: nenhuma ordem aberta — reabrindo...')
+                    self._open_trade()
+
+            except Exception as e:
+                log.error(f'Watchdog erro: {e}')
 
     def _open_trade(self):
         """Solicita proposta e compra ACCU."""
@@ -352,6 +385,17 @@ def status():
         'losses':      trader.losses,
         'total_pnl':   round(trader.total_pnl, 2),
     })
+
+@app.route('/reset')
+def reset():
+    """Limpa contratos fantasmas e reabre uma nova ordem."""
+    with trader._lock:
+        cleared = list(trader._contracts.keys())
+        trader._contracts.clear()
+        trader._opening = False
+    log.info(f'Reset manual: limpou {cleared}')
+    threading.Timer(1, trader._open_trade).start()
+    return jsonify({'ok': True, 'cleared': cleared, 'msg': 'Contratos limpos, reabrindo...'})
 
 @app.route('/health')
 def health():
