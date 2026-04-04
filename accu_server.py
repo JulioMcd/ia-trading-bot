@@ -353,6 +353,10 @@ def status():
         'total_pnl':   round(trader.total_pnl, 2),
     })
 
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
+
 # ── MAIN ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     if not DERIV_TOKEN:
