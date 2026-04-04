@@ -36,7 +36,7 @@ MODEL_PATH   = '/data/btc_model.pkl'
 SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 800
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
-STOP_LOSS      = 1.10   # mínimo aceito pela Deriv p/ x800
+STOP_LOSS      = 4.50   # SL amplo para x800 (comissão consome SL pequeno)
 TAKE_PROFIT_PCT = 0.04  # fecha no lucro quando profit > 4% do stake
 MAX_OPEN       = 5      # máximo de ordens abertas simultâneas
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
