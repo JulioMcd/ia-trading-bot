@@ -196,11 +196,10 @@ class AccuTrader:
                 return
             self._opening.add(symbol)
 
-        # Determina stake: Martingale apenas em ativos com PnL positivo
-        sym_pnl   = self.sym_stats.get(symbol, {}).get('pnl', 0.0)
-        cur_stake = self.sym_stake.get(symbol, STAKE_BASE)
-        martingale_active = sym_pnl > 0
-        stake_to_use = cur_stake if martingale_active else STAKE_BASE
+        # Usa stake salvo pelo Martingale (_handle_poc é a fonte de verdade)
+        stake_to_use = self.sym_stake.get(symbol, STAKE_BASE)
+        martingale_active = stake_to_use > STAKE_BASE
+        sym_pnl = self.sym_stats.get(symbol, {}).get('pnl', 0.0)
 
         log.info(f'[{symbol}] Abrindo ACCU stake=${stake_to_use:.2f} '
                  f'growth={int(GROWTH_RATE*100)}% TP=${TAKE_PROFIT} '
