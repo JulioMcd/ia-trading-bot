@@ -874,6 +874,40 @@ def trades_all():
         'trades': list(trader.trades),
     })
 
+@app.route('/profit-table')
+def profit_table():
+    """Busca historico de trades da Deriv (autenticado)."""
+    import threading
+    result = {}
+    event  = threading.Event()
+
+    def cb(msg):
+        result['data'] = msg.get('profit_table', {})
+        event.set()
+
+    deriv.send({
+        'profit_table': 1,
+        'description':  1,
+        'limit':        100,
+        'offset':       0,
+        'sort':         'DESC',
+    }, callback=cb)
+
+    event.wait(timeout=10)
+    if 'data' not in result:
+        return jsonify({'error': 'timeout ou não autorizado'}), 504
+
+    transactions = result['data'].get('transactions', [])
+    # Filtra apenas multipliers do simbolo
+    filtered = [t for t in transactions if SYMBOL in str(t.get('longcode', '')) or 'MULT' in str(t.get('transaction_id', ''))]
+    if not filtered:
+        filtered = transactions  # retorna tudo se nao filtrar
+
+    return jsonify({
+        'total': len(filtered),
+        'transactions': filtered[:100],
+    })
+
 @app.route('/stats')
 def stats():
     total = trader.wins + trader.losses
