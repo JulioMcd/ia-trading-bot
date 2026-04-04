@@ -357,11 +357,13 @@ def status():
 def health():
     return jsonify({'status': 'ok'}), 200
 
+# ── INICIALIZA (funciona com gunicorn e python direto) ───────────────
+if DERIV_TOKEN:
+    deriv.start()
+    trader.start()
+else:
+    log.error('DERIV_TOKEN nao configurado!')
+
 # ── MAIN ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    if not DERIV_TOKEN:
-        log.error('DERIV_TOKEN nao configurado!')
-    else:
-        deriv.start()
-        trader.start()
     app.run(host='0.0.0.0', port=PORT)
