@@ -79,6 +79,8 @@
     <tr>
       <th>Ativo</th>
       <th>Status</th>
+      <th>Stake</th>
+      <th>Martingale</th>
       <th>Wins</th>
       <th>Losses</th>
       <th>Winrate</th>
@@ -177,10 +179,17 @@ async function refresh() {
       const btnLabel = isActive ? '⏸ Pausar' : '▶ Ativar';
       const btnCls   = isActive ? 'btn-stop' : 'btn-start';
 
+      const stakeHtml = `<span style="color:${s.cur_stake > 1 ? '#f0883e' : '#8b949e'};font-weight:bold">$${s.cur_stake || 1}</span>`;
+      const mgBadge  = s.martingale
+        ? '<span class="badge badge-green">✓ ON</span>'
+        : '<span class="badge badge-gray">OFF</span>';
+
       tbody.innerHTML += `
         <tr>
           <td><b>${s.symbol}</b></td>
           <td>${statusBadge}</td>
+          <td>${stakeHtml}</td>
+          <td>${mgBadge}</td>
           <td class="green"><b>${s.wins}</b></td>
           <td class="red"><b>${s.losses}</b></td>
           <td>${wrHtml}</td>

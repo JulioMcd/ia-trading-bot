@@ -24,7 +24,8 @@ DERIV_APP_ID  = os.environ.get('DERIV_APP_ID', '1089')
 DERIV_WS      = f'wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}'
 PORT          = int(os.environ.get('PORT', 8000))
 
-STAKE         = 1.0    # USD por ordem
+STAKE_BASE    = 1.0    # USD stake inicial
+STAKE_MAX     = 8.0    # USD stake maximo (3 doublings: 1→2→4→8)
 GROWTH_RATE   = 0.05   # 5% crescimento por tick
 TAKE_PROFIT   = 0.80   # TP fixo $0.80
 REOPEN_DELAY  = 1      # segundos antes de reabrir
@@ -157,6 +158,8 @@ class AccuTrader:
         self.last_error     = None
         self.sym_stats      = {s: {'wins': 0, 'losses': 0, 'pnl': 0.0} for s in SYMBOLS}
         self.disabled_syms  = set()
+        # Martingale: stake atual por ativo
+        self.sym_stake      = {s: STAKE_BASE for s in SYMBOLS}
 
     def start(self):
         def _wait():
@@ -193,7 +196,15 @@ class AccuTrader:
                 return
             self._opening.add(symbol)
 
-        log.info(f'[{symbol}] Abrindo ACCU stake=${STAKE} growth={int(GROWTH_RATE*100)}% TP=${TAKE_PROFIT}')
+        # Determina stake: Martingale apenas em ativos com PnL positivo
+        sym_pnl   = self.sym_stats.get(symbol, {}).get('pnl', 0.0)
+        cur_stake = self.sym_stake.get(symbol, STAKE_BASE)
+        martingale_active = sym_pnl > 0
+        stake_to_use = cur_stake if martingale_active else STAKE_BASE
+
+        log.info(f'[{symbol}] Abrindo ACCU stake=${stake_to_use:.2f} '
+                 f'growth={int(GROWTH_RATE*100)}% TP=${TAKE_PROFIT} '
+                 f'pnl=${sym_pnl:.2f} martingale={"ON" if martingale_active else "OFF"}')
 
         def on_proposal(msg):
             if msg.get('error'):
@@ -212,7 +223,7 @@ class AccuTrader:
                     self._opening.discard(symbol)
                 return
 
-            deriv.send({'buy': pid, 'price': STAKE}, callback=on_buy)
+            deriv.send({'buy': pid, 'price': stake_to_use}, callback=on_buy)
 
         def on_buy(msg):
             with self._lock:
@@ -231,13 +242,13 @@ class AccuTrader:
                 threading.Timer(5, self._open_trade, args=(symbol,)).start()
                 return
 
-            log.info(f'[{symbol}] Ordem aberta! cid={cid}')
+            log.info(f'[{symbol}] Ordem aberta! cid={cid} stake=${stake_to_use:.2f}')
             with self._lock:
                 self._contracts[cid] = {
                     'cid':       cid,
                     'symbol':    symbol,
                     'open_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
-                    'stake':     STAKE,
+                    'stake':     stake_to_use,
                 }
 
             # Subscreve para monitorar
@@ -249,7 +260,7 @@ class AccuTrader:
 
         deriv.send({
             'proposal':      1,
-            'amount':        STAKE,
+            'amount':        stake_to_use,
             'basis':         'stake',
             'contract_type': 'ACCU',
             'currency':      'USD',
@@ -296,18 +307,40 @@ class AccuTrader:
             self.sym_stats[symbol]['pnl']    += pnl
             result = 'LOSS'
 
+        # ── Martingale: ajusta stake do proximo trade ──
+        sym_pnl_now = self.sym_stats[symbol]['pnl']
+        old_stake   = self.sym_stake.get(symbol, STAKE_BASE)
+        if sym_pnl_now > 0:
+            # Ativo lucrativo: aplica Martingale
+            if result == 'LOSS':
+                # Dobra o stake apos loss (ate o maximo)
+                new_stake = min(old_stake * 2, STAKE_MAX)
+                log.info(f'[{symbol}] Martingale ON — LOSS — stake: ${old_stake:.2f} → ${new_stake:.2f}')
+            else:
+                # Reseta ao base apos win
+                new_stake = STAKE_BASE
+                if old_stake > STAKE_BASE:
+                    log.info(f'[{symbol}] Martingale ON — WIN — stake resetado: ${old_stake:.2f} → ${new_stake:.2f}')
+        else:
+            # Ativo negativo: mantém stake base
+            new_stake = STAKE_BASE
+        self.sym_stake[symbol] = new_stake
+
         log.info(
-            f'[{symbol}] {result} cid={cid} PnL=${pnl:+.4f} '
+            f'[{symbol}] {result} cid={cid} PnL=${pnl:+.4f} stake_prox=${new_stake:.2f} '
             f'| {self.wins}W/{self.losses}L PnL=${self.total_pnl:+.2f}'
         )
 
         self.trades.appendleft({
-            'symbol':     symbol,
-            'cid':        cid,
-            'open_time':  info.get('open_time', ''),
-            'close_time': str(poc.get('sell_time', '')),
-            'pnl':        round(pnl, 4),
-            'result':     result,
+            'symbol':      symbol,
+            'cid':         cid,
+            'open_time':   info.get('open_time', ''),
+            'close_time':  str(poc.get('sell_time', '')),
+            'stake':       round(info.get('stake', STAKE_BASE), 2),
+            'pnl':         round(pnl, 4),
+            'result':      result,
+            'next_stake':  new_stake,
+            'martingale':  sym_pnl_now > 0,
         })
 
         # Reabre no mesmo ativo
@@ -421,9 +454,18 @@ def stats():
         wr = round(s['wins'] / total * 100, 1) if total > 0 else 0
         active = sym not in trader.disabled_syms
         is_open = sym in trader._symbols_open()
-        result.append({'symbol': sym, 'wins': s['wins'], 'losses': s['losses'],
-                       'winrate': wr, 'pnl': round(s['pnl'], 2), 'total': total,
-                       'active': active, 'is_open': is_open})
+        result.append({
+            'symbol':      sym,
+            'wins':        s['wins'],
+            'losses':      s['losses'],
+            'winrate':     wr,
+            'pnl':         round(s['pnl'], 2),
+            'total':       total,
+            'active':      active,
+            'is_open':     is_open,
+            'cur_stake':   round(trader.sym_stake.get(sym, STAKE_BASE), 2),
+            'martingale':  s['pnl'] > 0,
+        })
     result.sort(key=lambda x: x['pnl'], reverse=True)
     return jsonify(result)
 
