@@ -37,7 +37,7 @@ SYMBOL         = 'cryBTCUSD'
 MULTIPLIER     = 800
 STAKE          = 5.0    # USD (necessário para SL=4.50 funcionar)
 STOP_LOSS      = 4.50   # SL amplo para x800
-TAKE_PROFIT    = 0.45   # TP fixo $0.20
+TAKE_PROFIT    = 0.45   # TP fixo $0.45
 MAX_OPEN       = 5      # máximo de ordens abertas simultâneas
 MIN_CONF       = 0.50   # aceita qualquer sinal (invertido = ~93% acerto)
 TRADE_INTERVAL = 300    # 5 minutos entre trades
