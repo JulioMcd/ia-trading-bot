@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Accumulator Bot — Deriv
-Ativo: Volatility 75 Index (R_75)
-Estrategia: Compra ACCU 5%, TP=$0.20, reabre automaticamente ao fechar
+Abre ACCU simultaneamente em TODOS os ativos disponiveis.
+Ao fechar qualquer ordem, reabre no mesmo ativo automaticamente.
 """
 import os, json, time, threading, logging
 from collections import deque
@@ -24,12 +24,25 @@ DERIV_APP_ID  = os.environ.get('DERIV_APP_ID', '1089')
 DERIV_WS      = f'wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}'
 PORT          = int(os.environ.get('PORT', 8000))
 
-SYMBOL        = 'R_75'       # Volatility 75 Index
-STAKE         = 5.0          # USD por ordem
-GROWTH_RATE   = 0.05         # 5% crescimento por tick
-TAKE_PROFIT   = 0.20         # TP fixo $0.20
-REOPEN_DELAY  = 1            # segundos aguardar antes de reabrir
-BOT_ACTIVE    = True         # liga/desliga o bot
+STAKE         = 1.0    # USD por ordem
+GROWTH_RATE   = 0.05   # 5% crescimento por tick
+TAKE_PROFIT   = 0.20   # TP fixo $0.20
+REOPEN_DELAY  = 1      # segundos antes de reabrir
+BOT_ACTIVE    = True
+
+# Todos os ativos que suportam Accumulators na Deriv
+SYMBOLS = [
+    'R_10',    # Volatility 10 Index
+    'R_25',    # Volatility 25 Index
+    'R_50',    # Volatility 50 Index
+    'R_75',    # Volatility 75 Index
+    'R_100',   # Volatility 100 Index
+    '1HZ10V',  # Volatility 10 (1s) Index
+    '1HZ25V',  # Volatility 25 (1s) Index
+    '1HZ50V',  # Volatility 50 (1s) Index
+    '1HZ75V',  # Volatility 75 (1s) Index
+    '1HZ100V', # Volatility 100 (1s) Index
+]
 
 # ── FLASK ────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -65,11 +78,11 @@ class DerivClient:
 
     def _on_message(self, ws, raw):
         try:
-            msg  = json.loads(raw)
-            rid  = msg.get('req_id')
+            msg   = json.loads(raw)
+            rid   = msg.get('req_id')
             mtype = msg.get('msg_type', '')
 
-            # Authorize — marca como autenticado
+            # Authorize
             if mtype == 'authorize':
                 if msg.get('error'):
                     log.error(f'Auth falhou: {msg["error"]["message"]}')
@@ -78,16 +91,15 @@ class DerivClient:
                     login = msg.get('authorize', {}).get('loginid', '?')
                     log.info(f'Autenticado! Login={login}')
 
-            # Passa para callback registrado
+            # Callback registrado
             if rid and rid in self._callbacks:
-                # callbacks de proposal ficam ate buy acontecer
                 if mtype not in ('proposal',):
                     cb = self._callbacks.pop(rid)
                     cb(msg)
                 else:
                     self._callbacks[rid](msg)
 
-            # POC — envia para o trader monitorar
+            # POC — repassa ao trader
             if mtype == 'proposal_open_contract':
                 trader._handle_poc(msg)
 
@@ -107,9 +119,6 @@ class DerivClient:
         time.sleep(5)
         if self._running:
             self._connect()
-
-    def _on_ping(self, ws, data):
-        pass
 
     def _connect(self):
         self._ws = websocket.WebSocketApp(
@@ -138,128 +147,96 @@ deriv = DerivClient()
 # ── ACCUMULATOR TRADER ───────────────────────────────────────────────
 class AccuTrader:
     def __init__(self):
-        self._lock       = threading.Lock()
-        self._contracts  = {}    # cid → info
-        self._opening    = False  # evita abrir duplicado
-        self.trades      = deque(maxlen=500)
-        self.wins        = 0
-        self.losses      = 0
-        self.total_pnl   = 0.0
-        self.last_error  = None
-        self._active     = True
+        self._lock          = threading.Lock()
+        self._contracts     = {}    # cid → {symbol, open_time, stake}
+        self._opening       = set() # symbols com abertura em andamento
+        self.trades         = deque(maxlen=1000)
+        self.wins           = 0
+        self.losses         = 0
+        self.total_pnl      = 0.0
+        self.last_error     = None
 
     def start(self):
-        """Aguarda WS estar pronto e abre primeira ordem."""
         def _wait():
-            for _ in range(30):
+            for _ in range(60):
                 time.sleep(1)
                 if deriv._auth:
-                    log.info('DerivClient autenticado — iniciando trader')
-                    self._open_trade()
+                    log.info(f'Autenticado — abrindo ordens em {len(SYMBOLS)} ativos...')
+                    # Abre uma ordem em cada ativo com delay entre elas
+                    for i, sym in enumerate(SYMBOLS):
+                        threading.Timer(i * 0.5, self._open_trade, args=(sym,)).start()
                     return
             log.error('Timeout aguardando autenticacao')
         threading.Thread(target=_wait, daemon=True).start()
         threading.Thread(target=self._watchdog, daemon=True).start()
 
-    def _watchdog(self):
-        """Verifica contratos fantasmas a cada 30s e reabre se necessario."""
-        MAX_AGE = 120  # segundos — ACCU com TP=$0.20 nunca dura mais que 2min
-        while True:
-            time.sleep(30)
-            try:
-                now = datetime.utcnow()
-                with self._lock:
-                    stale = []
-                    for cid, info in self._contracts.items():
-                        try:
-                            opened = datetime.strptime(info['open_time'], '%Y-%m-%d %H:%M:%S UTC')
-                            age = (now - opened).total_seconds()
-                            if age > MAX_AGE:
-                                stale.append(cid)
-                        except Exception:
-                            stale.append(cid)
+    def _symbols_open(self):
+        """Retorna set de symbols com contrato aberto."""
+        return {info['symbol'] for info in self._contracts.values()}
 
-                    for cid in stale:
-                        log.warning(f'Watchdog: contrato fantasma {cid} removido (age>{MAX_AGE}s)')
-                        self._contracts.pop(cid, None)
-
-                if stale:
-                    log.info('Watchdog: reabrindo ordem apos limpeza...')
-                    self._open_trade()
-                elif not self._contracts and not self._opening and BOT_ACTIVE and deriv._auth:
-                    log.info('Watchdog: nenhuma ordem aberta — reabrindo...')
-                    self._open_trade()
-
-            except Exception as e:
-                log.error(f'Watchdog erro: {e}')
-
-    def _open_trade(self):
-        """Solicita proposta e compra ACCU."""
+    def _open_trade(self, symbol: str):
         global BOT_ACTIVE
         if not BOT_ACTIVE:
-            log.info('Bot pausado — nao abre nova ordem')
             return
         if not deriv._auth:
-            log.warning('WS nao autenticado — aguardando...')
-            time.sleep(3)
+            threading.Timer(5, self._open_trade, args=(symbol,)).start()
             return
 
         with self._lock:
-            if self._opening:
+            if symbol in self._opening:
                 return
-            if len(self._contracts) >= 1:
-                log.info(f'Ja tem {len(self._contracts)} ordem aberta — aguardando fechar')
+            if symbol in self._symbols_open():
                 return
-            self._opening = True
+            self._opening.add(symbol)
 
-        log.info(f'Solicitando proposta ACCU R_75 — stake=${STAKE} growth={int(GROWTH_RATE*100)}% TP=${TAKE_PROFIT}')
+        log.info(f'[{symbol}] Abrindo ACCU stake=${STAKE} growth={int(GROWTH_RATE*100)}% TP=${TAKE_PROFIT}')
 
         def on_proposal(msg):
             if msg.get('error'):
                 err = msg['error']['message']
-                log.error(f'Proposta recusada: {err}')
-                self.last_error = err
+                log.error(f'[{symbol}] Proposta recusada: {err}')
+                self.last_error = f'{symbol}: {err}'
                 with self._lock:
-                    self._opening = False
-                # tenta novamente em 5s
-                threading.Timer(5, self._open_trade).start()
+                    self._opening.discard(symbol)
+                threading.Timer(10, self._open_trade, args=(symbol,)).start()
                 return
 
             prop = msg.get('proposal', {})
             pid  = prop.get('id')
             if not pid:
                 with self._lock:
-                    self._opening = False
+                    self._opening.discard(symbol)
                 return
 
-            log.info(f'Proposta recebida id={pid} — comprando...')
             deriv.send({'buy': pid, 'price': STAKE}, callback=on_buy)
 
         def on_buy(msg):
             with self._lock:
-                self._opening = False
+                self._opening.discard(symbol)
 
             if msg.get('error'):
                 err = msg['error']['message']
-                log.error(f'Erro ao comprar: {err}')
-                self.last_error = err
-                threading.Timer(5, self._open_trade).start()
+                log.error(f'[{symbol}] Erro ao comprar: {err}')
+                self.last_error = f'{symbol}: {err}'
+                threading.Timer(10, self._open_trade, args=(symbol,)).start()
                 return
 
             buy = msg.get('buy', {})
             cid = buy.get('contract_id')
             if not cid:
+                threading.Timer(5, self._open_trade, args=(symbol,)).start()
                 return
 
-            log.info(f'Ordem aberta! contract_id={cid}')
+            log.info(f'[{symbol}] Ordem aberta! cid={cid}')
             with self._lock:
                 self._contracts[cid] = {
                     'cid':       cid,
+                    'symbol':    symbol,
                     'open_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
                     'stake':     STAKE,
                 }
 
-            # Subscreve para monitorar o contrato
+            # Subscreve para monitorar
             deriv.send({
                 'proposal_open_contract': 1,
                 'contract_id': cid,
@@ -267,147 +244,173 @@ class AccuTrader:
             })
 
         deriv.send({
-            'proposal':     1,
-            'amount':       STAKE,
-            'basis':        'stake',
-            'contract_type':'ACCU',
-            'currency':     'USD',
-            'growth_rate':  GROWTH_RATE,
-            'symbol':       SYMBOL,
-            'limit_order':  {'take_profit': TAKE_PROFIT},
+            'proposal':      1,
+            'amount':        STAKE,
+            'basis':         'stake',
+            'contract_type': 'ACCU',
+            'currency':      'USD',
+            'growth_rate':   GROWTH_RATE,
+            'symbol':        symbol,
+            'limit_order':   {'take_profit': TAKE_PROFIT},
         }, callback=on_proposal)
 
     def _handle_poc(self, msg):
-        """Recebe atualizacoes do contrato aberto."""
-        poc = msg.get('proposal_open_contract', {})
+        poc     = msg.get('proposal_open_contract', {})
         if not poc:
             return
 
-        cid    = poc.get('contract_id')
-        status = poc.get('status', '')
+        cid     = poc.get('contract_id')
         is_sold = poc.get('is_sold', 0)
 
         if not is_sold:
-            # Contrato ainda aberto — log do valor atual
-            current_pnl = float(poc.get('profit', 0))
-            current_val = float(poc.get('current_spot', 0))
-            if cid in self._contracts:
-                log.debug(f'[{cid}] spot={current_val:.4f} lucro=${current_pnl:.4f}')
-            return
+            return  # contrato ainda aberto
 
-        # ─ Contrato fechado ─
-        sell_price  = float(poc.get('sell_price', 0))
-        buy_price   = float(poc.get('buy_price',  STAKE))
-        pnl         = sell_price - buy_price
-        sell_time   = poc.get('sell_time', '')
-        exit_reason = 'TP' if pnl > 0 else 'LOSS'
-
+        # ── Contrato fechado ──
         with self._lock:
-            info = self._contracts.pop(cid, {})
+            info = self._contracts.pop(cid, None)
+
+        if not info:
+            return  # ja foi processado
+
+        symbol     = info['symbol']
+        sell_price = float(poc.get('sell_price', 0) or 0)
+        buy_price  = float(poc.get('buy_price',  STAKE) or STAKE)
+        pnl        = sell_price - buy_price
 
         if pnl > 0:
-            self.wins     += 1
+            self.wins      += 1
             self.total_pnl += pnl
-            status_emoji = 'WIN'
+            result = 'WIN'
         else:
-            self.losses   += 1
+            self.losses    += 1
             self.total_pnl += pnl
-            status_emoji = 'LOSS'
+            result = 'LOSS'
 
         log.info(
-            f'[{status_emoji}] id={cid} PnL=${pnl:+.4f} '
-            f'| Total: {self.wins}W/{self.losses}L PnL=${self.total_pnl:+.2f}'
+            f'[{symbol}] {result} cid={cid} PnL=${pnl:+.4f} '
+            f'| {self.wins}W/{self.losses}L PnL=${self.total_pnl:+.2f}'
         )
 
         self.trades.appendleft({
-            'cid':       cid,
-            'open_time': info.get('open_time', ''),
-            'close_time': str(sell_time),
-            'stake':      buy_price,
+            'symbol':     symbol,
+            'cid':        cid,
+            'open_time':  info.get('open_time', ''),
+            'close_time': str(poc.get('sell_time', '')),
             'pnl':        round(pnl, 4),
-            'result':     exit_reason,
-            'wins':       self.wins,
-            'losses':     self.losses,
+            'result':     result,
         })
 
-        # Reabre automaticamente apos delay
-        log.info(f'Reabrindo nova ordem em {REOPEN_DELAY}s...')
-        threading.Timer(REOPEN_DELAY, self._open_trade).start()
+        # Reabre no mesmo ativo
+        threading.Timer(REOPEN_DELAY, self._open_trade, args=(symbol,)).start()
+
+    def _watchdog(self):
+        """Limpa contratos fantasmas e garante todos os ativos ativos."""
+        MAX_AGE = 180  # segundos max para um ACCU com TP=$0.20
+        while True:
+            time.sleep(30)
+            try:
+                if not BOT_ACTIVE or not deriv._auth:
+                    continue
+
+                now = datetime.utcnow()
+
+                # Limpa contratos fantasmas (abertos ha mais de MAX_AGE)
+                with self._lock:
+                    stale = []
+                    for cid, info in self._contracts.items():
+                        try:
+                            opened = datetime.strptime(info['open_time'], '%Y-%m-%d %H:%M:%S UTC')
+                            if (now - opened).total_seconds() > MAX_AGE:
+                                stale.append((cid, info['symbol']))
+                        except Exception:
+                            stale.append((cid, info.get('symbol', '?')))
+
+                    for cid, sym in stale:
+                        log.warning(f'Watchdog: removendo fantasma {cid} [{sym}]')
+                        self._contracts.pop(cid, None)
+
+                # Reabre ativos que nao tem ordem aberta
+                open_syms = self._symbols_open()
+                opening   = self._opening.copy()
+                for sym in SYMBOLS:
+                    if sym not in open_syms and sym not in opening:
+                        log.info(f'Watchdog: [{sym}] sem ordem — reabrindo...')
+                        threading.Timer(0.5, self._open_trade, args=(sym,)).start()
+
+            except Exception as e:
+                log.error(f'Watchdog erro: {e}')
 
 trader = AccuTrader()
 
 # ── ENDPOINTS ────────────────────────────────────────────────────────
 @app.route('/')
 def index():
-    global BOT_ACTIVE
-    winrate = (trader.wins / (trader.wins + trader.losses) * 100
-               if (trader.wins + trader.losses) > 0 else 0)
+    open_syms = trader._symbols_open()
+    winrate   = (trader.wins / (trader.wins + trader.losses) * 100
+                 if (trader.wins + trader.losses) > 0 else 0)
     return jsonify({
-        'bot':         'Accumulator R_75',
-        'active':      BOT_ACTIVE,
-        'symbol':      SYMBOL,
-        'stake':       STAKE,
-        'growth_rate': f'{int(GROWTH_RATE*100)}%',
-        'take_profit': TAKE_PROFIT,
-        'ws_ready':    deriv._auth,
-        'open_orders': len(trader._contracts),
-        'wins':        trader.wins,
-        'losses':      trader.losses,
-        'winrate':     round(winrate, 1),
-        'total_pnl':   round(trader.total_pnl, 2),
-        'last_error':  trader.last_error,
+        'bot':          'Accumulator Multi-Asset',
+        'active':       BOT_ACTIVE,
+        'ws_ready':     deriv._auth,
+        'symbols':      SYMBOLS,
+        'open_orders':  len(trader._contracts),
+        'open_symbols': list(open_syms),
+        'stake':        STAKE,
+        'growth_rate':  f'{int(GROWTH_RATE*100)}%',
+        'take_profit':  TAKE_PROFIT,
+        'wins':         trader.wins,
+        'losses':       trader.losses,
+        'winrate':      round(winrate, 1),
+        'total_pnl':    round(trader.total_pnl, 2),
+        'last_error':   trader.last_error,
     })
 
 @app.route('/trades')
 def trades():
-    return jsonify(list(trader.trades)[:50])
+    return jsonify(list(trader.trades)[:100])
 
-@app.route('/start')
-def start_bot():
-    global BOT_ACTIVE
-    BOT_ACTIVE = True
-    trader._open_trade()
-    return jsonify({'ok': True, 'msg': 'Bot iniciado'})
+@app.route('/trades/<symbol>')
+def trades_by_symbol(symbol):
+    filtered = [t for t in trader.trades if t.get('symbol') == symbol.upper()]
+    return jsonify(filtered[:50])
 
 @app.route('/stop')
 def stop_bot():
     global BOT_ACTIVE
     BOT_ACTIVE = False
-    return jsonify({'ok': True, 'msg': 'Bot pausado — ordens abertas fecham normalmente'})
+    return jsonify({'ok': True, 'msg': 'Bot pausado'})
 
-@app.route('/status')
-def status():
-    return jsonify({
-        'active':      BOT_ACTIVE,
-        'ws_ready':    deriv._auth,
-        'open_orders': list(trader._contracts.keys()),
-        'wins':        trader.wins,
-        'losses':      trader.losses,
-        'total_pnl':   round(trader.total_pnl, 2),
-    })
+@app.route('/start')
+def start_bot():
+    global BOT_ACTIVE
+    BOT_ACTIVE = True
+    open_syms = trader._symbols_open()
+    for sym in SYMBOLS:
+        if sym not in open_syms:
+            threading.Timer(0.3, trader._open_trade, args=(sym,)).start()
+    return jsonify({'ok': True, 'msg': f'Bot iniciado em {len(SYMBOLS)} ativos'})
 
 @app.route('/reset')
 def reset():
-    """Limpa contratos fantasmas e reabre uma nova ordem."""
     with trader._lock:
         cleared = list(trader._contracts.keys())
         trader._contracts.clear()
-        trader._opening = False
-    log.info(f'Reset manual: limpou {cleared}')
-    threading.Timer(1, trader._open_trade).start()
-    return jsonify({'ok': True, 'cleared': cleared, 'msg': 'Contratos limpos, reabrindo...'})
+        trader._opening.clear()
+    log.info(f'Reset manual: limpou {len(cleared)} contratos')
+    for i, sym in enumerate(SYMBOLS):
+        threading.Timer(i * 0.5, trader._open_trade, args=(sym,)).start()
+    return jsonify({'ok': True, 'cleared': len(cleared), 'msg': 'Reabrindo em todos os ativos...'})
 
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok'}), 200
 
-# ── INICIALIZA (funciona com gunicorn e python direto) ───────────────
+# ── INICIALIZA (gunicorn + python direto) ────────────────────────────
 if DERIV_TOKEN:
     deriv.start()
     trader.start()
 else:
     log.error('DERIV_TOKEN nao configurado!')
 
-# ── MAIN ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT)
